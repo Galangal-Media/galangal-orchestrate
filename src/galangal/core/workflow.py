@@ -22,7 +22,8 @@ from galangal.core.tasks import get_current_branch
 from galangal.ai.claude import set_pause_requested, get_pause_requested
 from galangal.prompts.builder import PromptBuilder
 from galangal.validation.runner import ValidationRunner
-from galangal.ui.tui import run_stage_with_tui
+from galangal.ui.tui import run_stage_with_tui, TUIAdapter, WorkflowTUIApp, PromptType
+from galangal.ai.claude import ClaudeBackend
 
 console = Console()
 
@@ -88,10 +89,11 @@ def get_next_stage(
     return next_stage
 
 
-def execute_stage(state: WorkflowState) -> tuple[bool, str]:
-    """Execute the current stage. Returns (success, message)."""
-    from galangal.commands.approve import prompt_plan_approval, prompt_design_approval
+def execute_stage(state: WorkflowState, tui_app: WorkflowTUIApp = None) -> tuple[bool, str]:
+    """Execute the current stage. Returns (success, message).
 
+    If tui_app is provided, uses the persistent TUI instead of creating a new one.
+    """
     stage = state.stage
     task_name = state.task_name
     config = get_config()
@@ -99,8 +101,9 @@ def execute_stage(state: WorkflowState) -> tuple[bool, str]:
     if stage == Stage.COMPLETE:
         return True, "Workflow complete"
 
-    # Design approval gate
-    if stage == Stage.DEV:
+    # Design approval gate (only in legacy mode without TUI)
+    if stage == Stage.DEV and tui_app is None:
+        from galangal.commands.approve import prompt_design_approval
         design_skipped = artifact_exists(
             "DESIGN_SKIP.md", task_name
         ) or should_skip_for_task_type(Stage.DESIGN, state.task_type)
@@ -124,15 +127,27 @@ def execute_stage(state: WorkflowState) -> tuple[bool, str]:
 
     # PREFLIGHT runs validation directly
     if stage == Stage.PREFLIGHT:
-        console.print("[dim]Running preflight checks...[/dim]")
+        if tui_app:
+            tui_app.add_activity("Running preflight checks...", "⚙")
+        else:
+            console.print("[dim]Running preflight checks...[/dim]")
+
         runner = ValidationRunner()
         result = runner.validate_stage("PREFLIGHT", task_name)
+
         if result.success:
-            console.print(f"[green]✓ Preflight: {result.message}[/green]")
+            if tui_app:
+                tui_app.show_message(f"Preflight: {result.message}", "success")
+            else:
+                console.print(f"[green]✓ Preflight: {result.message}[/green]")
             return True, result.message
         else:
-            console.print(f"[red]✗ Preflight: {result.message}[/red]")
-            console.print("[yellow]  Fix environment issues before continuing.[/yellow]")
+            if tui_app:
+                tui_app.show_message(f"Preflight: {result.message}", "error")
+                tui_app.show_message("Fix environment issues before continuing", "warning")
+            else:
+                console.print(f"[red]✗ Preflight: {result.message}[/red]")
+                console.print("[yellow]  Fix environment issues before continuing.[/yellow]")
             return False, result.message
 
     # Get current branch for UI
@@ -164,14 +179,26 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     with open(log_file, "w") as f:
         f.write(f"=== Prompt ===\n{prompt}\n\n")
 
-    # Run stage with TUI
-    success, output = run_stage_with_tui(
-        task_name=task_name,
-        stage=stage.value,
-        branch=branch,
-        attempt=state.attempt,
-        prompt=prompt,
-    )
+    # Run stage - either with persistent TUI or standalone
+    if tui_app:
+        # Use the persistent TUI
+        backend = ClaudeBackend()
+        ui = TUIAdapter(tui_app)
+        success, output = backend.invoke(
+            prompt=prompt,
+            timeout=14400,
+            max_turns=200,
+            ui=ui,
+        )
+    else:
+        # Create new TUI for this stage
+        success, output = run_stage_with_tui(
+            task_name=task_name,
+            stage=stage.value,
+            branch=branch,
+            attempt=state.attempt,
+            prompt=prompt,
+        )
 
     # Log the output
     with open(log_file, "a") as f:
@@ -181,7 +208,11 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         return False, output
 
     # Validate stage
-    console.print("[dim]Validating stage outputs...[/dim]")
+    if tui_app:
+        tui_app.add_activity("Validating stage outputs...", "⚙")
+    else:
+        console.print("[dim]Validating stage outputs...[/dim]")
+
     runner = ValidationRunner()
     result = runner.validate_stage(stage.value, task_name)
 
@@ -189,9 +220,15 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         f.write(f"\n=== Validation ===\n{result.message}\n")
 
     if result.success:
-        console.print(f"[green]✓ {result.message}[/green]")
+        if tui_app:
+            tui_app.show_message(result.message, "success")
+        else:
+            console.print(f"[green]✓ {result.message}[/green]")
     else:
-        console.print(f"[red]✗ {result.message}[/red]")
+        if tui_app:
+            tui_app.show_message(result.message, "error")
+        else:
+            console.print(f"[red]✗ {result.message}[/red]")
 
     return result.success, result.message
 
@@ -282,6 +319,235 @@ def handle_rollback(state: WorkflowState, message: str) -> bool:
 
 def run_workflow(state: WorkflowState) -> None:
     """Run the workflow from current state to completion or failure."""
+    import os
+    import threading
+
+    # Try persistent TUI first (unless disabled)
+    if not os.environ.get("GALANGAL_NO_TUI"):
+        try:
+            result = _run_workflow_with_tui(state)
+            if result != "use_legacy":
+                # TUI handled the workflow
+                return
+        except Exception as e:
+            console.print(f"[yellow]TUI error: {e}. Using legacy mode.[/yellow]")
+
+    # Legacy mode (no persistent TUI)
+    _run_workflow_legacy(state)
+
+
+def _run_workflow_with_tui(state: WorkflowState) -> str:
+    """Run workflow with persistent TUI. Returns result or 'use_legacy' to fall back."""
+    import threading
+
+    app = WorkflowTUIApp(state.task_name, state.stage.value)
+    config = get_config()
+    max_retries = config.stages.max_retries
+
+    # Shared state for thread communication
+    workflow_done = threading.Event()
+
+    def workflow_thread():
+        """Run the workflow loop in a background thread."""
+        try:
+            while state.stage != Stage.COMPLETE and not app._paused:
+                app.update_stage(state.stage.value, state.attempt)
+                app.set_status("running", f"executing {state.stage.value}")
+
+                # Execute stage with the TUI app
+                success, message = execute_stage(state, tui_app=app)
+
+                if app._paused:
+                    app._workflow_result = "paused"
+                    break
+
+                if not success:
+                    app.show_stage_complete(state.stage.value, False)
+
+                    if state.awaiting_approval or state.clarification_required:
+                        app.show_message(message, "warning")
+                        save_state(state)
+                        app._workflow_result = "paused"
+                        break
+
+                    if handle_rollback(state, message):
+                        app.show_message(f"Rolling back: {message[:80]}", "warning")
+                        continue
+
+                    state.attempt += 1
+                    state.last_failure = message
+
+                    if state.attempt > max_retries:
+                        app.show_message(f"Max retries ({max_retries}) exceeded", "error")
+                        save_state(state)
+                        app._workflow_result = "failed"
+                        break
+
+                    app.show_message(f"Retrying (attempt {state.attempt}/{max_retries})...", "warning")
+                    save_state(state)
+                    continue
+
+                app.show_stage_complete(state.stage.value, True)
+
+                # Plan approval gate - handle in TUI with two-step flow
+                if state.stage == Stage.PM and not artifact_exists("APPROVAL.md", state.task_name):
+                    approval_event = threading.Event()
+                    approval_result = {"value": None, "approver": None, "reason": None}
+
+                    # Get default approver name from config
+                    default_approver = config.project.approver_name or ""
+
+                    def handle_approval(choice):
+                        if choice == "yes":
+                            approval_result["value"] = "pending_name"
+                            # Don't set event yet - wait for name input
+                        elif choice == "no":
+                            approval_result["value"] = "pending_reason"
+                            # Don't set event yet - wait for rejection reason
+                        else:
+                            approval_result["value"] = "quit"
+                            approval_event.set()
+
+                    def handle_approver_name(name):
+                        if name:
+                            approval_result["value"] = "approved"
+                            approval_result["approver"] = name
+                            # Write approval artifact with approver name
+                            from datetime import datetime, timezone
+                            approval_content = f"""# Plan Approval
+
+**Status:** Approved
+**Approved By:** {name}
+**Date:** {datetime.now(timezone.utc).isoformat()}
+
+## Approved via TUI
+"""
+                            write_artifact("APPROVAL.md", approval_content, state.task_name)
+                            app.show_message(f"Plan approved by {name}", "success")
+                        else:
+                            # Cancelled - go back to approval prompt
+                            approval_result["value"] = None
+                            app.show_prompt(PromptType.PLAN_APPROVAL, "Approve plan to continue?", handle_approval)
+                            return  # Don't set event - wait for new choice
+                        approval_event.set()
+
+                    def handle_rejection_reason(reason):
+                        if reason:
+                            approval_result["value"] = "rejected"
+                            approval_result["reason"] = reason
+                            state.stage = Stage.PM
+                            state.attempt = 1
+                            state.last_failure = f"Plan rejected: {reason}"
+                            save_state(state)
+                            app.show_message(f"Plan rejected: {reason}", "warning")
+                        else:
+                            # Cancelled - go back to approval prompt
+                            approval_result["value"] = None
+                            app.show_prompt(PromptType.PLAN_APPROVAL, "Approve plan to continue?", handle_approval)
+                            return  # Don't set event - wait for new choice
+                        approval_event.set()
+
+                    app.show_prompt(PromptType.PLAN_APPROVAL, "Approve plan to continue?", handle_approval)
+
+                    # Wait for choice, then potentially for name or reason
+                    while not approval_event.is_set():
+                        approval_event.wait(timeout=0.1)
+                        if approval_result["value"] == "pending_name":
+                            approval_result["value"] = None  # Reset
+                            app.show_text_input("Enter approver name:", default_approver, handle_approver_name)
+                        elif approval_result["value"] == "pending_reason":
+                            approval_result["value"] = None  # Reset
+                            app.show_text_input("Enter rejection reason:", "Needs revision", handle_rejection_reason)
+
+                    if approval_result["value"] == "quit":
+                        app._workflow_result = "paused"
+                        break
+                    elif approval_result["value"] == "rejected":
+                        app.show_message("Restarting PM stage with feedback...", "info")
+                        continue
+
+                if state.stage == Stage.DEV:
+                    archive_rollback_if_exists(state.task_name)
+
+                # Get next stage
+                next_stage = get_next_stage(state.stage, state)
+                if next_stage:
+                    expected_next_idx = STAGE_ORDER.index(state.stage) + 1
+                    actual_next_idx = STAGE_ORDER.index(next_stage)
+                    if actual_next_idx > expected_next_idx:
+                        skipped = STAGE_ORDER[expected_next_idx:actual_next_idx]
+                        for s in skipped:
+                            app.show_message(f"Skipped {s.value} (condition not met)", "info")
+
+                    state.stage = next_stage
+                    state.attempt = 1
+                    state.last_failure = None
+                    state.awaiting_approval = False
+                    state.clarification_required = False
+                    save_state(state)
+                else:
+                    state.stage = Stage.COMPLETE
+                    save_state(state)
+
+            # Workflow complete
+            if state.stage == Stage.COMPLETE:
+                app.show_workflow_complete()
+                app.update_stage("COMPLETE")
+                app.set_status("complete", "workflow finished")
+
+                completion_event = threading.Event()
+                completion_result = {"value": None}
+
+                def handle_completion(choice):
+                    completion_result["value"] = choice
+                    completion_event.set()
+
+                app.show_prompt(PromptType.COMPLETION, "Workflow complete!", handle_completion)
+                completion_event.wait()
+
+                if completion_result["value"] == "yes":
+                    app._workflow_result = "create_pr"
+                elif completion_result["value"] == "no":
+                    state.stage = Stage.DEV
+                    state.attempt = 1
+                    save_state(state)
+                    app._workflow_result = "back_to_dev"
+                else:
+                    app._workflow_result = "paused"
+
+        except Exception as e:
+            app.show_message(f"Error: {e}", "error")
+            app._workflow_result = "error"
+        finally:
+            workflow_done.set()
+            app.call_from_thread(app.set_timer, 0.5, app.exit)
+
+    # Start workflow in background thread
+    thread = threading.Thread(target=workflow_thread, daemon=True)
+
+    def start_thread():
+        thread.start()
+
+    app.call_later(start_thread)
+    app.run()
+
+    # Handle result
+    result = app._workflow_result or "paused"
+
+    if result == "create_pr":
+        from galangal.commands.complete import finalize_task
+        finalize_task(state.task_name, state, force=False)
+    elif result == "back_to_dev":
+        # Restart workflow from DEV
+        return _run_workflow_with_tui(state)
+    elif result == "paused":
+        _handle_pause(state)
+
+    return result
+
+
+def _run_workflow_legacy(state: WorkflowState) -> None:
+    """Run workflow without persistent TUI (legacy mode)."""
     from galangal.commands.approve import prompt_plan_approval
     from galangal.commands.complete import finalize_task
 
@@ -375,7 +641,6 @@ def run_workflow(state: WorkflowState) -> None:
             console.print("[bold green]WORKFLOW COMPLETE[/bold green]")
             console.print("=" * 60)
 
-            from galangal.commands.complete import finalize_task
             from rich.prompt import Prompt
 
             console.print("\n[bold]Options:[/bold]")

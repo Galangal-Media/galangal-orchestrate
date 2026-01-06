@@ -19,6 +19,7 @@ class ProjectConfig(BaseModel):
 
     name: str = Field(default="My Project", description="Project name")
     stacks: list[StackConfig] = Field(default_factory=list, description="Technology stacks")
+    approver_name: Optional[str] = Field(default=None, description="Default approver name for plan approvals")
 
 
 class StageConfig(BaseModel):

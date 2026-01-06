@@ -80,6 +80,11 @@ Tip: Press Ctrl+C during execution to pause gracefully.
     start_parser.add_argument(
         "--name", "-n", help="Task name (auto-generated if not provided)"
     )
+    start_parser.add_argument(
+        "--type", "-t",
+        choices=["feature", "bugfix", "refactor", "chore", "docs", "hotfix", "1", "2", "3", "4", "5", "6"],
+        help="Task type (skip interactive selection)"
+    )
     start_parser.set_defaults(func=_cmd_start)
 
     # list

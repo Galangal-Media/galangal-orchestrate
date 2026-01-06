@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "galangal-orchestrate"
-version = "0.2.3"
+version = "0.2.6"
 description = "AI-driven development workflow orchestrator"
 readme = "README.md"
 license = "MIT"
@@ -36,6 +36,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
@@ -69,3 +70,4 @@ warn_unused_ignores = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+asyncio_mode = "auto"

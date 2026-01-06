@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 
 from rich.prompt import Prompt
 
-from galangal.config.loader import get_config
 from galangal.core.state import Stage, load_state, save_state
 from galangal.core.tasks import get_active_task
 from galangal.core.artifacts import artifact_exists, read_artifact, write_artifact
@@ -20,8 +19,6 @@ def prompt_plan_approval(task_name: str, state) -> str:
     Interactive approval prompt for PLAN.md.
     Returns: 'approved', 'rejected', or 'quit'
     """
-    config = get_config()
-
     console.print("\n" + "=" * 60)
     console.print("[bold yellow]⏸️  APPROVAL REQUIRED[/bold yellow]")
     console.print("=" * 60)
@@ -47,9 +44,7 @@ def prompt_plan_approval(task_name: str, state) -> str:
         choice = Prompt.ask("Your choice", default="y").strip().lower()
 
         if choice in ["y", "yes", "approve"]:
-            approver = config.get("approver", "") or Prompt.ask(
-                "Approver name", default=""
-            )
+            approver = Prompt.ask("Approver name", default="")
 
             approval_content = f"""# Plan Approval
 
@@ -86,8 +81,6 @@ def prompt_design_approval(task_name: str, state) -> str:
     Interactive approval prompt for DESIGN.md.
     Returns: 'approved', 'rejected', or 'quit'
     """
-    config = get_config()
-
     console.print("\n" + "=" * 60)
     console.print("[bold yellow]⏸️  DESIGN REVIEW REQUIRED[/bold yellow]")
     console.print("=" * 60)
@@ -112,9 +105,7 @@ def prompt_design_approval(task_name: str, state) -> str:
         choice = Prompt.ask("Your choice", default="y").strip().lower()
 
         if choice in ["y", "yes", "approve"]:
-            approver = config.get("approver", "") or Prompt.ask(
-                "Reviewer name", default=""
-            )
+            approver = Prompt.ask("Reviewer name", default="")
 
             review_content = f"""# Design Review
 
