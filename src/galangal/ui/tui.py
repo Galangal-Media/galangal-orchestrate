@@ -102,7 +102,7 @@ class StageTUIApp(App):
     def on_mount(self) -> None:
         """Start the stage execution."""
         self._update_status_line()
-        self.run_worker(self._execute_stage, exclusive=True)
+        self.run_worker(self._execute_stage, exclusive=True, thread=True)
 
     def _update_status_line(self) -> None:
         """Update the status line."""
@@ -118,8 +118,8 @@ class StageTUIApp(App):
             f"Time: {elapsed_str}"
         )
 
-    async def _execute_stage(self) -> None:
-        """Execute the stage using Claude."""
+    def _execute_stage(self) -> None:
+        """Execute the stage using Claude (runs in worker thread)."""
         backend = ClaudeBackend()
 
         # Create a UI adapter
@@ -136,14 +136,14 @@ class StageTUIApp(App):
         success, _ = self.result
         if success:
             self._status = "complete"
-            self._add_activity("[green]Stage completed successfully[/green]", "✓")
+            self.call_from_thread(self._add_activity, "[green]Stage completed successfully[/green]", "✓")
         else:
             self._status = "failed"
-            self._add_activity("[red]Stage failed[/red]", "✗")
+            self.call_from_thread(self._add_activity, "[red]Stage failed[/red]", "✗")
 
-        self._update_status_line()
+        self.call_from_thread(self._update_status_line)
         # Auto-exit after a short delay
-        self.set_timer(1.5, self.exit)
+        self.call_from_thread(self.set_timer, 1.5, self.exit)
 
     def _add_activity(self, activity: str, icon: str = "•") -> None:
         """Add an activity to the log."""
