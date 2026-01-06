@@ -1,0 +1,362 @@
+"""
+Config-driven validation runner.
+"""
+
+import fnmatch
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+from galangal.config.loader import get_project_root, get_config
+from galangal.config.schema import StageValidation, ValidationCommand, PreflightCheck
+from galangal.core.artifacts import artifact_exists, read_artifact, write_artifact
+
+
+@dataclass
+class ValidationResult:
+    """Result of a validation check."""
+
+    success: bool
+    message: str
+    output: Optional[str] = None
+    rollback_to: Optional[str] = None  # Stage to rollback to on failure
+
+
+class ValidationRunner:
+    """Run config-driven validation for stages."""
+
+    def __init__(self):
+        self.config = get_config()
+        self.project_root = get_project_root()
+
+    def validate_stage(
+        self,
+        stage: str,
+        task_name: str,
+    ) -> ValidationResult:
+        """Run validation for a stage based on config."""
+        stage_lower = stage.lower()
+
+        # Get stage validation config
+        validation_config = self.config.validation
+        stage_config: Optional[StageValidation] = getattr(
+            validation_config, stage_lower, None
+        )
+
+        if stage_config is None:
+            # No config for this stage - use defaults
+            return self._validate_with_defaults(stage, task_name)
+
+        # Check skip conditions
+        if stage_config.skip_if:
+            if self._should_skip(stage_config.skip_if, task_name):
+                self._write_skip_artifact(stage, task_name, "Condition met")
+                return ValidationResult(True, f"{stage} skipped (condition met)")
+
+        # Run preflight checks (for PREFLIGHT stage)
+        if stage_config.checks:
+            result = self._run_preflight_checks(stage_config.checks, task_name)
+            if not result.success:
+                return result
+
+        # Run validation commands
+        for cmd_config in stage_config.commands:
+            result = self._run_command(cmd_config, task_name)
+            if not result.success:
+                if cmd_config.optional:
+                    continue
+                if cmd_config.allow_failure:
+                    # Log but don't fail
+                    continue
+                return result
+
+        # Check for pass/fail markers in artifacts (for AI-driven stages)
+        if stage_config.artifact and stage_config.pass_marker:
+            result = self._check_artifact_markers(stage_config, task_name)
+            if not result.success:
+                return result
+
+        # Check required artifacts
+        for artifact_name in stage_config.artifacts_required:
+            if not artifact_exists(artifact_name, task_name):
+                return ValidationResult(
+                    False,
+                    f"{artifact_name} not found",
+                    rollback_to="DEV",
+                )
+
+        return ValidationResult(True, f"{stage} validation passed")
+
+    def _should_skip(self, skip_condition, task_name: str) -> bool:
+        """Check if skip condition is met."""
+        if skip_condition.no_files_match:
+            # Check if any files match the glob pattern in git diff
+            try:
+                result = subprocess.run(
+                    ["git", "diff", "--name-only", "main...HEAD"],
+                    cwd=self.project_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                changed_files = result.stdout.strip().split("\n")
+                pattern = skip_condition.no_files_match
+
+                for f in changed_files:
+                    if fnmatch.fnmatch(f, pattern):
+                        return False  # Found a match, don't skip
+
+                return True  # No matches, skip
+            except Exception:
+                return False  # On error, don't skip
+
+        return False
+
+    def _write_skip_artifact(self, stage: str, task_name: str, reason: str) -> None:
+        """Write a skip marker artifact."""
+        from datetime import datetime, timezone
+
+        content = f"""# {stage} Stage Skipped
+
+Date: {datetime.now(timezone.utc).isoformat()}
+Reason: {reason}
+"""
+        write_artifact(f"{stage.upper()}_SKIP.md", content, task_name)
+
+    def _run_preflight_checks(
+        self, checks: list[PreflightCheck], task_name: str
+    ) -> ValidationResult:
+        """Run preflight environment checks."""
+        from datetime import datetime, timezone
+
+        results: dict[str, dict] = {}
+        all_ok = True
+
+        for check in checks:
+            if check.path_exists:
+                path = self.project_root / check.path_exists
+                exists = path.exists()
+                results[check.name] = {"status": "OK" if exists else "Missing"}
+                if not exists:
+                    all_ok = False
+
+            elif check.command:
+                try:
+                    result = subprocess.run(
+                        check.command,
+                        shell=True,
+                        cwd=self.project_root,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    output = result.stdout.strip()
+
+                    if check.expect_empty:
+                        # Filter out task-related files for git status
+                        if output:
+                            filtered = self._filter_task_files(output, task_name)
+                            ok = not filtered
+                        else:
+                            ok = True
+                    else:
+                        ok = result.returncode == 0
+
+                    results[check.name] = {
+                        "status": "OK" if ok else "Failed",
+                        "output": output[:200] if output else "",
+                    }
+                    if not ok:
+                        all_ok = False
+
+                except Exception as e:
+                    results[check.name] = {"status": "Error", "error": str(e)}
+                    all_ok = False
+
+        # Generate report
+        status = "READY" if all_ok else "NOT_READY"
+        report = f"""# Preflight Report
+
+## Summary
+- **Status:** {status}
+- **Date:** {datetime.now(timezone.utc).isoformat()}
+
+## Checks
+"""
+        for name, result in results.items():
+            status_icon = "✓" if result.get("status") == "OK" else "✗"
+            report += f"\n### {status_icon} {name}\n"
+            report += f"- Status: {result.get('status', 'Unknown')}\n"
+            if result.get("output"):
+                report += f"- Output: {result['output']}\n"
+            if result.get("error"):
+                report += f"- Error: {result['error']}\n"
+
+        write_artifact("PREFLIGHT_REPORT.md", report, task_name)
+
+        if all_ok:
+            return ValidationResult(True, "Preflight checks passed")
+        return ValidationResult(False, "Preflight checks failed - fix environment issues")
+
+    def _filter_task_files(self, git_status: str, task_name: str) -> str:
+        """Filter out task-related files from git status output."""
+        config = get_config()
+        tasks_dir = config.tasks_dir
+
+        filtered_lines = []
+        for line in git_status.split("\n"):
+            file_path = line[3:] if len(line) > 3 else line
+            # Skip task artifacts directory
+            if file_path.startswith(f"{tasks_dir}/"):
+                continue
+            filtered_lines.append(line)
+
+        return "\n".join(filtered_lines)
+
+    def _run_command(
+        self, cmd_config: ValidationCommand, task_name: str
+    ) -> ValidationResult:
+        """Run a single validation command."""
+        command = cmd_config.command.replace("{task_dir}", str(get_project_root() / get_config().tasks_dir / task_name))
+
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                cwd=self.project_root,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+
+            if result.returncode == 0:
+                return ValidationResult(
+                    True,
+                    f"{cmd_config.name}: passed",
+                    output=result.stdout,
+                )
+            else:
+                return ValidationResult(
+                    False,
+                    f"{cmd_config.name}: failed",
+                    output=result.stdout + result.stderr,
+                    rollback_to="DEV",
+                )
+
+        except subprocess.TimeoutExpired:
+            return ValidationResult(
+                False,
+                f"{cmd_config.name}: timed out",
+                rollback_to="DEV",
+            )
+        except Exception as e:
+            return ValidationResult(
+                False,
+                f"{cmd_config.name}: error - {e}",
+                rollback_to="DEV",
+            )
+
+    def _check_artifact_markers(
+        self, stage_config: StageValidation, task_name: str
+    ) -> ValidationResult:
+        """Check for pass/fail markers in an artifact."""
+        artifact_name = stage_config.artifact
+        if not artifact_name:
+            return ValidationResult(True, "No artifact to check")
+
+        content = read_artifact(artifact_name, task_name)
+        if not content:
+            return ValidationResult(
+                False,
+                f"{artifact_name} not found or empty",
+                rollback_to="DEV",
+            )
+
+        content_upper = content.upper()
+
+        if stage_config.pass_marker and stage_config.pass_marker in content_upper:
+            return ValidationResult(True, f"{artifact_name}: approved")
+
+        if stage_config.fail_marker and stage_config.fail_marker in content_upper:
+            return ValidationResult(
+                False,
+                f"{artifact_name}: changes requested",
+                rollback_to="DEV",
+            )
+
+        return ValidationResult(
+            False,
+            f"{artifact_name}: unclear result - must contain {stage_config.pass_marker} or {stage_config.fail_marker}",
+        )
+
+    def _validate_with_defaults(
+        self, stage: str, task_name: str
+    ) -> ValidationResult:
+        """Validate using default logic when no config is provided."""
+        stage_upper = stage.upper()
+
+        # PM stage - check for SPEC.md and PLAN.md
+        if stage_upper == "PM":
+            if not artifact_exists("SPEC.md", task_name):
+                return ValidationResult(False, "SPEC.md not found")
+            if not artifact_exists("PLAN.md", task_name):
+                return ValidationResult(False, "PLAN.md not found")
+            return ValidationResult(True, "PM stage validated")
+
+        # DESIGN stage - check for DESIGN.md or skip marker
+        if stage_upper == "DESIGN":
+            if artifact_exists("DESIGN_SKIP.md", task_name):
+                return ValidationResult(True, "Design skipped")
+            if not artifact_exists("DESIGN.md", task_name):
+                return ValidationResult(False, "DESIGN.md not found")
+            return ValidationResult(True, "Design stage validated")
+
+        # DEV stage - just check Claude completed
+        if stage_upper == "DEV":
+            return ValidationResult(True, "DEV stage completed - QA will validate")
+
+        # TEST stage - check for TEST_PLAN.md
+        if stage_upper == "TEST":
+            if not artifact_exists("TEST_PLAN.md", task_name):
+                return ValidationResult(False, "TEST_PLAN.md not found")
+            return ValidationResult(True, "Test stage validated")
+
+        # QA stage - check for QA_REPORT.md
+        if stage_upper == "QA":
+            if not artifact_exists("QA_REPORT.md", task_name):
+                return ValidationResult(False, "QA_REPORT.md not found")
+            report = read_artifact("QA_REPORT.md", task_name) or ""
+            if "PASS" in report.upper() and "FAIL" not in report.upper():
+                return ValidationResult(True, "QA passed")
+            return ValidationResult(False, "QA failed", rollback_to="DEV")
+
+        # SECURITY stage - check for SECURITY_CHECKLIST.md or skip
+        if stage_upper == "SECURITY":
+            if artifact_exists("SECURITY_SKIP.md", task_name):
+                return ValidationResult(True, "Security skipped")
+            if not artifact_exists("SECURITY_CHECKLIST.md", task_name):
+                return ValidationResult(False, "SECURITY_CHECKLIST.md not found")
+            return ValidationResult(True, "Security stage validated")
+
+        # REVIEW stage - check for REVIEW_NOTES.md with APPROVE
+        if stage_upper == "REVIEW":
+            if not artifact_exists("REVIEW_NOTES.md", task_name):
+                return ValidationResult(False, "REVIEW_NOTES.md not found")
+            notes = read_artifact("REVIEW_NOTES.md", task_name) or ""
+            if "APPROVE" in notes.upper():
+                return ValidationResult(True, "Review approved")
+            if "REQUEST_CHANGES" in notes.upper():
+                return ValidationResult(
+                    False, "Review requested changes", rollback_to="DEV"
+                )
+            return ValidationResult(False, "Review result unclear")
+
+        # DOCS stage - check for DOCS_REPORT.md
+        if stage_upper == "DOCS":
+            if not artifact_exists("DOCS_REPORT.md", task_name):
+                return ValidationResult(False, "DOCS_REPORT.md not found")
+            return ValidationResult(True, "Docs stage validated")
+
+        # Default: pass
+        return ValidationResult(True, f"{stage} completed")
