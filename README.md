@@ -96,9 +96,11 @@ stages:
 
 validation:
   qa:
+    timeout: 3600
     commands:
       - name: "Lint"
         command: "./scripts/lint.sh"
+        timeout: 600
       - name: "Tests"
         command: "pytest"
 

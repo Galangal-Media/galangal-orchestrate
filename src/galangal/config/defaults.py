@@ -52,9 +52,12 @@ validation:
 
   # QA - quality checks
   qa:
+    # Default timeout per command (seconds)
+    timeout: 300
     commands:
       - name: "Tests"
         command: "echo 'Configure your test command in .galangal/config.yaml'"
+        # timeout: 3600
 
   # Review - code review (AI-driven)
   review:

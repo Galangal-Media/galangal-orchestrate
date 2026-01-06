@@ -46,6 +46,9 @@ class ValidationCommand(BaseModel):
     command: str = Field(description="Shell command to run")
     optional: bool = Field(default=False, description="Don't fail if this command fails")
     allow_failure: bool = Field(default=False, description="Report but don't block on failure")
+    timeout: Optional[int] = Field(
+        default=None, description="Command timeout in seconds (overrides stage default)"
+    )
 
 
 class SkipCondition(BaseModel):
@@ -60,6 +63,9 @@ class StageValidation(BaseModel):
     """Validation configuration for a single stage."""
 
     skip_if: Optional[SkipCondition] = Field(default=None, description="Skip condition")
+    timeout: int = Field(
+        default=300, description="Default timeout in seconds for validation commands"
+    )
     commands: list[ValidationCommand] = Field(
         default_factory=list, description="Commands to run"
     )

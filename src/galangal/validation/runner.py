@@ -62,7 +62,7 @@ class ValidationRunner:
 
         # Run validation commands
         for cmd_config in stage_config.commands:
-            result = self._run_command(cmd_config, task_name)
+            result = self._run_command(cmd_config, task_name, stage_config.timeout)
             if not result.success:
                 if cmd_config.optional:
                     continue
@@ -215,10 +215,11 @@ Reason: {reason}
         return "\n".join(filtered_lines)
 
     def _run_command(
-        self, cmd_config: ValidationCommand, task_name: str
+        self, cmd_config: ValidationCommand, task_name: str, default_timeout: int
     ) -> ValidationResult:
         """Run a single validation command."""
         command = cmd_config.command.replace("{task_dir}", str(get_project_root() / get_config().tasks_dir / task_name))
+        timeout = cmd_config.timeout if cmd_config.timeout is not None else default_timeout
 
         try:
             result = subprocess.run(
@@ -227,7 +228,7 @@ Reason: {reason}
                 cwd=self.project_root,
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=timeout,
             )
 
             if result.returncode == 0:
