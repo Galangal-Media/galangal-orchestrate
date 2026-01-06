@@ -114,14 +114,89 @@ prompt_context: |
 
 ## Customizing Prompts
 
-Export and customize stage prompts:
+Galangal uses a layered prompt system:
 
-```bash
-# Export defaults to .galangal/prompts/
-galangal prompts export
+1. **Base prompts** - Generic, language-agnostic prompts built into the package
+2. **Project prompts** - Your customizations in `.galangal/prompts/`
 
-# Show effective prompt for a stage
-galangal prompts show dev
+### Prompt Modes
+
+Project prompts support two modes:
+
+#### Supplement Mode (Recommended)
+
+Add project-specific content that gets prepended to the base prompt. Include the `# BASE` marker where you want the base prompt inserted:
+
+```markdown
+<!-- .galangal/prompts/dev.md -->
+
+## My Project CLI Scripts
+
+Use these commands for testing:
+- `./scripts/test.sh` - Run tests
+- `./scripts/lint.sh` - Run linter
+
+## My Project Patterns
+
+- Always use `api_success()` for responses
+- Never use raw SQL queries
+
+# BASE
+```
+
+The `# BASE` marker tells galangal to insert the generic base prompt at that location. Your project-specific content appears first, followed by the standard instructions.
+
+#### Override Mode
+
+To completely replace a base prompt, simply omit the `# BASE` marker:
+
+```markdown
+<!-- .galangal/prompts/preflight.md -->
+
+# Custom Preflight
+
+This completely replaces the default preflight prompt.
+
+[Your custom instructions here...]
+```
+
+### Available Prompts
+
+Create any of these files in `.galangal/prompts/` to customize:
+
+| File | Stage |
+|------|-------|
+| `pm.md` | Requirements & planning |
+| `design.md` | Architecture design |
+| `preflight.md` | Environment checks |
+| `dev.md` | Implementation |
+| `test.md` | Test writing |
+| `qa.md` | Quality assurance |
+| `security.md` | Security review |
+| `review.md` | Code review |
+| `docs.md` | Documentation |
+
+### Config-Based Context
+
+You can also inject context via `config.yaml` without creating prompt files:
+
+```yaml
+# .galangal/config.yaml
+
+# Injected into ALL stage prompts
+prompt_context: |
+  ## Project Rules
+  - Use TypeScript strict mode
+  - All APIs must be documented
+
+# Injected into specific stages only
+stage_context:
+  dev: |
+    ## Dev Environment
+    - Run `npm run dev` for hot reload
+  test: |
+    ## Test Setup
+    - Use vitest for unit tests
 ```
 
 ## Commands
