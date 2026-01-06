@@ -57,3 +57,10 @@ MANIFEST
 # Local development
 .env
 .env.local
+
+# Local sandbox
+sandbox/
+/.galangal
+
+# Galangal task artifacts
+galangal-tasks/

@@ -208,14 +208,14 @@ class ClaudeBackend(AIBackend):
                             ui.set_status("reading", short_path)
 
                     elif tool_name == "Bash":
-                        cmd_preview = item.get("input", {}).get("command", "")[:40]
+                        cmd_preview = item.get("input", {}).get("command", "")[:140]
                         ui.add_activity(f"Bash: {cmd_preview}", "🔧")
                         ui.set_status("running", "bash")
 
                     elif tool_name in ["Grep", "Glob"]:
-                        pattern = item.get("input", {}).get("pattern", "")[:30]
+                        pattern = item.get("input", {}).get("pattern", "")[:80]
                         ui.add_activity(f"{tool_name}: {pattern}", "🔍")
-                        ui.set_status("searching", pattern[:20])
+                        ui.set_status("searching", pattern[:40])
 
                     elif tool_name == "Task":
                         desc = item.get("input", {}).get("description", "agent")

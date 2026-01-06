@@ -15,12 +15,13 @@ Layout:
 ├────────────────────────────────────────────────────┴─────────────┤
 │ ⠋ Running: waiting for API response                              │ Action
 ├──────────────────────────────────────────────────────────────────┤
-│ q Quit  v Verbose  y Yes  n No                                   │ Footer
+│ ^Q Quit  ^D Verbose  ^F Files                                    │ Footer
 └──────────────────────────────────────────────────────────────────┘
 """
 
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Callable
 from enum import Enum
@@ -31,6 +32,7 @@ from textual.widgets import Footer, Static, RichLog, Input
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll, Container
 from textual.reactive import reactive
+from textual.screen import ModalScreen
 
 from galangal.ai.claude import ClaudeBackend
 from galangal.core.state import Stage, STAGE_ORDER
@@ -120,6 +122,22 @@ class StageProgressWidget(Static):
         "COMPLETE": "COMPLETE",
     }
 
+    STAGE_COMPACT = {
+        "PM": "PM",
+        "DESIGN": "DSGN",
+        "PREFLIGHT": "PREF",
+        "DEV": "DEV",
+        "MIGRATION": "MIGR",
+        "TEST": "TEST",
+        "CONTRACT": "CNTR",
+        "QA": "QA",
+        "BENCHMARK": "BENCH",
+        "SECURITY": "SEC",
+        "REVIEW": "RVW",
+        "DOCS": "DOCS",
+        "COMPLETE": "DONE",
+    }
+
     def render(self) -> Text:
         text = Text(justify="center")
 
@@ -131,17 +149,39 @@ class StageProgressWidget(Static):
         except StopIteration:
             current_idx = 0
 
-        for i, stage in enumerate(STAGE_ORDER):
-            if i > 0:
-                text.append(" ━ ", style="#504945")
+        width = self.size.width or 0
+        use_window = width and width < 70
+        use_compact = width and width < 110
+        display_names = self.STAGE_COMPACT if use_compact else self.STAGE_DISPLAY
 
-            name = self.STAGE_DISPLAY.get(stage.value, stage.value)
+        stages = list(STAGE_ORDER)
+        if use_window:
+            start = max(current_idx - 2, 0)
+            end = min(current_idx + 3, len(stages))
+            items: list[Optional[int]] = []
+            if start > 0:
+                items.append(None)
+            items.extend(range(start, end))
+            if end < len(stages):
+                items.append(None)
+        else:
+            items = list(range(len(stages)))
+
+        for idx, stage_idx in enumerate(items):
+            if idx > 0:
+                text.append(" ━ ", style="#504945")
+            if stage_idx is None:
+                text.append("...", style="#504945")
+                continue
+
+            stage = stages[stage_idx]
+            name = display_names.get(stage.value, stage.value)
 
             if stage.value in self.skipped_stages:
                 text.append(f"⊘ {name}", style="#504945 strike")
-            elif i < current_idx:
+            elif stage_idx < current_idx:
                 text.append(f"● {name}", style="#b8bb26")
-            elif i == current_idx:
+            elif stage_idx == current_idx:
                 text.append(f"◉ {name}", style="bold #fabd2f")
             else:
                 text.append(f"○ {name}", style="#504945")
@@ -165,7 +205,18 @@ class CurrentActionWidget(Static):
             text.append(f"{spinner} ", style="#83a598")
             text.append(self.action, style="bold #ebdbb2")
             if self.detail:
-                detail = self.detail[:150] + "..." if len(self.detail) > 150 else self.detail
+                detail = self.detail
+                width = self.size.width or 0
+                if width:
+                    reserved = len(self.action) + 4
+                    max_detail = max(width - reserved, 0)
+                    if max_detail and len(detail) > max_detail:
+                        if max_detail > 3:
+                            detail = detail[: max_detail - 3] + "..."
+                        else:
+                            detail = ""
+                if not detail:
+                    return text
                 text.append(f": {detail}", style="#928374")
         else:
             text.append("○ Idle", style="#504945")
@@ -181,113 +232,207 @@ class FilesPanelWidget(Static):
 
     def add_file(self, action: str, path: str) -> None:
         """Add a file operation."""
-        # Shorten path for display
-        if "/" in path:
-            parts = path.split("/")
-            short_path = parts[-1]
-            if len(short_path) > 25:
-                short_path = short_path[:22] + "..."
-        else:
-            short_path = path[:25] if len(path) > 25 else path
-
-        entry = (action, short_path)
+        entry = (action, path)
         if entry not in self._files:
             self._files.append(entry)
             self.refresh()
 
     def render(self) -> Text:
+        width = self.size.width or 24
+        divider_width = max(width - 1, 1)
         text = Text()
         text.append("Files\n", style="bold #928374")
-        text.append("─" * 20 + "\n", style="#504945")
+        text.append("─" * divider_width + "\n", style="#504945")
 
         if not self._files:
             text.append("(none yet)", style="#504945 italic")
         else:
             # Show last 20 files
             for action, path in self._files[-20:]:
+                display_path = path
+                if "/" in display_path:
+                    parts = display_path.split("/")
+                    display_path = "/".join(parts[-2:])
+                max_len = max(width - 4, 1)
+                if len(display_path) > max_len:
+                    if max_len > 3:
+                        display_path = display_path[: max_len - 3] + "..."
+                    else:
+                        display_path = display_path[:max_len]
                 icon = "✏️" if action == "write" else "📖"
                 color = "#b8bb26" if action == "write" else "#83a598"
                 text.append(f"{icon} ", style=color)
-                text.append(f"{path}\n", style="#ebdbb2")
+                text.append(f"{display_path}\n", style="#ebdbb2")
 
         return text
 
 
-class PromptWidget(Static):
-    """Widget for showing prompts."""
+# =============================================================================
+# Prompt Modal
+# =============================================================================
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._message = ""
-        self._options = ""
-        self._visible = False
-        self.display = False  # Hidden by default
 
-    def set_prompt(self, message: str, options: str) -> None:
-        """Set prompt content and show it."""
+@dataclass(frozen=True)
+class PromptOption:
+    key: str
+    label: str
+    result: str
+    color: str
+
+
+class PromptModal(ModalScreen):
+    """Modal prompt for multi-choice selections."""
+
+    CSS = """
+    PromptModal {
+        align: center middle;
+        layout: vertical;
+    }
+
+    #prompt-dialog {
+        width: 70%;
+        max-width: 80;
+        min-width: 40;
+        background: #3c3836;
+        border: round #504945;
+        padding: 1 2;
+        layout: vertical;
+    }
+
+    #prompt-message {
+        color: #ebdbb2;
+        text-style: bold;
+        margin-bottom: 1;
+        text-wrap: wrap;
+    }
+
+    #prompt-options {
+        color: #ebdbb2;
+    }
+
+    #prompt-hint {
+        color: #7c6f64;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("1", "choose_1", show=False),
+        Binding("2", "choose_2", show=False),
+        Binding("3", "choose_3", show=False),
+        Binding("y", "choose_yes", show=False),
+        Binding("n", "choose_no", show=False),
+        Binding("q", "choose_quit", show=False),
+        Binding("escape", "choose_quit", show=False),
+    ]
+
+    def __init__(self, message: str, options: list[PromptOption]):
+        super().__init__()
         self._message = message
         self._options = options
-        self._visible = True
-        self.display = True  # Show widget in layout
-        self.refresh()
+        self._key_map = {option.key: option.result for option in options}
 
-    def hide(self) -> None:
-        """Hide the prompt."""
-        self._visible = False
-        self._message = ""
-        self._options = ""
-        self.display = False  # Remove from layout
-        self.refresh()
+    def compose(self) -> ComposeResult:
+        options_text = "\n".join(
+            f"[{option.color}]{option.key}[/] {option.label}" for option in self._options
+        )
+        with Vertical(id="prompt-dialog"):
+            yield Static(self._message, id="prompt-message")
+            yield Static(Text.from_markup(options_text), id="prompt-options")
+            yield Static("Press 1-3 to choose, Esc to cancel", id="prompt-hint")
 
-    def render(self) -> Text:
-        if not self._visible or not self._message:
-            return Text("")
+    def _submit_key(self, key: str) -> None:
+        result = self._key_map.get(key)
+        if result:
+            self.dismiss(result)
 
-        text = Text()
-        text.append("\n", style="")
-        text.append("─" * 70 + "\n", style="#504945")
-        text.append("  " + self._message + "\n", style="bold #ebdbb2")
-        text.append("  ")
-        # Parse Rich markup for options (contains color codes)
-        text.append_text(Text.from_markup(self._options))
-        text.append("\n")
-        text.append("─" * 70, style="#504945")
-        return text
+    def action_choose_1(self) -> None:
+        self._submit_key("1")
+
+    def action_choose_2(self) -> None:
+        self._submit_key("2")
+
+    def action_choose_3(self) -> None:
+        self._submit_key("3")
+
+    def action_choose_yes(self) -> None:
+        self.dismiss("yes")
+
+    def action_choose_no(self) -> None:
+        self.dismiss("no")
+
+    def action_choose_quit(self) -> None:
+        self.dismiss("quit")
 
 
-class InputPromptWidget(Static):
-    """Widget for text input prompts."""
+# =============================================================================
+# Text Input Modal
+# =============================================================================
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._label = ""
-        self._visible = False
-        self.display = False
 
-    def show_input(self, label: str, default: str = "") -> None:
-        """Show input prompt with label."""
+class TextInputModal(ModalScreen):
+    """Modal for collecting short text input."""
+
+    CSS = """
+    TextInputModal {
+        align: center middle;
+        layout: vertical;
+    }
+
+    #text-input-dialog {
+        width: 70%;
+        max-width: 80;
+        min-width: 40;
+        background: #3c3836;
+        border: round #504945;
+        padding: 1 2;
+        layout: vertical;
+    }
+
+    #text-input-label {
+        color: #ebdbb2;
+        text-style: bold;
+        margin-bottom: 1;
+        text-wrap: wrap;
+    }
+
+    #text-input-field {
+        width: 100%;
+    }
+
+    #text-input-hint {
+        color: #7c6f64;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+    ]
+
+    def __init__(self, label: str, default: str = ""):
+        super().__init__()
         self._label = label
-        self._visible = True
-        self.display = True
-        self.refresh()
+        self._default = default
 
-    def hide(self) -> None:
-        """Hide the input prompt."""
-        self._visible = False
-        self._label = ""
-        self.display = False
-        self.refresh()
+    def compose(self) -> ComposeResult:
+        with Vertical(id="text-input-dialog"):
+            yield Static(self._label, id="text-input-label")
+            yield Input(value=self._default, placeholder=self._label, id="text-input-field")
+            yield Static("Press Enter to submit, Esc to cancel", id="text-input-hint")
 
-    def render(self) -> Text:
-        if not self._visible:
-            return Text("")
+    def on_mount(self) -> None:
+        field = self.query_one("#text-input-field", Input)
+        self.set_focus(field)
+        field.cursor_position = len(field.value)
 
-        text = Text()
-        text.append("─" * 70 + "\n", style="#504945")
-        text.append("  " + self._label + "\n", style="bold #ebdbb2")
-        text.append("  [#928374]Press Enter to submit, Escape to cancel[/]\n", style="")
-        text.append("─" * 70, style="#504945")
-        return Text.from_markup(str(text))
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "text-input-field":
+            value = event.value.strip()
+            self.dismiss(value if value else None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 # =============================================================================
@@ -303,9 +448,14 @@ class WorkflowTUIApp(App):
     CSS = """
     Screen {
         background: #282828;
+    }
+
+    #workflow-root {
         layout: grid;
         grid-size: 1;
         grid-rows: 2 2 1fr 1 auto;
+        height: 100%;
+        width: 100%;
     }
 
     #header {
@@ -352,28 +502,6 @@ class WorkflowTUIApp(App):
         border-top: solid #504945;
     }
 
-    #prompt-area {
-        background: #3c3836;
-        padding: 0 2;
-        height: auto;
-    }
-
-    #input-label {
-        background: #3c3836;
-        padding: 0 2;
-        height: auto;
-    }
-
-    #input-container {
-        height: 3;
-        padding: 0 2;
-        background: #3c3836;
-    }
-
-    #text-input {
-        width: 100%;
-    }
-
     Footer {
         background: #1d2021;
     }
@@ -387,11 +515,7 @@ class WorkflowTUIApp(App):
     BINDINGS = [
         Binding("ctrl+q", "quit_workflow", "^Q Quit", show=True),
         Binding("ctrl+d", "toggle_verbose", "^D Verbose", show=True),
-        Binding("y", "select_yes", "Yes", show=False),
-        Binding("n", "select_no", "No", show=False),
-        Binding("1", "select_option_1", "1", show=False),
-        Binding("2", "select_option_2", "2", show=False),
-        Binding("3", "select_option_3", "3", show=False),
+        Binding("ctrl+f", "toggle_files", "^F Files", show=True),
     ]
 
     def __init__(self, task_name: str, initial_stage: str, max_retries: int = 5):
@@ -411,26 +535,25 @@ class WorkflowTUIApp(App):
         # Workflow control
         self._prompt_type = PromptType.NONE
         self._prompt_callback: Optional[Callable] = None
+        self._active_prompt_screen: Optional[PromptModal] = None
         self._workflow_result: Optional[str] = None
         self._paused = False
 
         # Text input state
         self._input_callback: Optional[Callable] = None
-        self._input_label = ""
+        self._active_input_screen: Optional[TextInputModal] = None
+        self._files_visible = True
 
     def compose(self) -> ComposeResult:
-        yield HeaderWidget(id="header")
-        yield StageProgressWidget(id="progress")
-        with Horizontal(id="main-content"):
-            with VerticalScroll(id="activity-container"):
-                yield RichLog(id="activity-log", highlight=True, markup=True)
-            yield FilesPanelWidget(id="files-container")
-        yield CurrentActionWidget(id="current-action")
-        yield PromptWidget(id="prompt-area")
-        yield InputPromptWidget(id="input-label")
-        with Container(id="input-container"):
-            yield Input(id="text-input", placeholder="Type message to AI...")
-        yield Footer()
+        with Container(id="workflow-root"):
+            yield HeaderWidget(id="header")
+            yield StageProgressWidget(id="progress")
+            with Horizontal(id="main-content"):
+                with VerticalScroll(id="activity-container"):
+                    yield RichLog(id="activity-log", highlight=True, markup=True)
+                yield FilesPanelWidget(id="files-container")
+            yield CurrentActionWidget(id="current-action")
+            yield Footer()
 
     def on_mount(self) -> None:
         """Initialize widgets."""
@@ -442,9 +565,6 @@ class WorkflowTUIApp(App):
 
         progress = self.query_one("#progress", StageProgressWidget)
         progress.current_stage = self.current_stage
-
-        # Hide input label by default (but keep input always visible)
-        self.query_one("#input-label", InputPromptWidget).display = False
 
         # Start timers
         self.set_interval(1.0, self._update_elapsed)
@@ -572,20 +692,40 @@ class WorkflowTUIApp(App):
         self._prompt_type = prompt_type
         self._prompt_callback = callback
 
-        options_text = {
-            PromptType.PLAN_APPROVAL: "[#b8bb26]1[/] Approve  [#fb4934]2[/] Reject  [#fabd2f]3[/] Quit",
-            PromptType.DESIGN_APPROVAL: "[#b8bb26]1[/] Approve  [#fb4934]2[/] Reject  [#fabd2f]3[/] Quit",
-            PromptType.COMPLETION: "[#b8bb26]1[/] Create PR  [#fb4934]2[/] Back to DEV  [#fabd2f]3[/] Quit",
-        }.get(prompt_type, "[#b8bb26]1[/] Yes  [#fb4934]2[/] No  [#fabd2f]3[/] Quit")
-
-        # Store for use in _show closure
-        msg = message
-        opts = options_text
+        options = {
+            PromptType.PLAN_APPROVAL: [
+                PromptOption("1", "Approve", "yes", "#b8bb26"),
+                PromptOption("2", "Reject", "no", "#fb4934"),
+                PromptOption("3", "Quit", "quit", "#fabd2f"),
+            ],
+            PromptType.DESIGN_APPROVAL: [
+                PromptOption("1", "Approve", "yes", "#b8bb26"),
+                PromptOption("2", "Reject", "no", "#fb4934"),
+                PromptOption("3", "Quit", "quit", "#fabd2f"),
+            ],
+            PromptType.COMPLETION: [
+                PromptOption("1", "Create PR", "yes", "#b8bb26"),
+                PromptOption("2", "Back to DEV", "no", "#fb4934"),
+                PromptOption("3", "Quit", "quit", "#fabd2f"),
+            ],
+        }.get(prompt_type, [
+            PromptOption("1", "Yes", "yes", "#b8bb26"),
+            PromptOption("2", "No", "no", "#fb4934"),
+            PromptOption("3", "Quit", "quit", "#fabd2f"),
+        ])
 
         def _show():
             try:
-                prompt = self.query_one("#prompt-area", PromptWidget)
-                prompt.set_prompt(msg, opts)
+                def _handle(result: Optional[str]) -> None:
+                    self._active_prompt_screen = None
+                    self._prompt_callback = None
+                    self._prompt_type = PromptType.NONE
+                    if result:
+                        callback(result)
+
+                screen = PromptModal(message, options)
+                self._active_prompt_screen = screen
+                self.push_screen(screen, _handle)
             except Exception as e:
                 # Log error to activity - use internal method to avoid threading issues
                 log = self.query_one("#activity-log", RichLog)
@@ -595,11 +735,7 @@ class WorkflowTUIApp(App):
             self.call_from_thread(_show)
         except Exception:
             # Direct call as fallback
-            try:
-                prompt = self.query_one("#prompt-area", PromptWidget)
-                prompt.set_prompt(msg, opts)
-            except Exception:
-                pass
+            _show()
 
     def hide_prompt(self) -> None:
         """Hide prompt."""
@@ -607,33 +743,29 @@ class WorkflowTUIApp(App):
         self._prompt_callback = None
 
         def _hide():
-            prompt = self.query_one("#prompt-area", PromptWidget)
-            prompt.hide()
+            if self._active_prompt_screen:
+                self._active_prompt_screen.dismiss(None)
+                self._active_prompt_screen = None
 
         try:
             self.call_from_thread(_hide)
         except Exception:
-            try:
-                prompt = self.query_one("#prompt-area", PromptWidget)
-                prompt.hide()
-            except Exception:
-                pass
+            _hide()
 
     def show_text_input(self, label: str, default: str, callback: Callable) -> None:
         """Show text input prompt."""
         self._input_callback = callback
-        self._input_label = label
 
         def _show():
             try:
-                input_label = self.query_one("#input-label", InputPromptWidget)
-                input_label.show_input(label)
+                def _handle(result: Optional[str]) -> None:
+                    self._active_input_screen = None
+                    self._input_callback = None
+                    callback(result if result else None)
 
-                text_input = self.query_one("#text-input", Input)
-                text_input.value = default
-                text_input.placeholder = label
-                self.set_focus(text_input)
-                text_input.cursor_position = len(default)
+                screen = TextInputModal(label, default)
+                self._active_input_screen = screen
+                self.push_screen(screen, _handle)
             except Exception as e:
                 log = self.query_one("#activity-log", RichLog)
                 log.write(f"[#fb4934]⚠ Input error: {e}[/]")
@@ -641,57 +773,21 @@ class WorkflowTUIApp(App):
         try:
             self.call_from_thread(_show)
         except Exception:
-            try:
-                input_label = self.query_one("#input-label", InputPromptWidget)
-                input_label.show_input(label)
-                text_input = self.query_one("#text-input", Input)
-                text_input.value = default
-                text_input.placeholder = label
-                self.set_focus(text_input)
-                text_input.cursor_position = len(default)
-            except Exception:
-                pass
+            _show()
 
     def hide_text_input(self) -> None:
         """Reset text input prompt."""
         self._input_callback = None
-        self._input_label = ""
 
         def _hide():
-            try:
-                input_label = self.query_one("#input-label", InputPromptWidget)
-                input_label.hide()
-                text_input = self.query_one("#text-input", Input)
-                text_input.value = ""
-                text_input.placeholder = "Type message to AI..."
-            except Exception:
-                pass
+            if self._active_input_screen:
+                self._active_input_screen.dismiss(None)
+                self._active_input_screen = None
 
         try:
             self.call_from_thread(_hide)
         except Exception:
-            try:
-                self.query_one("#input-label", InputPromptWidget).hide()
-                text_input = self.query_one("#text-input", Input)
-                text_input.value = ""
-                text_input.placeholder = "Type message to AI..."
-            except Exception:
-                pass
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle text input submission."""
-        if self._input_callback and event.input.id == "text-input":
-            callback = self._input_callback
-            value = event.value.strip()
-            self.hide_text_input()
-            callback(value if value else None)
-
-    def on_key(self, event) -> None:
-        """Handle escape key to cancel text input."""
-        if event.key == "escape" and self._input_callback:
-            callback = self._input_callback
-            self.hide_text_input()
-            callback(None)  # None indicates cancelled
+            _hide()
 
     # -------------------------------------------------------------------------
     # Actions
@@ -699,76 +795,26 @@ class WorkflowTUIApp(App):
 
     def _text_input_active(self) -> bool:
         """Check if text input is currently active and should capture keys."""
-        return self._input_callback is not None
-
-    # Check methods - return False to skip binding and let Input widget handle key
-    def check_action_select_yes(self) -> bool:
-        return not self._text_input_active()
-
-    def check_action_select_no(self) -> bool:
-        return not self._text_input_active()
+        return self._input_callback is not None or self._active_input_screen is not None
 
     def check_action_quit_workflow(self) -> bool:
-        return not self._text_input_active()
-
-    def check_action_select_option_1(self) -> bool:
-        return not self._text_input_active()
-
-    def check_action_select_option_2(self) -> bool:
-        return not self._text_input_active()
-
-    def check_action_select_option_3(self) -> bool:
         return not self._text_input_active()
 
     def check_action_toggle_verbose(self) -> bool:
         return not self._text_input_active()
 
-    def action_select_yes(self) -> None:
-        if self._prompt_callback:
-            callback = self._prompt_callback
-            self.hide_prompt()
-            callback("yes")
-
-    def action_select_no(self) -> None:
-        if self._prompt_callback:
-            callback = self._prompt_callback
-            self.hide_prompt()
-            callback("no")
-
     def action_quit_workflow(self) -> None:
+        if self._active_prompt_screen:
+            self._active_prompt_screen.dismiss("quit")
+            return
         if self._prompt_callback:
             callback = self._prompt_callback
             self.hide_prompt()
             callback("quit")
-        else:
-            self._paused = True
-            self._workflow_result = "paused"
-            self.exit()
-
-    def action_select_option_1(self) -> None:
-        """Handle option 1 (Approve/Yes)."""
-        if self._prompt_callback:
-            callback = self._prompt_callback
-            self.hide_prompt()
-            callback("yes")
-
-    def action_select_option_2(self) -> None:
-        """Handle option 2 (Reject/No)."""
-        if self._prompt_callback:
-            callback = self._prompt_callback
-            self.hide_prompt()
-            callback("no")
-
-    def action_select_option_3(self) -> None:
-        """Handle option 3 (Quit)."""
-        if self._prompt_callback:
-            callback = self._prompt_callback
-            self.hide_prompt()
-            callback("quit")
-        else:
-            self._paused = True
-            self._workflow_result = "paused"
-            self.exit()
+            return
+        self._paused = True
+        self._workflow_result = "paused"
+        self.exit()
 
     def add_raw_line(self, line: str) -> None:
         """Store raw line and display if in verbose mode."""
@@ -804,6 +850,19 @@ class WorkflowTUIApp(App):
             # Replay recent activity
             for icon, activity in self._activity_lines[-30:]:
                 log.write(f"  {icon} {activity}")
+
+    def action_toggle_files(self) -> None:
+        self._files_visible = not self._files_visible
+        files = self.query_one("#files-container", FilesPanelWidget)
+        activity = self.query_one("#activity-container", VerticalScroll)
+
+        if self._files_visible:
+            files.display = True
+            files.styles.width = "25%"
+            activity.styles.width = "75%"
+        else:
+            files.display = False
+            activity.styles.width = "100%"
 
 
 # =============================================================================
