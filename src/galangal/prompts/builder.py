@@ -20,21 +20,46 @@ class PromptBuilder:
         self.defaults_dir = Path(__file__).parent / "defaults"
 
     def get_stage_prompt(self, stage: Stage) -> str:
-        """Get the base prompt for a stage, checking overrides first."""
+        """Get the prompt for a stage, with project override/supplement support.
+
+        Project prompts in .galangal/prompts/ can either:
+        - Supplement the base: Include '# BASE' marker where base prompt should be inserted
+        - Override entirely: No marker = full replacement of base prompt
+        """
         stage_lower = stage.value.lower()
 
-        # 1. Check for project override
-        override_path = self.override_dir / f"{stage_lower}.md"
-        if override_path.exists():
-            return override_path.read_text()
-
-        # 2. Fall back to default
+        # Get base prompt
         default_path = self.defaults_dir / f"{stage_lower}.md"
+        base_prompt = ""
         if default_path.exists():
-            return default_path.read_text()
+            base_prompt = default_path.read_text()
 
-        # 3. Minimal fallback
-        return f"Execute the {stage.value} stage for the task."
+        # Check for project prompt
+        project_path = self.override_dir / f"{stage_lower}.md"
+        if not project_path.exists():
+            return base_prompt or f"Execute the {stage.value} stage for the task."
+
+        project_prompt = project_path.read_text()
+
+        # Check for # BASE marker (supplement mode)
+        if "# BASE" in project_prompt:
+            # Split at marker and insert base prompt
+            parts = project_prompt.split("# BASE", 1)
+            header = parts[0].rstrip()
+            footer = parts[1].lstrip() if len(parts) > 1 else ""
+
+            result_parts = []
+            if header:
+                result_parts.append(header)
+            if base_prompt:
+                result_parts.append(base_prompt)
+            if footer:
+                result_parts.append(footer)
+
+            return "\n\n".join(result_parts)
+
+        # No marker = full override
+        return project_prompt
 
     def build_full_prompt(self, stage: Stage, state: WorkflowState) -> str:
         """Build the complete prompt for a stage execution."""
