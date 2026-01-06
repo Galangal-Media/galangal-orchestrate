@@ -2,6 +2,7 @@
 Textual TUI for stage execution display.
 """
 
+import threading
 import time
 from datetime import datetime
 from typing import Optional
@@ -102,7 +103,9 @@ class StageTUIApp(App):
     def on_mount(self) -> None:
         """Start the stage execution."""
         self._update_status_line()
-        self.run_worker(self._execute_stage, exclusive=True, thread=True)
+        # Use native threading to ensure we're in a separate thread
+        self._worker_thread = threading.Thread(target=self._execute_stage, daemon=True)
+        self._worker_thread.start()
 
     def _update_status_line(self) -> None:
         """Update the status line."""
@@ -172,8 +175,12 @@ class TUIAdapter(StageUI):
 
     def add_raw_line(self, line: str) -> None:
         if self.app.verbose:
-            log = self.app.query_one("#activity-log", RichLog)
-            self.app.call_from_thread(log.write, f"[dim]{line.strip()}[/dim]")
+            self.app.call_from_thread(self._write_raw_line, line.strip())
+
+    def _write_raw_line(self, line: str) -> None:
+        """Write a raw line to the activity log (runs in main thread)."""
+        log = self.app.query_one("#activity-log", RichLog)
+        log.write(f"[dim]{line}[/dim]")
 
     def set_turns(self, turns: int) -> None:
         self.app._turns = turns
