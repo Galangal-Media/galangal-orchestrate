@@ -2,6 +2,8 @@
 
 AI-driven development workflow orchestrator. A deterministic workflow system that guides AI assistants through structured development stages.
 
+**Note:** Currently designed for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with a Claude Pro or Max subscription. Support for other AI backends (Gemini, etc.) is planned for future releases.
+
 ## Features
 
 - **Structured Workflow**: PM → DESIGN → DEV → TEST → QA → SECURITY → REVIEW → DOCS
@@ -18,10 +20,20 @@ AI-driven development workflow orchestrator. A deterministic workflow system tha
 pip install galangal-orchestrate
 ```
 
-Or with pipx for global install:
+Or with pipx for isolated global install (recommended):
 
 ```bash
 pipx install galangal-orchestrate
+```
+
+### Updating
+
+```bash
+# If installed with pip
+pip install --upgrade galangal-orchestrate
+
+# If installed with pipx
+pipx upgrade galangal-orchestrate
 ```
 
 ## Quick Start
@@ -222,7 +234,8 @@ stage_context:
 ## Requirements
 
 - Python 3.10+
-- Claude CLI (`claude` command available)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI installed (`claude` command available)
+- Claude Pro or Max subscription
 - Git
 
 ## License
