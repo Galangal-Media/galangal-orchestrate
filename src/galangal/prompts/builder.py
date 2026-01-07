@@ -131,6 +131,13 @@ Only update documentation types marked as YES above.""")
                     f"\n# Note: Design stage was skipped\n{read_artifact('DESIGN_SKIP.md', task_name)}"
                 )
 
+        # DEVELOPMENT.md for DEV stage (progress tracking for resume)
+        if stage == Stage.DEV:
+            if artifact_exists("DEVELOPMENT.md", task_name):
+                parts.append(
+                    f"\n# DEVELOPMENT.md (Previous progress - continue from here)\n{read_artifact('DEVELOPMENT.md', task_name)}"
+                )
+
         # ROLLBACK for DEV and TEST (issues to fix)
         if stage in [Stage.DEV, Stage.TEST]:
             if artifact_exists("ROLLBACK.md", task_name):
