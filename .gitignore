@@ -65,3 +65,7 @@ sandbox/
 # Galangal task artifacts
 galangal-tasks/
 /CLAUDE.md
+
+# Ideas (local brainstorming)
+ideas/
+.test_venv

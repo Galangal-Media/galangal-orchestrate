@@ -1,5 +1,5 @@
 """
-Textual TUI for workflow execution display.
+Main Textual TUI application for workflow execution.
 
 Layout:
 ┌──────────────────────────────────────────────────────────────────┐
@@ -22,447 +22,21 @@ Layout:
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
 
-from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical, VerticalScroll
-from textual.reactive import reactive
-from textual.screen import ModalScreen
-from textual.widgets import Footer, Input, RichLog, Static
-
-from galangal.ai.claude import ClaudeBackend
-from galangal.core.state import STAGE_ORDER
-
-
-class PromptType(Enum):
-    """Types of prompts the TUI can show."""
-    NONE = "none"
-    PLAN_APPROVAL = "plan_approval"
-    DESIGN_APPROVAL = "design_approval"
-    COMPLETION = "completion"
-    TEXT_INPUT = "text_input"
-    PREFLIGHT_RETRY = "preflight_retry"
-    STAGE_FAILURE = "stage_failure"
-    POST_COMPLETION = "post_completion"
-    TASK_TYPE = "task_type"
-
-
-class StageUI:
-    """Interface for stage execution UI updates."""
-
-    def set_status(self, status: str, detail: str = "") -> None:
-        pass
-
-    def add_activity(self, activity: str, icon: str = "•") -> None:
-        pass
-
-    def add_raw_line(self, line: str) -> None:
-        pass
-
-    def set_turns(self, turns: int) -> None:
-        pass
-
-    def finish(self, success: bool) -> None:
-        pass
-
-
-# =============================================================================
-# Custom Widgets
-# =============================================================================
-
-
-class HeaderWidget(Static):
-    """Fixed header showing task info."""
-
-    task_name: reactive[str] = reactive("")
-    stage: reactive[str] = reactive("")
-    attempt: reactive[int] = reactive(1)
-    max_retries: reactive[int] = reactive(5)
-    elapsed: reactive[str] = reactive("0:00")
-    turns: reactive[int] = reactive(0)
-    status: reactive[str] = reactive("starting")
-
-    def render(self) -> Text:
-        text = Text()
-
-        # Row 1: Task, Stage, Attempt
-        text.append("Task: ", style="#928374")
-        text.append(self.task_name[:30], style="bold #83a598")
-        text.append("  Stage: ", style="#928374")
-        text.append(f"{self.stage}", style="bold #fabd2f")
-        text.append(f" ({self.attempt}/{self.max_retries})", style="#928374")
-        text.append("  Elapsed: ", style="#928374")
-        text.append(self.elapsed, style="bold #ebdbb2")
-        text.append("  Turns: ", style="#928374")
-        text.append(str(self.turns), style="bold #b8bb26")
-
-        return text
-
-
-class StageProgressWidget(Static):
-    """Centered stage progress bar with full names."""
-
-    current_stage: reactive[str] = reactive("PM")
-    skipped_stages: reactive[frozenset] = reactive(frozenset())
-    hidden_stages: reactive[frozenset] = reactive(frozenset())
-
-    # Full stage display names
-    STAGE_DISPLAY = {
-        "PM": "PM",
-        "DESIGN": "DESIGN",
-        "PREFLIGHT": "PREFLIGHT",
-        "DEV": "DEV",
-        "MIGRATION": "MIGRATION",
-        "TEST": "TEST",
-        "CONTRACT": "CONTRACT",
-        "QA": "QA",
-        "BENCHMARK": "BENCHMARK",
-        "SECURITY": "SECURITY",
-        "REVIEW": "REVIEW",
-        "DOCS": "DOCS",
-        "COMPLETE": "COMPLETE",
-    }
-
-    STAGE_COMPACT = {
-        "PM": "PM",
-        "DESIGN": "DSGN",
-        "PREFLIGHT": "PREF",
-        "DEV": "DEV",
-        "MIGRATION": "MIGR",
-        "TEST": "TEST",
-        "CONTRACT": "CNTR",
-        "QA": "QA",
-        "BENCHMARK": "BENCH",
-        "SECURITY": "SEC",
-        "REVIEW": "RVW",
-        "DOCS": "DOCS",
-        "COMPLETE": "DONE",
-    }
-
-    def render(self) -> Text:
-        text = Text(justify="center")
-
-        # Filter out hidden stages (task type + config skips)
-        visible_stages = [s for s in STAGE_ORDER if s.value not in self.hidden_stages]
-
-        try:
-            current_idx = next(
-                i for i, s in enumerate(visible_stages)
-                if s.value == self.current_stage
-            )
-        except StopIteration:
-            current_idx = 0
-
-        width = self.size.width or 0
-        use_window = width and width < 70
-        use_compact = width and width < 110
-        display_names = self.STAGE_COMPACT if use_compact else self.STAGE_DISPLAY
-
-        stages = visible_stages
-        if use_window:
-            start = max(current_idx - 2, 0)
-            end = min(current_idx + 3, len(stages))
-            items: list[int | None] = []
-            if start > 0:
-                items.append(None)
-            items.extend(range(start, end))
-            if end < len(stages):
-                items.append(None)
-        else:
-            items = list(range(len(stages)))
-
-        for idx, stage_idx in enumerate(items):
-            if idx > 0:
-                text.append(" ━ ", style="#504945")
-            if stage_idx is None:
-                text.append("...", style="#504945")
-                continue
-
-            stage = stages[stage_idx]
-            name = display_names.get(stage.value, stage.value)
-
-            if stage.value in self.skipped_stages:
-                text.append(f"⊘ {name}", style="#504945 strike")
-            elif stage_idx < current_idx:
-                text.append(f"● {name}", style="#b8bb26")
-            elif stage_idx == current_idx:
-                text.append(f"◉ {name}", style="bold #fabd2f")
-            else:
-                text.append(f"○ {name}", style="#504945")
-
-        return text
-
-
-class CurrentActionWidget(Static):
-    """Shows the current action with animated spinner."""
-
-    action: reactive[str] = reactive("")
-    detail: reactive[str] = reactive("")
-    spinner_frame: reactive[int] = reactive(0)
-
-    SPINNERS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-
-    def render(self) -> Text:
-        text = Text()
-        if self.action:
-            spinner = self.SPINNERS[self.spinner_frame % len(self.SPINNERS)]
-            text.append(f"{spinner} ", style="#83a598")
-            text.append(self.action, style="bold #ebdbb2")
-            if self.detail:
-                detail = self.detail
-                width = self.size.width or 0
-                if width:
-                    reserved = len(self.action) + 4
-                    max_detail = max(width - reserved, 0)
-                    if max_detail and len(detail) > max_detail:
-                        if max_detail > 3:
-                            detail = detail[: max_detail - 3] + "..."
-                        else:
-                            detail = ""
-                if not detail:
-                    return text
-                text.append(f": {detail}", style="#928374")
-        else:
-            text.append("○ Idle", style="#504945")
-        return text
-
-
-class FilesPanelWidget(Static):
-    """Panel showing files that have been read/written."""
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._files: list[tuple[str, str]] = []
-
-    def add_file(self, action: str, path: str) -> None:
-        """Add a file operation."""
-        entry = (action, path)
-        if entry not in self._files:
-            self._files.append(entry)
-            self.refresh()
-
-    def render(self) -> Text:
-        width = self.size.width or 24
-        divider_width = max(width - 1, 1)
-        text = Text()
-        text.append("Files\n", style="bold #928374")
-        text.append("─" * divider_width + "\n", style="#504945")
-
-        if not self._files:
-            text.append("(none yet)", style="#504945 italic")
-        else:
-            # Show last 20 files
-            for action, path in self._files[-20:]:
-                display_path = path
-                if "/" in display_path:
-                    parts = display_path.split("/")
-                    display_path = "/".join(parts[-2:])
-                max_len = max(width - 4, 1)
-                if len(display_path) > max_len:
-                    if max_len > 3:
-                        display_path = display_path[: max_len - 3] + "..."
-                    else:
-                        display_path = display_path[:max_len]
-                icon = "✏️" if action == "write" else "📖"
-                color = "#b8bb26" if action == "write" else "#83a598"
-                text.append(f"{icon} ", style=color)
-                text.append(f"{display_path}\n", style="#ebdbb2")
-
-        return text
-
-
-# =============================================================================
-# Prompt Modal
-# =============================================================================
-
-
-@dataclass(frozen=True)
-class PromptOption:
-    key: str
-    label: str
-    result: str
-    color: str
-
-
-class PromptModal(ModalScreen):
-    """Modal prompt for multi-choice selections."""
-
-    CSS = """
-    PromptModal {
-        align: center middle;
-        layout: vertical;
-    }
-
-    #prompt-dialog {
-        width: 90%;
-        max-width: 120;
-        min-width: 50;
-        max-height: 80%;
-        background: #3c3836;
-        border: round #504945;
-        padding: 1 2;
-        layout: vertical;
-        overflow-y: auto;
-    }
-
-    #prompt-message {
-        color: #ebdbb2;
-        text-style: bold;
-        margin-bottom: 1;
-        text-wrap: wrap;
-    }
-
-    #prompt-options {
-        color: #ebdbb2;
-    }
-
-    #prompt-hint {
-        color: #7c6f64;
-        margin-top: 1;
-    }
-    """
-
-    BINDINGS = [
-        Binding("1", "choose_1", show=False),
-        Binding("2", "choose_2", show=False),
-        Binding("3", "choose_3", show=False),
-        Binding("4", "choose_4", show=False),
-        Binding("5", "choose_5", show=False),
-        Binding("6", "choose_6", show=False),
-        Binding("y", "choose_yes", show=False),
-        Binding("n", "choose_no", show=False),
-        Binding("q", "choose_quit", show=False),
-        Binding("escape", "choose_quit", show=False),
-    ]
-
-    def __init__(self, message: str, options: list[PromptOption]):
-        super().__init__()
-        self._message = message
-        self._options = options
-        self._key_map = {option.key: option.result for option in options}
-
-    def compose(self) -> ComposeResult:
-        options_text = "\n".join(
-            f"[{option.color}]{option.key}[/] {option.label}" for option in self._options
-        )
-        # Dynamic hint based on number of options
-        max_key = max((int(o.key) for o in self._options if o.key.isdigit()), default=3)
-        hint = f"Press 1-{max_key} to choose, Esc to cancel"
-        with Vertical(id="prompt-dialog"):
-            yield Static(self._message, id="prompt-message")
-            yield Static(Text.from_markup(options_text), id="prompt-options")
-            yield Static(hint, id="prompt-hint")
-
-    def _submit_key(self, key: str) -> None:
-        result = self._key_map.get(key)
-        if result:
-            self.dismiss(result)
-
-    def action_choose_1(self) -> None:
-        self._submit_key("1")
-
-    def action_choose_2(self) -> None:
-        self._submit_key("2")
-
-    def action_choose_3(self) -> None:
-        self._submit_key("3")
-
-    def action_choose_4(self) -> None:
-        self._submit_key("4")
-
-    def action_choose_5(self) -> None:
-        self._submit_key("5")
-
-    def action_choose_6(self) -> None:
-        self._submit_key("6")
-
-    def action_choose_yes(self) -> None:
-        self.dismiss("yes")
-
-    def action_choose_no(self) -> None:
-        self.dismiss("no")
-
-    def action_choose_quit(self) -> None:
-        self.dismiss("quit")
-
-
-# =============================================================================
-# Text Input Modal
-# =============================================================================
-
-
-class TextInputModal(ModalScreen):
-    """Modal for collecting short text input."""
-
-    CSS = """
-    TextInputModal {
-        align: center middle;
-        layout: vertical;
-    }
-
-    #text-input-dialog {
-        width: 70%;
-        max-width: 80;
-        min-width: 40;
-        background: #3c3836;
-        border: round #504945;
-        padding: 1 2;
-        layout: vertical;
-    }
-
-    #text-input-label {
-        color: #ebdbb2;
-        text-style: bold;
-        margin-bottom: 1;
-        text-wrap: wrap;
-    }
-
-    #text-input-field {
-        width: 100%;
-    }
-
-    #text-input-hint {
-        color: #7c6f64;
-        margin-top: 1;
-    }
-    """
-
-    BINDINGS = [
-        Binding("escape", "cancel", show=False),
-    ]
-
-    def __init__(self, label: str, default: str = ""):
-        super().__init__()
-        self._label = label
-        self._default = default
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="text-input-dialog"):
-            yield Static(self._label, id="text-input-label")
-            yield Input(value=self._default, placeholder=self._label, id="text-input-field")
-            yield Static("Press Enter to submit, Esc to cancel", id="text-input-hint")
-
-    def on_mount(self) -> None:
-        field = self.query_one("#text-input-field", Input)
-        self.set_focus(field)
-        field.cursor_position = len(field.value)
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "text-input-field":
-            value = event.value.strip()
-            self.dismiss(value if value else None)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-
-# =============================================================================
-# Main TUI App
-# =============================================================================
+from textual.containers import Container, Horizontal, VerticalScroll
+from textual.widgets import Footer, RichLog
+
+from galangal.ui.tui.adapters import PromptType, TUIAdapter
+from galangal.ui.tui.modals import PromptModal, PromptOption, TextInputModal
+from galangal.ui.tui.widgets import (
+    CurrentActionWidget,
+    FilesPanelWidget,
+    HeaderWidget,
+    StageProgressWidget,
+)
 
 
 class WorkflowTUIApp(App):
@@ -652,6 +226,7 @@ class WorkflowTUIApp(App):
 
     def set_status(self, status: str, detail: str = "") -> None:
         """Update current action display."""
+
         def _update():
             action = self.query_one("#current-action", CurrentActionWidget)
             action.action = status
@@ -694,6 +269,7 @@ class WorkflowTUIApp(App):
 
     def add_file(self, action: str, path: str) -> None:
         """Add file to files panel."""
+
         def _add():
             files = self.query_one("#files-container", FilesPanelWidget)
             files.add_file(action, path)
@@ -768,14 +344,18 @@ class WorkflowTUIApp(App):
                 PromptOption("5", "Docs - Documentation only", "docs", "#d3869b"),
                 PromptOption("6", "Hotfix - Critical fix", "hotfix", "#fe8019"),
             ],
-        }.get(prompt_type, [
-            PromptOption("1", "Yes", "yes", "#b8bb26"),
-            PromptOption("2", "No", "no", "#fb4934"),
-            PromptOption("3", "Quit", "quit", "#fabd2f"),
-        ])
+        }.get(
+            prompt_type,
+            [
+                PromptOption("1", "Yes", "yes", "#b8bb26"),
+                PromptOption("2", "No", "no", "#fb4934"),
+                PromptOption("3", "Quit", "quit", "#fabd2f"),
+            ],
+        )
 
         def _show():
             try:
+
                 def _handle(result: str | None) -> None:
                     self._active_prompt_screen = None
                     self._prompt_callback = None
@@ -818,6 +398,7 @@ class WorkflowTUIApp(App):
 
         def _show():
             try:
+
                 def _handle(result: str | None) -> None:
                     self._active_input_screen = None
                     self._input_callback = None
@@ -925,82 +506,6 @@ class WorkflowTUIApp(App):
             activity.styles.width = "100%"
 
 
-# =============================================================================
-# TUI Adapter for ClaudeBackend
-# =============================================================================
-
-
-class TUIAdapter(StageUI):
-    """Adapter to connect ClaudeBackend to TUI."""
-
-    def __init__(self, app: WorkflowTUIApp):
-        self.app = app
-
-    def set_status(self, status: str, detail: str = "") -> None:
-        self.app.set_status(status, detail)
-
-    def add_activity(self, activity: str, icon: str = "•") -> None:
-        self.app.add_activity(activity, icon)
-
-        # Track file operations
-        if "Read:" in activity or "📖" in activity:
-            path = activity.split(":")[-1].strip() if ":" in activity else activity
-            self.app.add_file("read", path)
-        elif "Edit:" in activity or "Write:" in activity or "✏️" in activity:
-            path = activity.split(":")[-1].strip() if ":" in activity else activity
-            self.app.add_file("write", path)
-
-    def add_raw_line(self, line: str) -> None:
-        """Pass raw line to app for storage and display."""
-        self.app.add_raw_line(line)
-
-    def set_turns(self, turns: int) -> None:
-        self.app.set_turns(turns)
-
-    def finish(self, success: bool) -> None:
-        pass
-
-
-# =============================================================================
-# Simple Console UI (fallback)
-# =============================================================================
-
-
-class SimpleConsoleUI(StageUI):
-    """Simple console-based UI without Textual."""
-
-    def __init__(self, task_name: str, stage: str):
-        from rich.console import Console
-        self.console = Console()
-        self.task_name = task_name
-        self.stage = stage
-        self.turns = 0
-
-    def set_status(self, status: str, detail: str = "") -> None:
-        self.console.print(f"[dim]{status}: {detail}[/dim]")
-
-    def add_activity(self, activity: str, icon: str = "•") -> None:
-        self.console.print(f"  {icon} {activity}")
-
-    def add_raw_line(self, line: str) -> None:
-        pass
-
-    def set_turns(self, turns: int) -> None:
-        self.turns = turns
-        self.console.print(f"[dim]Turn {turns}[/dim]")
-
-    def finish(self, success: bool) -> None:
-        if success:
-            self.console.print(f"[green]✓ {self.stage} completed[/green]")
-        else:
-            self.console.print(f"[red]✗ {self.stage} failed[/red]")
-
-
-# =============================================================================
-# Legacy single-stage TUI (backward compatible)
-# =============================================================================
-
-
 class StageTUIApp(WorkflowTUIApp):
     """Single-stage TUI app."""
 
@@ -1024,6 +529,8 @@ class StageTUIApp(WorkflowTUIApp):
         self._worker_thread.start()
 
     def _execute_stage(self) -> None:
+        from galangal.ai.claude import ClaudeBackend
+
         backend = ClaudeBackend()
         ui = TUIAdapter(self)
 
@@ -1041,62 +548,3 @@ class StageTUIApp(WorkflowTUIApp):
             self.call_from_thread(self.add_activity, "[#fb4934]Stage failed[/]", "✗")
 
         self.call_from_thread(self.set_timer, 1.5, self.exit)
-
-
-# =============================================================================
-# Entry Points
-# =============================================================================
-
-
-def _run_simple_mode(
-    task_name: str,
-    stage: str,
-    attempt: int,
-    prompt: str,
-) -> tuple[bool, str]:
-    """Run stage without TUI."""
-    from rich.console import Console
-    console = Console()
-    console.print(f"\n[bold]Running {stage}[/bold] (attempt {attempt})")
-
-    backend = ClaudeBackend()
-    ui = SimpleConsoleUI(task_name, stage)
-
-    result = backend.invoke(
-        prompt=prompt,
-        timeout=14400,
-        max_turns=200,
-        ui=ui,
-    )
-    ui.finish(result[0])
-    return result
-
-
-def run_stage_with_tui(
-    task_name: str,
-    stage: str,
-    branch: str,
-    attempt: int,
-    prompt: str,
-) -> tuple[bool, str]:
-    """Run a single stage with TUI."""
-    import os
-
-    if os.environ.get("GALANGAL_NO_TUI"):
-        return _run_simple_mode(task_name, stage, attempt, prompt)
-
-    try:
-        app = StageTUIApp(
-            task_name=task_name,
-            stage=stage,
-            branch=branch,
-            attempt=attempt,
-            prompt=prompt,
-        )
-        app.run()
-        return app.result
-    except Exception as e:
-        from rich.console import Console
-        console = Console()
-        console.print(f"[yellow]TUI error: {e}. Falling back to simple mode.[/yellow]")
-        return _run_simple_mode(task_name, stage, attempt, prompt)
