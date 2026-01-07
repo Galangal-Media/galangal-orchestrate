@@ -126,6 +126,35 @@ class AIConfig(BaseModel):
     )
 
 
+class DocsConfig(BaseModel):
+    """Documentation paths configuration."""
+
+    changelog: str = Field(
+        default="CHANGELOG.md",
+        description="Path to changelog file",
+    )
+    security_audit: str = Field(
+        default="docs/security",
+        description="Directory for security audit reports",
+    )
+    general: str = Field(
+        default="docs",
+        description="Directory for general documentation",
+    )
+    update_changelog: bool = Field(
+        default=True,
+        description="Whether to update the changelog during DOCS stage",
+    )
+    update_security_audit: bool = Field(
+        default=True,
+        description="Whether to create/update security audit reports during SECURITY stage",
+    )
+    update_general_docs: bool = Field(
+        default=True,
+        description="Whether to update general documentation during DOCS stage",
+    )
+
+
 class PRConfig(BaseModel):
     """Pull request configuration."""
 
@@ -147,6 +176,7 @@ class GalangalConfig(BaseModel):
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
     pr: PRConfig = Field(default_factory=PRConfig)
+    docs: DocsConfig = Field(default_factory=DocsConfig)
     prompt_context: str = Field(
         default="", description="Global context added to all prompts"
     )

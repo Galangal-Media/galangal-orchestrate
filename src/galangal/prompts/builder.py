@@ -92,6 +92,23 @@ class PromptBuilder:
         if stage_context:
             context_parts.append(f"\n# Stage Context\n{stage_context}")
 
+        # Add documentation config for DOCS and SECURITY stages
+        if stage in [Stage.DOCS, Stage.SECURITY]:
+            docs_config = self.config.docs
+            context_parts.append(f"""
+# Documentation Configuration
+## Paths
+- Changelog: {docs_config.changelog}
+- Security Audit Directory: {docs_config.security_audit}
+- General Documentation: {docs_config.general}
+
+## What to Update
+- Update Changelog: {"YES" if docs_config.update_changelog else "NO - Skip changelog updates"}
+- Update Security Audit: {"YES" if docs_config.update_security_audit else "NO - Skip security audit docs"}
+- Update General Docs: {"YES" if docs_config.update_general_docs else "NO - Skip general documentation"}
+
+Only update documentation types marked as YES above.""")
+
         context = "\n".join(context_parts)
         return f"{context}\n\n---\n\n{base_prompt}"
 
