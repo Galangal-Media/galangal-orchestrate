@@ -54,6 +54,18 @@ class ValidationRunner:
                 self._write_skip_artifact(stage, task_name, "Condition met")
                 return ValidationResult(True, f"{stage} skipped (condition met)")
 
+        # SECURITY stage: if checklist says APPROVED, skip validation commands
+        # (the AI has already run scans and documented waivers)
+        if stage_lower == "security":
+            if artifact_exists("SECURITY_CHECKLIST.md", task_name):
+                checklist = read_artifact("SECURITY_CHECKLIST.md", task_name) or ""
+                if "APPROVED" in checklist.upper():
+                    return ValidationResult(True, "Security review approved")
+                if "REJECTED" in checklist.upper() or "BLOCKED" in checklist.upper():
+                    return ValidationResult(
+                        False, "Security review found blocking issues", rollback_to="DEV"
+                    )
+
         # Run preflight checks (for PREFLIGHT stage)
         if stage_config.checks:
             result = self._run_preflight_checks(stage_config.checks, task_name)
@@ -204,8 +216,12 @@ Reason: {reason}
         write_artifact("PREFLIGHT_REPORT.md", report, task_name)
 
         if all_ok:
-            return ValidationResult(True, "Preflight checks passed")
-        return ValidationResult(False, "Preflight checks failed - fix environment issues")
+            return ValidationResult(True, "Preflight checks passed", output=report)
+        return ValidationResult(
+            False,
+            "Preflight checks failed - fix environment issues",
+            output=report,
+        )
 
     def _filter_task_files(self, git_status: str, task_name: str) -> str:
         """Filter out task-related files from git status output."""
@@ -340,13 +356,21 @@ Reason: {reason}
                 return ValidationResult(True, "QA passed")
             return ValidationResult(False, "QA failed", rollback_to="DEV")
 
-        # SECURITY stage - check for SECURITY_CHECKLIST.md or skip
+        # SECURITY stage - check for SECURITY_CHECKLIST.md with APPROVED
         if stage_upper == "SECURITY":
             if artifact_exists("SECURITY_SKIP.md", task_name):
                 return ValidationResult(True, "Security skipped")
             if not artifact_exists("SECURITY_CHECKLIST.md", task_name):
                 return ValidationResult(False, "SECURITY_CHECKLIST.md not found")
-            return ValidationResult(True, "Security stage validated")
+            checklist = read_artifact("SECURITY_CHECKLIST.md", task_name) or ""
+            if "APPROVED" in checklist.upper():
+                return ValidationResult(True, "Security review approved")
+            if "REJECTED" in checklist.upper() or "BLOCKED" in checklist.upper():
+                return ValidationResult(
+                    False, "Security review found blocking issues", rollback_to="DEV"
+                )
+            # Checklist exists but no clear marker - pass with warning
+            return ValidationResult(True, "Security checklist created")
 
         # REVIEW stage - check for REVIEW_NOTES.md with APPROVE
         if stage_upper == "REVIEW":

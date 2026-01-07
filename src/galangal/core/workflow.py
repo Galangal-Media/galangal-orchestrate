@@ -143,13 +143,12 @@ def execute_stage(state: WorkflowState, tui_app: WorkflowTUIApp = None) -> tuple
                 console.print(f"[green]✓ Preflight: {result.message}[/green]")
             return True, result.message
         else:
-            if tui_app:
-                tui_app.show_message(f"Preflight: {result.message}", "error")
-                tui_app.show_message("Fix environment issues before continuing", "warning")
-            else:
-                console.print(f"[red]✗ Preflight: {result.message}[/red]")
-                console.print("[yellow]  Fix environment issues before continuing.[/yellow]")
-            return False, result.message
+            # Include detailed output in the failure message for display
+            detailed_message = result.message
+            if result.output:
+                detailed_message = f"{result.message}\n\n{result.output}"
+            # Return special marker so workflow knows this is preflight failure
+            return False, f"PREFLIGHT_FAILED:{detailed_message}"
 
     # Get current branch for UI
     branch = get_current_branch()
@@ -230,6 +229,10 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
             tui_app.show_message(result.message, "error")
         else:
             console.print(f"[red]✗ {result.message}[/red]")
+
+    # Include rollback target in message if validation failed
+    if not result.success and result.rollback_to:
+        return False, f"ROLLBACK:{result.rollback_to}:{result.message}"
 
     return result.success, result.message
 
@@ -375,6 +378,38 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                 if not success:
                     app.show_stage_complete(state.stage.value, False)
 
+                    # Handle preflight failures specially - don't auto-retry
+                    if message.startswith("PREFLIGHT_FAILED:"):
+                        detailed_error = message[len("PREFLIGHT_FAILED:") :]
+                        app.show_message("Preflight checks failed", "error")
+                        # Show the detailed report in the activity log
+                        for line in detailed_error.strip().split("\n"):
+                            if line.strip():
+                                app.add_activity(line)
+
+                        # Prompt user to retry after fixing
+                        retry_event = threading.Event()
+                        retry_result = {"value": None}
+
+                        def handle_preflight_retry(choice):
+                            retry_result["value"] = choice
+                            retry_event.set()
+
+                        app.show_prompt(
+                            PromptType.PREFLIGHT_RETRY,
+                            "Fix environment issues and retry?",
+                            handle_preflight_retry,
+                        )
+
+                        retry_event.wait()
+                        if retry_result["value"] == "retry":
+                            app.show_message("Retrying preflight checks...", "info")
+                            continue  # Retry without incrementing attempt
+                        else:
+                            save_state(state)
+                            app._workflow_result = "paused"
+                            break
+
                     if state.awaiting_approval or state.clarification_required:
                         app.show_message(message, "warning")
                         save_state(state)
@@ -389,10 +424,60 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     state.last_failure = message
 
                     if state.attempt > max_retries:
-                        app.show_message(f"Max retries ({max_retries}) exceeded", "error")
-                        save_state(state)
-                        app._workflow_result = "failed"
-                        break
+                        app.show_message(f"Max retries ({max_retries}) exceeded for {state.stage.value}", "error")
+                        # Show the failure details in the activity log
+                        app.add_activity("")
+                        app.add_activity("[bold red]Last failure:[/bold red]")
+                        for line in message[:2000].split("\n"):
+                            if line.strip():
+                                app.add_activity(f"  {line}")
+
+                        # Prompt user for what to do
+                        failure_event = threading.Event()
+                        failure_result = {"value": None, "feedback": None}
+
+                        def handle_failure_choice(choice):
+                            failure_result["value"] = choice
+                            if choice == "fix_in_dev":
+                                # Need to get feedback first
+                                def handle_feedback(feedback):
+                                    failure_result["feedback"] = feedback
+                                    failure_event.set()
+
+                                app.show_text_input(
+                                    "Describe what needs to be fixed:",
+                                    handle_feedback,
+                                )
+                            else:
+                                failure_event.set()
+
+                        app.show_prompt(
+                            PromptType.STAGE_FAILURE,
+                            f"Stage {state.stage.value} failed after {max_retries} attempts. What would you like to do?",
+                            handle_failure_choice,
+                        )
+
+                        failure_event.wait()
+
+                        if failure_result["value"] == "retry":
+                            state.attempt = 1  # Reset attempts
+                            app.show_message("Retrying stage...", "info")
+                            save_state(state)
+                            continue
+                        elif failure_result["value"] == "fix_in_dev":
+                            feedback = failure_result["feedback"] or "Fix the failing stage"
+                            # Roll back to DEV with feedback
+                            failing_stage = state.stage.value
+                            state.stage = Stage.DEV
+                            state.attempt = 1
+                            state.last_failure = f"Feedback from {failing_stage} failure: {feedback}\n\nOriginal error:\n{message[:1500]}"
+                            app.show_message(f"Rolling back to DEV with feedback", "warning")
+                            save_state(state)
+                            continue
+                        else:
+                            save_state(state)
+                            app._workflow_result = "paused"
+                            break
 
                     app.show_message(f"Retrying (attempt {state.attempt}/{max_retries})...", "warning")
                     save_state(state)
@@ -582,6 +667,29 @@ def _run_workflow_legacy(state: WorkflowState) -> None:
                     return
 
                 if not success:
+                    # Handle preflight failures specially - don't auto-retry
+                    if message.startswith("PREFLIGHT_FAILED:"):
+                        detailed_error = message[len("PREFLIGHT_FAILED:") :]
+                        console.print("\n[red]✗ Preflight checks failed[/red]\n")
+                        console.print(detailed_error)
+                        console.print()
+
+                        # Prompt user to retry after fixing
+                        while True:
+                            console.print("[yellow]Fix environment issues and retry?[/yellow]")
+                            console.print("  [bold]1[/bold] Retry")
+                            console.print("  [bold]2[/bold] Quit")
+                            choice = console.input("\n[bold]Choice:[/bold] ").strip()
+                            if choice == "1":
+                                console.print("\n[dim]Retrying preflight checks...[/dim]")
+                                break  # Break out of while loop, continue outer loop
+                            elif choice == "2":
+                                save_state(state)
+                                return
+                            else:
+                                console.print("[red]Invalid choice. Please enter 1 or 2.[/red]\n")
+                        continue  # Retry without incrementing attempt
+
                     if state.awaiting_approval or state.clarification_required:
                         console.print(f"\n{message}")
                         save_state(state)
@@ -597,9 +705,40 @@ def _run_workflow_legacy(state: WorkflowState) -> None:
                         console.print(
                             f"\n[red]Max retries ({max_retries}) exceeded for stage {state.stage.value}[/red]"
                         )
-                        console.print(f"Last failure: {message}")
-                        save_state(state)
-                        return
+                        console.print("\n[bold]Last failure:[/bold]")
+                        console.print(message[:2000])
+                        console.print()
+
+                        # Prompt user for what to do
+                        while True:
+                            console.print(f"[yellow]Stage {state.stage.value} failed after {max_retries} attempts. What would you like to do?[/yellow]")
+                            console.print("  [bold]1[/bold] Retry (reset attempts)")
+                            console.print("  [bold]2[/bold] Fix in DEV (add feedback and roll back)")
+                            console.print("  [bold]3[/bold] Quit")
+                            choice = console.input("\n[bold]Choice:[/bold] ").strip()
+
+                            if choice == "1":
+                                state.attempt = 1  # Reset attempts
+                                console.print("\n[dim]Retrying stage...[/dim]")
+                                save_state(state)
+                                break
+                            elif choice == "2":
+                                feedback = console.input("\n[bold]Describe what needs to be fixed:[/bold] ").strip()
+                                if not feedback:
+                                    feedback = "Fix the failing stage"
+                                failing_stage = state.stage.value
+                                state.stage = Stage.DEV
+                                state.attempt = 1
+                                state.last_failure = f"Feedback from {failing_stage} failure: {feedback}\n\nOriginal error:\n{message[:1500]}"
+                                console.print("\n[yellow]Rolling back to DEV with feedback[/yellow]")
+                                save_state(state)
+                                break
+                            elif choice == "3":
+                                save_state(state)
+                                return
+                            else:
+                                console.print("[red]Invalid choice. Please enter 1, 2, or 3.[/red]\n")
+                        continue
 
                     console.print(
                         f"\n[yellow]Stage failed, retrying (attempt {state.attempt}/{max_retries})...[/yellow]"

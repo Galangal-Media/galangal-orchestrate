@@ -45,6 +45,8 @@ class PromptType(Enum):
     DESIGN_APPROVAL = "design_approval"
     COMPLETION = "completion"
     TEXT_INPUT = "text_input"
+    PREFLIGHT_RETRY = "preflight_retry"
+    STAGE_FAILURE = "stage_failure"
 
 
 class StageUI:
@@ -719,6 +721,15 @@ class WorkflowTUIApp(App):
                 PromptOption("1", "Create PR", "yes", "#b8bb26"),
                 PromptOption("2", "Back to DEV", "no", "#fb4934"),
                 PromptOption("3", "Quit", "quit", "#fabd2f"),
+            ],
+            PromptType.PREFLIGHT_RETRY: [
+                PromptOption("1", "Retry", "retry", "#b8bb26"),
+                PromptOption("2", "Quit", "quit", "#fb4934"),
+            ],
+            PromptType.STAGE_FAILURE: [
+                PromptOption("1", "Retry", "retry", "#b8bb26"),
+                PromptOption("2", "Fix in DEV", "fix_in_dev", "#fabd2f"),
+                PromptOption("3", "Quit", "quit", "#fb4934"),
             ],
         }.get(prompt_type, [
             PromptOption("1", "Yes", "yes", "#b8bb26"),
