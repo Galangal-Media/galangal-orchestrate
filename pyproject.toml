@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "galangal-orchestrate"
-version = "0.2.14"
+version = "0.2.15"
 description = "AI-driven development workflow orchestrator"
 readme = "README.md"
 license = "MIT"

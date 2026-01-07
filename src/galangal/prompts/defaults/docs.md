@@ -16,19 +16,28 @@ Check the "Documentation Configuration" section in the context above for:
 
 ## Changelog Structure
 
-Changelogs are organized in a directory structure by year and month:
+Changelogs are organized in a directory structure by year/month/day, with time-prefixed filenames:
 
 ```
 {changelog_dir}/
 ├── 2025/
 │   ├── 01/
-│   │   ├── add-user-authentication.md
-│   │   └── fix-login-bug.md
+│   │   ├── 05/
+│   │   │   └── 143052-add-user-authentication.md
+│   │   └── 07/
+│   │       ├── 091530-fix-login-bug.md
+│   │       └── 163245-update-api-docs.md
 │   └── 02/
-│       └── update-dashboard.md
+│       └── 12/
+│           └── 110000-update-dashboard.md
 ```
 
-Each changelog entry is a separate markdown file named after the task/feature (use kebab-case).
+**Directory structure:** `{changelog_dir}/{YYYY}/{MM}/{DD}/`
+**Filename format:** `{HHMMSS}-{task-name}.md` (time + kebab-case task name)
+
+Example: `docs/changelog/2025/01/07/143052-add-login-feature.md` (released at 14:30:52)
+
+This ensures changelog entries are sorted chronologically by release time.
 
 ### Changelog Entry Format
 
@@ -58,7 +67,7 @@ Create DOCS_REPORT.md in the task's artifacts directory:
 ### Files Created/Updated
 | File | Change |
 |------|--------|
-| [changelog_dir]/YYYY/MM/task-name.md | Created changelog entry |
+| [changelog_dir]/YYYY/MM/DD/HHMMSS-task-name.md | Created changelog entry |
 | [other paths] | Description of update |
 
 ### Changelog Entry
@@ -73,9 +82,10 @@ Create DOCS_REPORT.md in the task's artifacts directory:
 1. Review SPEC.md and the implementation
 2. Check the Documentation Configuration to see what updates are enabled
 3. If **Update Changelog** is YES:
-   - Create a changelog entry file in `{changelog_dir}/{YEAR}/{MONTH}/`
-   - Use the current date for year/month folders
-   - Name the file using kebab-case based on the task name
+   - Create a changelog entry file in `{changelog_dir}/{YYYY}/{MM}/{DD}/`
+   - Use filename format: `HHMMSS-task-name.md` (e.g., `143052-add-login-feature.md`)
+   - Use current date/time for directory and filename
+   - Create year/month/day folders if they don't exist
 4. If **Update General Docs** is YES:
    - Update README if applicable
    - Update documentation in the general docs directory
@@ -87,7 +97,7 @@ Create DOCS_REPORT.md in the task's artifacts directory:
 
 - **Only update documentation types marked as YES** in the configuration
 - Use the configured documentation paths - do not create docs in arbitrary locations
-- Create year/month folders for changelog if they don't exist
+- Use the correct changelog format: `{changelog_dir}/{YYYY}/{MM}/{DD}/{HHMMSS}-task-name.md`
 - Keep documentation clear and concise
 - Don't over-document - focus on what users/developers need
 - Follow existing documentation patterns in the project
