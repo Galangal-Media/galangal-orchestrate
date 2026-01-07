@@ -103,7 +103,7 @@ class ValidationRunner:
     def _should_skip(self, skip_condition, task_name: str) -> bool:
         """Check if skip condition is met."""
         if skip_condition.no_files_match:
-            # Check if any files match the glob pattern in git diff
+            # Check if any files match the glob pattern(s) in git diff
             try:
                 result = subprocess.run(
                     ["git", "diff", "--name-only", "main...HEAD"],
@@ -113,11 +113,16 @@ class ValidationRunner:
                     timeout=10,
                 )
                 changed_files = result.stdout.strip().split("\n")
-                pattern = skip_condition.no_files_match
+
+                # Support both single pattern and list of patterns
+                patterns = skip_condition.no_files_match
+                if isinstance(patterns, str):
+                    patterns = [patterns]
 
                 for f in changed_files:
-                    if fnmatch.fnmatch(f, pattern):
-                        return False  # Found a match, don't skip
+                    for pattern in patterns:
+                        if fnmatch.fnmatch(f, pattern) or fnmatch.fnmatch(f.lower(), pattern.lower()):
+                            return False  # Found a match, don't skip
 
                 return True  # No matches, skip
             except Exception:

@@ -28,7 +28,7 @@ stages:
   skip:
     - BENCHMARK        # Enable if you have performance requirements
     # - CONTRACT       # Enable if you have OpenAPI contract testing
-    # - MIGRATION      # Enable if you have database migrations
+    # - MIGRATION      # Uncomment to always skip (auto-skips if no migration files)
 
   # Stage timeout in seconds (default: 4 hours)
   timeout: 14400
@@ -50,6 +50,17 @@ validation:
         command: "git status --porcelain"
         expect_empty: true
         warn_only: true       # Report but don't fail if working tree has changes
+
+  # Migration - auto-skip if no migration files changed
+  migration:
+    skip_if:
+      no_files_match:
+        - "**/migrations/**"
+        - "**/migrate/**"
+        - "**/alembic/**"
+        - "**/*migration*"
+        - "**/schema/**"
+        - "**/db/migrate/**"
 
   # QA - quality checks
   qa:

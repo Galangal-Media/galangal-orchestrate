@@ -55,8 +55,9 @@ class ValidationCommand(BaseModel):
 class SkipCondition(BaseModel):
     """Condition for skipping a stage."""
 
-    no_files_match: Optional[str] = Field(
-        default=None, description="Skip if no files match this glob pattern"
+    no_files_match: Optional[str | list[str]] = Field(
+        default=None,
+        description="Skip if no files match this glob pattern (or list of patterns)",
     )
 
 
