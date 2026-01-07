@@ -73,34 +73,3 @@ class TUIAdapter(StageUI):
 
     def finish(self, success: bool) -> None:
         pass
-
-
-class SimpleConsoleUI(StageUI):
-    """Simple console-based UI without Textual."""
-
-    def __init__(self, task_name: str, stage: str):
-        from rich.console import Console
-
-        self.console = Console()
-        self.task_name = task_name
-        self.stage = stage
-        self.turns = 0
-
-    def set_status(self, status: str, detail: str = "") -> None:
-        self.console.print(f"[dim]{status}: {detail}[/dim]")
-
-    def add_activity(self, activity: str, icon: str = "•") -> None:
-        self.console.print(f"  {icon} {activity}")
-
-    def add_raw_line(self, line: str) -> None:
-        pass
-
-    def set_turns(self, turns: int) -> None:
-        self.turns = turns
-        self.console.print(f"[dim]Turn {turns}[/dim]")
-
-    def finish(self, success: bool) -> None:
-        if success:
-            self.console.print(f"[green]✓ {self.stage} completed[/green]")
-        else:
-            self.console.print(f"[red]✗ {self.stage} failed[/red]")

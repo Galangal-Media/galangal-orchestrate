@@ -9,7 +9,7 @@ This package provides:
 - run_stage_with_tui: Entry point for running a single stage with TUI
 """
 
-from galangal.ui.tui.adapters import PromptType, SimpleConsoleUI, StageUI, TUIAdapter
+from galangal.ui.tui.adapters import PromptType, StageUI, TUIAdapter
 from galangal.ui.tui.app import StageTUIApp, WorkflowTUIApp
 from galangal.ui.tui.entry import run_stage_with_tui
 from galangal.ui.tui.modals import PromptModal, PromptOption, TextInputModal
@@ -28,7 +28,6 @@ __all__ = [
     "PromptType",
     "StageUI",
     "TUIAdapter",
-    "SimpleConsoleUI",
     # Entry points
     "run_stage_with_tui",
     # Widgets

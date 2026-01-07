@@ -2,9 +2,10 @@
 Core workflow utilities - stage execution, rollback handling.
 """
 
-from datetime import datetime, timezone
+from __future__ import annotations
 
-from rich.console import Console
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from galangal.ai.claude import ClaudeBackend
 from galangal.config.loader import get_config
@@ -17,12 +18,12 @@ from galangal.core.state import (
     save_state,
     should_skip_for_task_type,
 )
-from galangal.core.tasks import get_current_branch
 from galangal.prompts.builder import PromptBuilder
-from galangal.ui.tui import TUIAdapter, WorkflowTUIApp, run_stage_with_tui
+from galangal.ui.tui import TUIAdapter
 from galangal.validation.runner import ValidationRunner
 
-console = Console()
+if TYPE_CHECKING:
+    from galangal.ui.tui import WorkflowTUIApp
 
 
 def get_next_stage(
@@ -74,33 +75,13 @@ def get_next_stage(
     return next_stage
 
 
-def execute_stage(state: WorkflowState, tui_app: WorkflowTUIApp = None) -> tuple[bool, str]:
-    """Execute the current stage. Returns (success, message).
-
-    If tui_app is provided, uses the persistent TUI instead of creating a new one.
-    """
+def execute_stage(state: WorkflowState, tui_app: WorkflowTUIApp) -> tuple[bool, str]:
+    """Execute the current stage. Returns (success, message)."""
     stage = state.stage
     task_name = state.task_name
 
     if stage == Stage.COMPLETE:
         return True, "Workflow complete"
-
-    # Design approval gate (only in legacy mode without TUI)
-    if stage == Stage.DEV and tui_app is None:
-        from galangal.commands.approve import prompt_design_approval
-
-        design_skipped = artifact_exists(
-            "DESIGN_SKIP.md", task_name
-        ) or should_skip_for_task_type(Stage.DESIGN, state.task_type)
-
-        if design_skipped:
-            pass
-        elif not artifact_exists("DESIGN_REVIEW.md", task_name):
-            result = prompt_design_approval(task_name, state)
-            if result == "quit":
-                return False, "PAUSED: User requested pause"
-            elif result == "rejected":
-                return True, "Design rejected - restarting from DESIGN"
 
     # Check for clarification
     if artifact_exists("QUESTIONS.md", task_name) and not artifact_exists(
@@ -112,19 +93,13 @@ def execute_stage(state: WorkflowState, tui_app: WorkflowTUIApp = None) -> tuple
 
     # PREFLIGHT runs validation directly
     if stage == Stage.PREFLIGHT:
-        if tui_app:
-            tui_app.add_activity("Running preflight checks...", "⚙")
-        else:
-            console.print("[dim]Running preflight checks...[/dim]")
+        tui_app.add_activity("Running preflight checks...", "⚙")
 
         runner = ValidationRunner()
         result = runner.validate_stage("PREFLIGHT", task_name)
 
         if result.success:
-            if tui_app:
-                tui_app.show_message(f"Preflight: {result.message}", "success")
-            else:
-                console.print(f"[green]✓ Preflight: {result.message}[/green]")
+            tui_app.show_message(f"Preflight: {result.message}", "success")
             return True, result.message
         else:
             # Include detailed output in the failure message for display
@@ -133,9 +108,6 @@ def execute_stage(state: WorkflowState, tui_app: WorkflowTUIApp = None) -> tuple
                 detailed_message = f"{result.message}\n\n{result.output}"
             # Return special marker so workflow knows this is preflight failure
             return False, f"PREFLIGHT_FAILED:{detailed_message}"
-
-    # Get current branch for UI
-    branch = get_current_branch()
 
     # Build prompt
     builder = PromptBuilder()
@@ -163,26 +135,15 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     with open(log_file, "w") as f:
         f.write(f"=== Prompt ===\n{prompt}\n\n")
 
-    # Run stage - either with persistent TUI or standalone
-    if tui_app:
-        # Use the persistent TUI
-        backend = ClaudeBackend()
-        ui = TUIAdapter(tui_app)
-        success, output = backend.invoke(
-            prompt=prompt,
-            timeout=14400,
-            max_turns=200,
-            ui=ui,
-        )
-    else:
-        # Create new TUI for this stage
-        success, output = run_stage_with_tui(
-            task_name=task_name,
-            stage=stage.value,
-            branch=branch,
-            attempt=state.attempt,
-            prompt=prompt,
-        )
+    # Run stage with TUI
+    backend = ClaudeBackend()
+    ui = TUIAdapter(tui_app)
+    success, output = backend.invoke(
+        prompt=prompt,
+        timeout=14400,
+        max_turns=200,
+        ui=ui,
+    )
 
     # Log the output
     with open(log_file, "a") as f:
@@ -192,10 +153,7 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         return False, output
 
     # Validate stage
-    if tui_app:
-        tui_app.add_activity("Validating stage outputs...", "⚙")
-    else:
-        console.print("[dim]Validating stage outputs...[/dim]")
+    tui_app.add_activity("Validating stage outputs...", "⚙")
 
     runner = ValidationRunner()
     result = runner.validate_stage(stage.value, task_name)
@@ -204,15 +162,9 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         f.write(f"\n=== Validation ===\n{result.message}\n")
 
     if result.success:
-        if tui_app:
-            tui_app.show_message(result.message, "success")
-        else:
-            console.print(f"[green]✓ {result.message}[/green]")
+        tui_app.show_message(result.message, "success")
     else:
-        if tui_app:
-            tui_app.show_message(result.message, "error")
-        else:
-            console.print(f"[red]✗ {result.message}[/red]")
+        tui_app.show_message(result.message, "error")
 
     # Include rollback target in message if validation failed
     if not result.success and result.rollback_to:
@@ -221,7 +173,7 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     return result.success, result.message
 
 
-def archive_rollback_if_exists(task_name: str) -> None:
+def archive_rollback_if_exists(task_name: str, tui_app: WorkflowTUIApp) -> None:
     """Archive ROLLBACK.md after DEV stage succeeds."""
     if not artifact_exists("ROLLBACK.md", task_name):
         return
@@ -242,11 +194,15 @@ def archive_rollback_if_exists(task_name: str) -> None:
     rollback_path = artifact_path("ROLLBACK.md", task_name)
     rollback_path.unlink()
 
-    console.print("   [dim]📋 Archived ROLLBACK.md → ROLLBACK_RESOLVED.md[/dim]")
+    tui_app.add_activity("Archived ROLLBACK.md → ROLLBACK_RESOLVED.md", "📋")
 
 
 def handle_rollback(state: WorkflowState, message: str) -> bool:
-    """Handle a rollback signal from a stage validator."""
+    """Handle a rollback signal from a stage validator.
+
+    Updates state and writes to ROLLBACK.md. The caller is responsible
+    for showing any UI feedback.
+    """
     # Check for rollback_to in validation result
     if not message.startswith("ROLLBACK:") and "rollback" not in message.lower():
         return False
@@ -293,11 +249,5 @@ def handle_rollback(state: WorkflowState, message: str) -> bool:
     state.attempt = 1
     state.last_failure = f"Rollback from {from_stage.value}: {reason}"
     save_state(state)
-
-    console.print(
-        f"\n[yellow]⚠️  ROLLBACK: {from_stage.value} → {target_stage.value}[/yellow]"
-    )
-    console.print(f"   Reason: {reason}")
-    console.print("   See ROLLBACK.md for details\n")
 
     return True

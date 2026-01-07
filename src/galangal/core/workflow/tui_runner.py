@@ -29,7 +29,7 @@ console = Console()
 
 
 def _run_workflow_with_tui(state: WorkflowState) -> str:
-    """Run workflow with persistent TUI. Returns result or 'use_legacy' to fall back."""
+    """Run workflow with persistent TUI. Returns result string."""
     config = get_config()
     max_retries = config.stages.max_retries
 
@@ -280,7 +280,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                         continue
 
                 if state.stage == Stage.DEV:
-                    archive_rollback_if_exists(state.task_name)
+                    archive_rollback_if_exists(state.task_name, app)
 
                 # Get next stage
                 next_stage = get_next_stage(state.stage, state)
