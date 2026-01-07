@@ -136,6 +136,30 @@ def should_skip_for_task_type(stage: Stage, task_type: TaskType) -> bool:
     return stage in TASK_TYPE_SKIP_STAGES.get(task_type, set())
 
 
+def get_hidden_stages_for_task_type(task_type: TaskType, config_skip: list[str] = None) -> set[str]:
+    """Get stages to hide from progress bar based on task type and config.
+
+    Args:
+        task_type: The type of task being executed
+        config_skip: List of stage names from config.stages.skip
+
+    Returns:
+        Set of stage name strings that should be hidden from the progress bar
+    """
+    hidden = set()
+
+    # Add task type skips
+    for stage in TASK_TYPE_SKIP_STAGES.get(task_type, set()):
+        hidden.add(stage.value)
+
+    # Add config skips
+    if config_skip:
+        for stage_name in config_skip:
+            hidden.add(stage_name.upper())
+
+    return hidden
+
+
 @dataclass
 class WorkflowState:
     """Persistent workflow state for a task."""

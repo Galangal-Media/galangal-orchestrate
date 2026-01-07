@@ -17,6 +17,7 @@ from galangal.core.state import (
     save_state,
     get_task_dir,
     should_skip_for_task_type,
+    get_hidden_stages_for_task_type,
 )
 from galangal.core.tasks import get_current_branch
 from galangal.ai.claude import set_pause_requested, get_pause_requested
@@ -340,9 +341,19 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
     """Run workflow with persistent TUI. Returns result or 'use_legacy' to fall back."""
     import threading
 
-    app = WorkflowTUIApp(state.task_name, state.stage.value)
     config = get_config()
     max_retries = config.stages.max_retries
+
+    # Compute hidden stages based on task type and config
+    hidden_stages = frozenset(
+        get_hidden_stages_for_task_type(state.task_type, config.stages.skip)
+    )
+
+    app = WorkflowTUIApp(
+        state.task_name,
+        state.stage.value,
+        hidden_stages=hidden_stages,
+    )
 
     # Shared state for thread communication
     workflow_done = threading.Event()

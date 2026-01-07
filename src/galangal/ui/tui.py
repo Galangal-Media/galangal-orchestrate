@@ -104,6 +104,7 @@ class StageProgressWidget(Static):
 
     current_stage: reactive[str] = reactive("PM")
     skipped_stages: reactive[frozenset] = reactive(frozenset())
+    hidden_stages: reactive[frozenset] = reactive(frozenset())
 
     # Full stage display names
     STAGE_DISPLAY = {
@@ -141,9 +142,12 @@ class StageProgressWidget(Static):
     def render(self) -> Text:
         text = Text(justify="center")
 
+        # Filter out hidden stages (task type + config skips)
+        visible_stages = [s for s in STAGE_ORDER if s.value not in self.hidden_stages]
+
         try:
             current_idx = next(
-                i for i, s in enumerate(STAGE_ORDER)
+                i for i, s in enumerate(visible_stages)
                 if s.value == self.current_stage
             )
         except StopIteration:
@@ -154,7 +158,7 @@ class StageProgressWidget(Static):
         use_compact = width and width < 110
         display_names = self.STAGE_COMPACT if use_compact else self.STAGE_DISPLAY
 
-        stages = list(STAGE_ORDER)
+        stages = visible_stages
         if use_window:
             start = max(current_idx - 2, 0)
             end = min(current_idx + 3, len(stages))
@@ -518,11 +522,18 @@ class WorkflowTUIApp(App):
         Binding("ctrl+f", "toggle_files", "^F Files", show=True),
     ]
 
-    def __init__(self, task_name: str, initial_stage: str, max_retries: int = 5):
+    def __init__(
+        self,
+        task_name: str,
+        initial_stage: str,
+        max_retries: int = 5,
+        hidden_stages: frozenset = None,
+    ):
         super().__init__()
         self.task_name = task_name
         self.current_stage = initial_stage
         self._max_retries = max_retries
+        self._hidden_stages = hidden_stages or frozenset()
         self.verbose = False
         self._start_time = time.time()
         self._attempt = 1
@@ -565,6 +576,7 @@ class WorkflowTUIApp(App):
 
         progress = self.query_one("#progress", StageProgressWidget)
         progress.current_stage = self.current_stage
+        progress.hidden_stages = self._hidden_stages
 
         # Start timers
         self.set_interval(1.0, self._update_elapsed)
