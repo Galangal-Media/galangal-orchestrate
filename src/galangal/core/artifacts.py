@@ -7,6 +7,7 @@ from pathlib import Path
 
 from galangal.config.loader import get_project_root
 from galangal.core.state import get_task_dir
+from galangal.exceptions import TaskError
 
 
 def artifact_path(name: str, task_name: str | None = None) -> Path:
@@ -16,7 +17,7 @@ def artifact_path(name: str, task_name: str | None = None) -> Path:
     if task_name is None:
         task_name = get_active_task()
     if task_name is None:
-        raise ValueError("No active task")
+        raise TaskError("No active task")
     return get_task_dir(task_name) / name
 
 
@@ -24,7 +25,7 @@ def artifact_exists(name: str, task_name: str | None = None) -> bool:
     """Check if an artifact exists."""
     try:
         return artifact_path(name, task_name).exists()
-    except ValueError:
+    except TaskError:
         return False
 
 
@@ -34,7 +35,7 @@ def read_artifact(name: str, task_name: str | None = None) -> str | None:
         path = artifact_path(name, task_name)
         if path.exists():
             return path.read_text()
-    except ValueError:
+    except TaskError:
         pass
     return None
 

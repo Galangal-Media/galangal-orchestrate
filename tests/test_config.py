@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from galangal.config import ConfigError
-from galangal.config.schema import GalangalConfig, StackConfig
 from galangal.config.loader import load_config, set_project_root
+from galangal.config.schema import GalangalConfig, StackConfig
 
 
 def test_default_config():

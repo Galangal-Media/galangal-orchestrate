@@ -5,15 +5,10 @@ Configuration loading and management.
 from pathlib import Path
 
 import yaml
-from pydantic import ValidationError
+from pydantic import ValidationError as PydanticValidationError
 
 from galangal.config.schema import GalangalConfig
-
-
-class ConfigError(Exception):
-    """Raised when configuration file is invalid."""
-
-    pass
+from galangal.exceptions import ConfigError
 
 # Global config cache
 _config: GalangalConfig | None = None
@@ -86,7 +81,7 @@ def load_config(project_root: Path | None = None) -> GalangalConfig:
     try:
         _config = GalangalConfig.model_validate(data)
         return _config
-    except ValidationError as e:
+    except PydanticValidationError as e:
         raise ConfigError(f"Invalid configuration in {config_path}: {e}") from e
 
 
