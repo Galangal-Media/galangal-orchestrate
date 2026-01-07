@@ -5,8 +5,15 @@ Configuration loading and management.
 from pathlib import Path
 
 import yaml
+from pydantic import ValidationError
 
 from galangal.config.schema import GalangalConfig
+
+
+class ConfigError(Exception):
+    """Raised when configuration file is invalid."""
+
+    pass
 
 # Global config cache
 _config: GalangalConfig | None = None
@@ -54,7 +61,9 @@ def set_project_root(path: Path) -> None:
 def load_config(project_root: Path | None = None) -> GalangalConfig:
     """
     Load configuration from .galangal/config.yaml.
+
     Returns default config if file doesn't exist.
+    Raises ConfigError if file exists but is invalid.
     """
     global _config, _project_root
 
@@ -70,16 +79,15 @@ def load_config(project_root: Path | None = None) -> GalangalConfig:
         return _config
 
     try:
-        with open(config_path) as f:
-            data = yaml.safe_load(f) or {}
+        data = yaml.safe_load(config_path.read_text()) or {}
+    except yaml.YAMLError as e:
+        raise ConfigError(f"Invalid YAML in {config_path}: {e}") from e
 
+    try:
         _config = GalangalConfig.model_validate(data)
         return _config
-    except Exception as e:
-        # Log warning but return defaults
-        print(f"Warning: Could not load config: {e}")
-        _config = GalangalConfig()
-        return _config
+    except ValidationError as e:
+        raise ConfigError(f"Invalid configuration in {config_path}: {e}") from e
 
 
 def get_config() -> GalangalConfig:
