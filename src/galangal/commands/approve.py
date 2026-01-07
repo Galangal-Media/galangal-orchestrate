@@ -48,13 +48,9 @@ def prompt_plan_approval(task_name: str, state) -> str:
 
             approval_content = f"""# Plan Approval
 
-**Status:** Approved
-**Date:** {datetime.now(timezone.utc).isoformat()}
-**Approver:** {approver or "Not specified"}
-
-## Approved Plan Summary
-
-{plan[:500] if plan else "(Plan content)"}
+- **Status:** Approved
+- **Approved By:** {approver or "Not specified"}
+- **Date:** {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
 """
             write_artifact("APPROVAL.md", approval_content, task_name)
             print_success("Plan approved!")

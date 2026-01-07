@@ -427,11 +427,9 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                             from datetime import datetime, timezone
                             approval_content = f"""# Plan Approval
 
-**Status:** Approved
-**Approved By:** {name}
-**Date:** {datetime.now(timezone.utc).isoformat()}
-
-## Approved via TUI
+- **Status:** Approved
+- **Approved By:** {name}
+- **Date:** {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
 """
                             write_artifact("APPROVAL.md", approval_content, state.task_name)
                             app.show_message(f"Plan approved by {name}", "success")

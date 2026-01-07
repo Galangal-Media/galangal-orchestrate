@@ -37,6 +37,7 @@ class PreflightCheck(BaseModel):
     command: Optional[str] = Field(default=None, description="Command to run")
     path_exists: Optional[str] = Field(default=None, description="Path that must exist")
     expect_empty: bool = Field(default=False, description="Pass if output is empty")
+    warn_only: bool = Field(default=False, description="Warn but don't fail the stage")
 
 
 class ValidationCommand(BaseModel):

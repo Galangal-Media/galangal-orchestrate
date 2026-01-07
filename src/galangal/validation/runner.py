@@ -138,7 +138,7 @@ Reason: {reason}
                 path = self.project_root / check.path_exists
                 exists = path.exists()
                 results[check.name] = {"status": "OK" if exists else "Missing"}
-                if not exists:
+                if not exists and not check.warn_only:
                     all_ok = False
 
             elif check.command:
@@ -163,16 +163,18 @@ Reason: {reason}
                     else:
                         ok = result.returncode == 0
 
+                    status = "OK" if ok else ("Warning" if check.warn_only else "Failed")
                     results[check.name] = {
-                        "status": "OK" if ok else "Failed",
+                        "status": status,
                         "output": output[:200] if output else "",
                     }
-                    if not ok:
+                    if not ok and not check.warn_only:
                         all_ok = False
 
                 except Exception as e:
                     results[check.name] = {"status": "Error", "error": str(e)}
-                    all_ok = False
+                    if not check.warn_only:
+                        all_ok = False
 
         # Generate report
         status = "READY" if all_ok else "NOT_READY"
@@ -185,7 +187,13 @@ Reason: {reason}
 ## Checks
 """
         for name, result in results.items():
-            status_icon = "✓" if result.get("status") == "OK" else "✗"
+            status_val = result.get("status", "Unknown")
+            if status_val == "OK":
+                status_icon = "✓"
+            elif status_val == "Warning":
+                status_icon = "⚠"
+            else:
+                status_icon = "✗"
             report += f"\n### {status_icon} {name}\n"
             report += f"- Status: {result.get('status', 'Unknown')}\n"
             if result.get("output"):

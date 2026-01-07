@@ -49,6 +49,7 @@ validation:
       - name: "Git clean"
         command: "git status --porcelain"
         expect_empty: true
+        warn_only: true       # Report but don't fail if working tree has changes
 
   # QA - quality checks
   qa:
