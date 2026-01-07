@@ -3,6 +3,7 @@ Config-driven validation runner.
 """
 
 import fnmatch
+import re
 import subprocess
 from dataclasses import dataclass
 
@@ -84,6 +85,12 @@ class ValidationRunner:
         # Check for pass/fail markers in artifacts (for AI-driven stages)
         if stage_config.artifact and stage_config.pass_marker:
             result = self._check_artifact_markers(stage_config, task_name)
+            if not result.success:
+                return result
+
+        # QA stage: always check QA_REPORT.md for PASS/FAIL status
+        if stage_lower == "qa":
+            result = self._check_qa_report(task_name)
             if not result.success:
                 return result
 
@@ -316,6 +323,44 @@ Reason: {reason}
         return ValidationResult(
             False,
             f"{artifact_name}: unclear result - must contain {stage_config.pass_marker} or {stage_config.fail_marker}",
+        )
+
+    def _check_qa_report(self, task_name: str) -> ValidationResult:
+        """Check QA_REPORT.md for pass/fail status.
+
+        Looks for **Status:** PASS or **Status:** FAIL pattern,
+        which is more reliable than searching for PASS/FAIL anywhere in content.
+        """
+        if not artifact_exists("QA_REPORT.md", task_name):
+            return ValidationResult(False, "QA_REPORT.md not found", rollback_to="DEV")
+
+        content = read_artifact("QA_REPORT.md", task_name) or ""
+        content_upper = content.upper()
+
+        # Look for explicit status line pattern: **Status:** PASS or FAIL
+        status_match = re.search(r"\*\*STATUS:\*\*\s*(PASS|FAIL)", content_upper)
+
+        if status_match:
+            status = status_match.group(1)
+            if status == "PASS":
+                return ValidationResult(True, "QA report: PASS")
+            else:
+                return ValidationResult(False, "QA report: FAIL", rollback_to="DEV")
+
+        # Fallback: check for Status: PASS/FAIL without markdown
+        status_match = re.search(r"STATUS:\s*(PASS|FAIL)", content_upper)
+        if status_match:
+            status = status_match.group(1)
+            if status == "PASS":
+                return ValidationResult(True, "QA report: PASS")
+            else:
+                return ValidationResult(False, "QA report: FAIL", rollback_to="DEV")
+
+        # If no clear status found, report as unclear
+        return ValidationResult(
+            False,
+            "QA_REPORT.md: No clear status found - must contain '**Status:** PASS' or '**Status:** FAIL'",
+            rollback_to="DEV",
         )
 
     def _validate_with_defaults(
