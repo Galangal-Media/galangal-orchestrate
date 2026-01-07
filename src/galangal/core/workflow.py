@@ -622,7 +622,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                             app.add_activity(f"[#83a598]PR: {pr_url}[/]", "")
                         app.add_activity("")
 
-                    # Show post-completion options
+                    # Show post-completion options with PR URL
                     post_event = threading.Event()
                     post_result = {"value": None}
 
@@ -630,9 +630,15 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                         post_result["value"] = choice
                         post_event.set()
 
+                    # Build completion message with PR URL if available
+                    completion_msg = "Task completed successfully!"
+                    if pr_url and pr_url.startswith("http"):
+                        completion_msg += f"\n\nPull Request:\n{pr_url}"
+                    completion_msg += "\n\nWhat would you like to do next?"
+
                     app.show_prompt(
                         PromptType.POST_COMPLETION,
-                        "What would you like to do next?",
+                        completion_msg,
                         handle_post_completion,
                     )
                     post_event.wait()
