@@ -296,13 +296,15 @@ class PromptModal(ModalScreen):
     }
 
     #prompt-dialog {
-        width: 70%;
-        max-width: 80;
-        min-width: 40;
+        width: 90%;
+        max-width: 120;
+        min-width: 50;
+        max-height: 80%;
         background: #3c3836;
         border: round #504945;
         padding: 1 2;
         layout: vertical;
+        overflow-y: auto;
     }
 
     #prompt-message {

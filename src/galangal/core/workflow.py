@@ -381,11 +381,20 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     # Handle preflight failures specially - don't auto-retry
                     if message.startswith("PREFLIGHT_FAILED:"):
                         detailed_error = message[len("PREFLIGHT_FAILED:") :]
-                        app.show_message("Preflight checks failed", "error")
-                        # Show the detailed report in the activity log
-                        for line in detailed_error.strip().split("\n"):
-                            if line.strip():
-                                app.add_activity(line)
+
+                        # Extract failed checks for display in modal
+                        failed_lines = []
+                        for line in detailed_error.split("\n"):
+                            if line.strip().startswith("✗") or "Failed" in line or "Missing" in line or "Error" in line:
+                                failed_lines.append(line.strip())
+
+                        # Build modal message with error details
+                        modal_message = "Preflight checks failed:\n\n"
+                        if failed_lines:
+                            modal_message += "\n".join(failed_lines[:10])  # Limit to 10 lines
+                        else:
+                            modal_message += detailed_error[:500]
+                        modal_message += "\n\nFix issues and retry?"
 
                         # Prompt user to retry after fixing
                         retry_event = threading.Event()
@@ -397,7 +406,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
 
                         app.show_prompt(
                             PromptType.PREFLIGHT_RETRY,
-                            "Fix environment issues and retry?",
+                            modal_message,
                             handle_preflight_retry,
                         )
 
@@ -424,13 +433,14 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     state.last_failure = message
 
                     if state.attempt > max_retries:
-                        app.show_message(f"Max retries ({max_retries}) exceeded for {state.stage.value}", "error")
-                        # Show the failure details in the activity log
-                        app.add_activity("")
-                        app.add_activity("[bold red]Last failure:[/bold red]")
-                        for line in message[:2000].split("\n"):
-                            if line.strip():
-                                app.add_activity(f"  {line}")
+                        # Build modal message with error details
+                        error_preview = message[:800].strip()
+                        if len(message) > 800:
+                            error_preview += "..."
+
+                        modal_message = f"Stage {state.stage.value} failed after {max_retries} attempts.\n\n"
+                        modal_message += f"Error:\n{error_preview}\n\n"
+                        modal_message += "What would you like to do?"
 
                         # Prompt user for what to do
                         failure_event = threading.Event()
@@ -453,7 +463,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
 
                         app.show_prompt(
                             PromptType.STAGE_FAILURE,
-                            f"Stage {state.stage.value} failed after {max_retries} attempts. What would you like to do?",
+                            modal_message,
                             handle_failure_choice,
                         )
 

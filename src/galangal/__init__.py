@@ -5,4 +5,4 @@ A deterministic workflow system that guides AI assistants through
 structured development stages: PM -> DESIGN -> DEV -> TEST -> QA -> REVIEW -> DOCS.
 """
 
-__version__ = "0.2.11"
+__version__ = "0.2.12"
