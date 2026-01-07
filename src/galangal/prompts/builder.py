@@ -98,7 +98,7 @@ class PromptBuilder:
             context_parts.append(f"""
 # Documentation Configuration
 ## Paths
-- Changelog: {docs_config.changelog}
+- Changelog Directory: {docs_config.changelog_dir}
 - Security Audit Directory: {docs_config.security_audit}
 - General Documentation: {docs_config.general}
 

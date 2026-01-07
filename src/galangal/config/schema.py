@@ -129,9 +129,9 @@ class AIConfig(BaseModel):
 class DocsConfig(BaseModel):
     """Documentation paths configuration."""
 
-    changelog: str = Field(
-        default="CHANGELOG.md",
-        description="Path to changelog file",
+    changelog_dir: str = Field(
+        default="docs/changelog",
+        description="Directory for changelog entries (organized by year/month)",
     )
     security_audit: str = Field(
         default="docs/security",

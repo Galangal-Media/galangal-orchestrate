@@ -14,6 +14,38 @@ Check the "Documentation Configuration" section in the context above for:
 
 **Important**: Only update documentation types that are marked as "YES" in the configuration.
 
+## Changelog Structure
+
+Changelogs are organized in a directory structure by year and month:
+
+```
+{changelog_dir}/
+├── 2025/
+│   ├── 01/
+│   │   ├── add-user-authentication.md
+│   │   └── fix-login-bug.md
+│   └── 02/
+│       └── update-dashboard.md
+```
+
+Each changelog entry is a separate markdown file named after the task/feature (use kebab-case).
+
+### Changelog Entry Format
+
+```markdown
+# [Feature/Fix Title]
+
+**Date:** YYYY-MM-DD
+**Type:** feature | fix | improvement | breaking
+
+## Summary
+Brief user-facing description of what changed.
+
+## Details
+- Bullet points of specific changes
+- Keep it concise and user-focused
+```
+
 ## Your Output
 
 Create DOCS_REPORT.md in the task's artifacts directory:
@@ -23,13 +55,14 @@ Create DOCS_REPORT.md in the task's artifacts directory:
 
 ## Documentation Updates
 
-### Files Updated
+### Files Created/Updated
 | File | Change |
 |------|--------|
-| [path] | Description of update |
+| [changelog_dir]/YYYY/MM/task-name.md | Created changelog entry |
+| [other paths] | Description of update |
 
-### Changelog Entry (if enabled)
-[The exact changelog entry you added, or "Skipped - disabled in config"]
+### Changelog Entry
+[The exact changelog entry you created, or "Skipped - disabled in config"]
 
 ## Summary
 [Brief description of documentation changes made]
@@ -40,7 +73,9 @@ Create DOCS_REPORT.md in the task's artifacts directory:
 1. Review SPEC.md and the implementation
 2. Check the Documentation Configuration to see what updates are enabled
 3. If **Update Changelog** is YES:
-   - Update the changelog file with a user-facing description of the changes
+   - Create a changelog entry file in `{changelog_dir}/{YEAR}/{MONTH}/`
+   - Use the current date for year/month folders
+   - Name the file using kebab-case based on the task name
 4. If **Update General Docs** is YES:
    - Update README if applicable
    - Update documentation in the general docs directory
@@ -52,6 +87,7 @@ Create DOCS_REPORT.md in the task's artifacts directory:
 
 - **Only update documentation types marked as YES** in the configuration
 - Use the configured documentation paths - do not create docs in arbitrary locations
+- Create year/month folders for changelog if they don't exist
 - Keep documentation clear and concise
 - Don't over-document - focus on what users/developers need
 - Follow existing documentation patterns in the project
