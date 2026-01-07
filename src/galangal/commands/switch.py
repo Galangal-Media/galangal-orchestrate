@@ -4,7 +4,7 @@ galangal switch - Switch to a different task.
 
 import argparse
 
-from galangal.core.state import load_state, get_task_dir
+from galangal.core.state import get_task_dir, load_state
 from galangal.core.tasks import set_active_task
 from galangal.ui.console import console, print_error, print_success
 

@@ -7,17 +7,17 @@ from datetime import datetime, timezone
 
 from rich.prompt import Prompt
 
+from galangal.core.artifacts import artifact_exists, write_artifact
 from galangal.core.state import (
+    STAGE_ORDER,
+    TASK_TYPE_SKIP_STAGES,
     Stage,
     load_state,
     save_state,
-    STAGE_ORDER,
-    TASK_TYPE_SKIP_STAGES,
 )
 from galangal.core.tasks import get_active_task
-from galangal.core.artifacts import artifact_exists, write_artifact
 from galangal.core.workflow import run_workflow
-from galangal.ui.console import console, print_error, print_success, print_info
+from galangal.ui.console import console, print_error, print_info, print_success
 
 
 def _skip_stage(

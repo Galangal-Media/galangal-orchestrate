@@ -47,7 +47,7 @@ Create TEST_PLAN.md in the task's artifacts directory:
    - Core functionality works
    - Edge cases are handled
    - Error conditions are handled properly
-5. Run the tests
+5. Run the newly created tests
 6. Document results in TEST_PLAN.md
 
 ## Important Rules

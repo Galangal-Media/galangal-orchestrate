@@ -6,7 +6,7 @@ import json
 import select
 import subprocess
 import time
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from galangal.ai.base import AIBackend
 from galangal.config.loader import get_project_root

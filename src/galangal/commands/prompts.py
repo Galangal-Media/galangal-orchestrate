@@ -9,7 +9,7 @@ from pathlib import Path
 from galangal.config.loader import get_prompts_dir
 from galangal.core.state import Stage
 from galangal.prompts.builder import PromptBuilder
-from galangal.ui.console import console, print_success, print_error, print_info
+from galangal.ui.console import console, print_error, print_info, print_success
 
 
 def cmd_prompts_export(args: argparse.Namespace) -> int:

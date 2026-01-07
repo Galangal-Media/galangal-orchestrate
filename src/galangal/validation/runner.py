@@ -5,11 +5,9 @@ Config-driven validation runner.
 import fnmatch
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional
 
-from galangal.config.loader import get_project_root, get_config
-from galangal.config.schema import StageValidation, ValidationCommand, PreflightCheck
+from galangal.config.loader import get_config, get_project_root
+from galangal.config.schema import PreflightCheck, StageValidation, ValidationCommand
 from galangal.core.artifacts import artifact_exists, read_artifact, write_artifact
 
 
@@ -19,8 +17,8 @@ class ValidationResult:
 
     success: bool
     message: str
-    output: Optional[str] = None
-    rollback_to: Optional[str] = None  # Stage to rollback to on failure
+    output: str | None = None
+    rollback_to: str | None = None  # Stage to rollback to on failure
 
 
 class ValidationRunner:
@@ -40,7 +38,7 @@ class ValidationRunner:
 
         # Get stage validation config
         validation_config = self.config.validation
-        stage_config: Optional[StageValidation] = getattr(
+        stage_config: StageValidation | None = getattr(
             validation_config, stage_lower, None
         )
 

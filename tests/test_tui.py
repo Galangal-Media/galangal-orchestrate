@@ -6,7 +6,7 @@ import pytest
 from textual.pilot import Pilot
 from textual.widgets import Input
 
-from galangal.ui.tui import WorkflowTUIApp, PromptType
+from galangal.ui.tui import WorkflowTUIApp, PromptType, TextInputModal, PromptModal
 
 
 @pytest.fixture
@@ -16,40 +16,7 @@ def app():
 
 
 class TestTextInput:
-    """Tests for text input functionality."""
-
-    @pytest.mark.asyncio
-    async def test_text_input_displays(self, app):
-        """Test that text input widget is always visible and accepts values."""
-        async with app.run_test() as pilot:
-            # Input should always be visible
-            text_input = app.query_one("#text-input", Input)
-
-            # Show text input with default value
-            callback_result = []
-            app.show_text_input("Enter name:", "default", lambda v: callback_result.append(v))
-
-            await pilot.pause()
-
-            text_input = app.query_one("#text-input", Input)
-            assert text_input.value == "default"
-            assert text_input.placeholder == "Enter name:"
-
-    @pytest.mark.asyncio
-    async def test_text_input_accepts_typing(self, app):
-        """Test that text input accepts keyboard input."""
-        async with app.run_test() as pilot:
-            callback_result = []
-            app.show_text_input("Enter name:", "", lambda v: callback_result.append(v))
-
-            await pilot.pause()
-
-            # Type some text
-            await pilot.press("t", "e", "s", "t")
-            await pilot.pause()
-
-            text_input = app.query_one("#text-input", Input)
-            assert text_input.value == "test"
+    """Tests for text input modal functionality."""
 
     @pytest.mark.asyncio
     async def test_text_input_submit(self, app):
@@ -58,9 +25,11 @@ class TestTextInput:
             callback_result = []
             app.show_text_input("Enter name:", "", lambda v: callback_result.append(v))
 
+            # Wait for modal to appear
+            await pilot.pause()
             await pilot.pause()
 
-            # Type and submit
+            # Type and submit - keypresses go to focused input
             await pilot.press("h", "e", "l", "l", "o")
             await pilot.press("enter")
             await pilot.pause()
@@ -84,62 +53,51 @@ class TestTextInput:
             # Callback should receive None for cancelled
             assert callback_result == [None]
 
-    @pytest.mark.asyncio
-    async def test_bindings_disabled_during_input(self, app):
-        """Test that app bindings don't interfere with text input."""
-        async with app.run_test() as pilot:
-            callback_result = []
-            app.show_text_input("Enter name:", "", lambda v: callback_result.append(v))
-
-            await pilot.pause()
-
-            # Type 'q' - should go into input, not quit
-            await pilot.press("q", "u", "i", "t")
-            await pilot.pause()
-
-            text_input = app.query_one("#text-input", Input)
-            assert text_input.value == "quit"
-
-            # App should still be running
-            assert app.is_running
-
 
 class TestPromptActions:
-    """Tests for approval prompt actions."""
+    """Tests for approval prompt modal actions."""
 
     @pytest.mark.asyncio
-    async def test_option_1_action_calls_yes(self, app):
-        """Test that action_select_option_1 triggers yes callback."""
+    async def test_prompt_modal_option_1(self, app):
+        """Test that pressing 1 triggers option 1 callback."""
         async with app.run_test() as pilot:
             callback_result = []
-            app._prompt_callback = lambda v: callback_result.append(v)
+            app.show_prompt(PromptType.PLAN_APPROVAL, "Test prompt", lambda v: callback_result.append(v))
 
-            # Call action directly
-            app.action_select_option_1()
+            await pilot.pause()
+
+            # Press 1 to select first option
+            await pilot.press("1")
             await pilot.pause()
 
             assert callback_result == ["yes"]
 
     @pytest.mark.asyncio
-    async def test_option_2_action_calls_no(self, app):
-        """Test that action_select_option_2 triggers no callback."""
+    async def test_prompt_modal_option_2(self, app):
+        """Test that pressing 2 triggers option 2 callback."""
         async with app.run_test() as pilot:
             callback_result = []
-            app._prompt_callback = lambda v: callback_result.append(v)
+            app.show_prompt(PromptType.PLAN_APPROVAL, "Test prompt", lambda v: callback_result.append(v))
 
-            app.action_select_option_2()
+            await pilot.pause()
+
+            # Press 2 to select second option
+            await pilot.press("2")
             await pilot.pause()
 
             assert callback_result == ["no"]
 
     @pytest.mark.asyncio
-    async def test_option_3_action_calls_quit(self, app):
-        """Test that action_select_option_3 triggers quit callback."""
+    async def test_prompt_modal_escape_quits(self, app):
+        """Test that pressing Escape triggers quit callback."""
         async with app.run_test() as pilot:
             callback_result = []
-            app._prompt_callback = lambda v: callback_result.append(v)
+            app.show_prompt(PromptType.PLAN_APPROVAL, "Test prompt", lambda v: callback_result.append(v))
 
-            app.action_select_option_3()
+            await pilot.pause()
+
+            # Press Escape to quit
+            await pilot.press("escape")
             await pilot.pause()
 
             assert callback_result == ["quit"]
@@ -149,8 +107,8 @@ class TestPromptActions:
         """Test that check_action returns False when input is active."""
         async with app.run_test() as pilot:
             # When no input active, check_action should return True
-            assert app.check_action_select_option_1() is True
+            assert app.check_action_quit_workflow() is True
 
             # When input is active, check_action should return False
             app._input_callback = lambda v: None
-            assert app.check_action_select_option_1() is False
+            assert app.check_action_quit_workflow() is False

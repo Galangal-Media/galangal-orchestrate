@@ -2,7 +2,7 @@
 Gemini backend implementation (stub for future use).
 """
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from galangal.ai.base import AIBackend
 

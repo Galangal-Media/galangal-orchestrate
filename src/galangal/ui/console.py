@@ -3,10 +3,10 @@ Console output utilities using Rich.
 """
 
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
-from galangal.core.state import Stage, TaskType, TASK_TYPE_SKIP_STAGES
+from galangal.core.state import TASK_TYPE_SKIP_STAGES, Stage, TaskType
 
 console = Console()
 

@@ -2,7 +2,7 @@
 Configuration schema using Pydantic models.
 """
 
-from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -10,8 +10,8 @@ class StackConfig(BaseModel):
     """Configuration for a technology stack."""
 
     language: str = Field(description="Programming language (python, typescript, php, etc.)")
-    framework: Optional[str] = Field(default=None, description="Framework (fastapi, vite, symfony)")
-    root: Optional[str] = Field(default=None, description="Subdirectory for this stack")
+    framework: str | None = Field(default=None, description="Framework (fastapi, vite, symfony)")
+    root: str | None = Field(default=None, description="Subdirectory for this stack")
 
 
 class ProjectConfig(BaseModel):
@@ -19,7 +19,7 @@ class ProjectConfig(BaseModel):
 
     name: str = Field(default="My Project", description="Project name")
     stacks: list[StackConfig] = Field(default_factory=list, description="Technology stacks")
-    approver_name: Optional[str] = Field(default=None, description="Default approver name for plan approvals")
+    approver_name: str | None = Field(default=None, description="Default approver name for plan approvals")
 
 
 class StageConfig(BaseModel):
@@ -34,8 +34,8 @@ class PreflightCheck(BaseModel):
     """A single preflight check."""
 
     name: str = Field(description="Check name for display")
-    command: Optional[str] = Field(default=None, description="Command to run")
-    path_exists: Optional[str] = Field(default=None, description="Path that must exist")
+    command: str | None = Field(default=None, description="Command to run")
+    path_exists: str | None = Field(default=None, description="Path that must exist")
     expect_empty: bool = Field(default=False, description="Pass if output is empty")
     warn_only: bool = Field(default=False, description="Warn but don't fail the stage")
 
@@ -47,7 +47,7 @@ class ValidationCommand(BaseModel):
     command: str = Field(description="Shell command to run")
     optional: bool = Field(default=False, description="Don't fail if this command fails")
     allow_failure: bool = Field(default=False, description="Report but don't block on failure")
-    timeout: Optional[int] = Field(
+    timeout: int | None = Field(
         default=None, description="Command timeout in seconds (overrides stage default)"
     )
 
@@ -55,7 +55,7 @@ class ValidationCommand(BaseModel):
 class SkipCondition(BaseModel):
     """Condition for skipping a stage."""
 
-    no_files_match: Optional[str | list[str]] = Field(
+    no_files_match: str | list[str] | None = Field(
         default=None,
         description="Skip if no files match this glob pattern (or list of patterns)",
     )
@@ -64,7 +64,7 @@ class SkipCondition(BaseModel):
 class StageValidation(BaseModel):
     """Validation configuration for a single stage."""
 
-    skip_if: Optional[SkipCondition] = Field(default=None, description="Skip condition")
+    skip_if: SkipCondition | None = Field(default=None, description="Skip condition")
     timeout: int = Field(
         default=300, description="Default timeout in seconds for validation commands"
     )
@@ -74,13 +74,13 @@ class StageValidation(BaseModel):
     checks: list[PreflightCheck] = Field(
         default_factory=list, description="Preflight checks (for preflight stage)"
     )
-    pass_marker: Optional[str] = Field(
+    pass_marker: str | None = Field(
         default=None, description="Text marker indicating pass (for AI stages)"
     )
-    fail_marker: Optional[str] = Field(
+    fail_marker: str | None = Field(
         default=None, description="Text marker indicating failure (for AI stages)"
     )
-    artifact: Optional[str] = Field(
+    artifact: str | None = Field(
         default=None, description="Artifact file to check for markers"
     )
     artifacts_required: list[str] = Field(

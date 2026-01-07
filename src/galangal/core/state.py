@@ -7,7 +7,6 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 
 class TaskType(str, Enum):
@@ -168,7 +167,7 @@ class WorkflowState:
     attempt: int
     awaiting_approval: bool
     clarification_required: bool
-    last_failure: Optional[str]
+    last_failure: str | None
     started_at: str
     task_description: str
     task_name: str
@@ -218,7 +217,7 @@ def get_task_dir(task_name: str) -> Path:
     return get_tasks_dir() / task_name
 
 
-def load_state(task_name: Optional[str] = None) -> Optional[WorkflowState]:
+def load_state(task_name: str | None = None) -> WorkflowState | None:
     """Load workflow state for a task."""
     from galangal.core.tasks import get_active_task
 

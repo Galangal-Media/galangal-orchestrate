@@ -21,21 +21,21 @@ Layout:
 
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Callable
 from enum import Enum
 
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.widgets import Footer, Static, RichLog, Input
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll, Container
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
+from textual.widgets import Footer, Input, RichLog, Static
 
 from galangal.ai.claude import ClaudeBackend
-from galangal.core.state import Stage, STAGE_ORDER
+from galangal.core.state import STAGE_ORDER
 
 
 class PromptType(Enum):
@@ -47,6 +47,8 @@ class PromptType(Enum):
     TEXT_INPUT = "text_input"
     PREFLIGHT_RETRY = "preflight_retry"
     STAGE_FAILURE = "stage_failure"
+    POST_COMPLETION = "post_completion"
+    TASK_TYPE = "task_type"
 
 
 class StageUI:
@@ -164,7 +166,7 @@ class StageProgressWidget(Static):
         if use_window:
             start = max(current_idx - 2, 0)
             end = min(current_idx + 3, len(stages))
-            items: list[Optional[int]] = []
+            items: list[int | None] = []
             if start > 0:
                 items.append(None)
             items.extend(range(start, end))
@@ -328,6 +330,9 @@ class PromptModal(ModalScreen):
         Binding("1", "choose_1", show=False),
         Binding("2", "choose_2", show=False),
         Binding("3", "choose_3", show=False),
+        Binding("4", "choose_4", show=False),
+        Binding("5", "choose_5", show=False),
+        Binding("6", "choose_6", show=False),
         Binding("y", "choose_yes", show=False),
         Binding("n", "choose_no", show=False),
         Binding("q", "choose_quit", show=False),
@@ -344,10 +349,13 @@ class PromptModal(ModalScreen):
         options_text = "\n".join(
             f"[{option.color}]{option.key}[/] {option.label}" for option in self._options
         )
+        # Dynamic hint based on number of options
+        max_key = max((int(o.key) for o in self._options if o.key.isdigit()), default=3)
+        hint = f"Press 1-{max_key} to choose, Esc to cancel"
         with Vertical(id="prompt-dialog"):
             yield Static(self._message, id="prompt-message")
             yield Static(Text.from_markup(options_text), id="prompt-options")
-            yield Static("Press 1-3 to choose, Esc to cancel", id="prompt-hint")
+            yield Static(hint, id="prompt-hint")
 
     def _submit_key(self, key: str) -> None:
         result = self._key_map.get(key)
@@ -362,6 +370,15 @@ class PromptModal(ModalScreen):
 
     def action_choose_3(self) -> None:
         self._submit_key("3")
+
+    def action_choose_4(self) -> None:
+        self._submit_key("4")
+
+    def action_choose_5(self) -> None:
+        self._submit_key("5")
+
+    def action_choose_6(self) -> None:
+        self._submit_key("6")
 
     def action_choose_yes(self) -> None:
         self.dismiss("yes")
@@ -549,14 +566,14 @@ class WorkflowTUIApp(App):
 
         # Workflow control
         self._prompt_type = PromptType.NONE
-        self._prompt_callback: Optional[Callable] = None
-        self._active_prompt_screen: Optional[PromptModal] = None
-        self._workflow_result: Optional[str] = None
+        self._prompt_callback: Callable | None = None
+        self._active_prompt_screen: PromptModal | None = None
+        self._workflow_result: str | None = None
         self._paused = False
 
         # Text input state
-        self._input_callback: Optional[Callable] = None
-        self._active_input_screen: Optional[TextInputModal] = None
+        self._input_callback: Callable | None = None
+        self._active_input_screen: TextInputModal | None = None
         self._files_visible = True
 
     def compose(self) -> ComposeResult:
@@ -597,13 +614,19 @@ class WorkflowTUIApp(App):
             mins, secs = divmod(elapsed, 60)
             elapsed_str = f"{mins}:{secs:02d}"
 
-        header = self.query_one("#header", HeaderWidget)
-        header.elapsed = elapsed_str
+        try:
+            header = self.query_one("#header", HeaderWidget)
+            header.elapsed = elapsed_str
+        except Exception:
+            pass  # Widget may not exist during shutdown
 
     def _update_spinner(self) -> None:
         """Update action spinner."""
-        action = self.query_one("#current-action", CurrentActionWidget)
-        action.spinner_frame += 1
+        try:
+            action = self.query_one("#current-action", CurrentActionWidget)
+            action.spinner_frame += 1
+        except Exception:
+            pass  # Widget may not exist during shutdown
 
     # -------------------------------------------------------------------------
     # Public API for workflow
@@ -733,6 +756,18 @@ class WorkflowTUIApp(App):
                 PromptOption("2", "Fix in DEV", "fix_in_dev", "#fabd2f"),
                 PromptOption("3", "Quit", "quit", "#fb4934"),
             ],
+            PromptType.POST_COMPLETION: [
+                PromptOption("1", "New Task", "new_task", "#b8bb26"),
+                PromptOption("2", "Quit", "quit", "#fabd2f"),
+            ],
+            PromptType.TASK_TYPE: [
+                PromptOption("1", "Feature - New functionality", "feature", "#b8bb26"),
+                PromptOption("2", "Bug Fix - Fix broken behavior", "bugfix", "#fb4934"),
+                PromptOption("3", "Refactor - Restructure code", "refactor", "#83a598"),
+                PromptOption("4", "Chore - Dependencies, config", "chore", "#fabd2f"),
+                PromptOption("5", "Docs - Documentation only", "docs", "#d3869b"),
+                PromptOption("6", "Hotfix - Critical fix", "hotfix", "#fe8019"),
+            ],
         }.get(prompt_type, [
             PromptOption("1", "Yes", "yes", "#b8bb26"),
             PromptOption("2", "No", "no", "#fb4934"),
@@ -741,7 +776,7 @@ class WorkflowTUIApp(App):
 
         def _show():
             try:
-                def _handle(result: Optional[str]) -> None:
+                def _handle(result: str | None) -> None:
                     self._active_prompt_screen = None
                     self._prompt_callback = None
                     self._prompt_type = PromptType.NONE
@@ -783,7 +818,7 @@ class WorkflowTUIApp(App):
 
         def _show():
             try:
-                def _handle(result: Optional[str]) -> None:
+                def _handle(result: str | None) -> None:
                     self._active_input_screen = None
                     self._input_callback = None
                     callback(result if result else None)

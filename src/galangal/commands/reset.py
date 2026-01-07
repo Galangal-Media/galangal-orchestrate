@@ -8,7 +8,7 @@ import shutil
 from rich.prompt import Prompt
 
 from galangal.core.state import get_task_dir
-from galangal.core.tasks import get_active_task, clear_active_task
+from galangal.core.tasks import clear_active_task, get_active_task
 from galangal.ui.console import print_error, print_info, print_success
 
 

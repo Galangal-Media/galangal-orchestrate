@@ -4,32 +4,30 @@ Workflow execution - stage execution, rollback, loop handling.
 
 import signal
 from datetime import datetime, timezone
-from typing import Optional
 
 from rich.console import Console
 
-from galangal.config.loader import get_config, get_tasks_dir
-from galangal.core.artifacts import artifact_exists, read_artifact, write_artifact, artifact_path
+from galangal.ai.claude import ClaudeBackend, get_pause_requested, set_pause_requested
+from galangal.config.loader import get_config
+from galangal.core.artifacts import artifact_exists, artifact_path, read_artifact, write_artifact
 from galangal.core.state import (
+    STAGE_ORDER,
     Stage,
     WorkflowState,
-    STAGE_ORDER,
-    save_state,
-    get_task_dir,
-    should_skip_for_task_type,
     get_hidden_stages_for_task_type,
+    get_task_dir,
+    save_state,
+    should_skip_for_task_type,
 )
 from galangal.core.tasks import get_current_branch
-from galangal.ai.claude import set_pause_requested, get_pause_requested
 from galangal.prompts.builder import PromptBuilder
+from galangal.ui.tui import PromptType, TUIAdapter, WorkflowTUIApp, run_stage_with_tui
 from galangal.validation.runner import ValidationRunner
-from galangal.ui.tui import run_stage_with_tui, TUIAdapter, WorkflowTUIApp, PromptType
-from galangal.ai.claude import ClaudeBackend
 
 console = Console()
 
 # Global state for pause handling
-_current_state: Optional[WorkflowState] = None
+_current_state: WorkflowState | None = None
 
 
 def _signal_handler(signum: int, frame) -> None:
@@ -43,7 +41,7 @@ def _signal_handler(signum: int, frame) -> None:
 
 def get_next_stage(
     current: Stage, state: WorkflowState
-) -> Optional[Stage]:
+) -> Stage | None:
     """Get the next stage, handling conditional stages and task type skipping."""
     config = get_config()
     task_name = state.task_name
@@ -97,7 +95,6 @@ def execute_stage(state: WorkflowState, tui_app: WorkflowTUIApp = None) -> tuple
     """
     stage = state.stage
     task_name = state.task_name
-    config = get_config()
 
     if stage == Stage.COMPLETE:
         return True, "Workflow complete"
@@ -263,8 +260,6 @@ def archive_rollback_if_exists(task_name: str) -> None:
 
 def handle_rollback(state: WorkflowState, message: str) -> bool:
     """Handle a rollback signal from a stage validator."""
-    runner = ValidationRunner()
-
     # Check for rollback_to in validation result
     if not message.startswith("ROLLBACK:") and "rollback" not in message.lower():
         return False
@@ -324,7 +319,6 @@ def handle_rollback(state: WorkflowState, message: str) -> bool:
 def run_workflow(state: WorkflowState) -> None:
     """Run the workflow from current state to completion or failure."""
     import os
-    import threading
 
     # Try persistent TUI first (unless disabled)
     if not os.environ.get("GALANGAL_NO_TUI"):
@@ -481,7 +475,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                             state.stage = Stage.DEV
                             state.attempt = 1
                             state.last_failure = f"Feedback from {failing_stage} failure: {feedback}\n\nOriginal error:\n{message[:1500]}"
-                            app.show_message(f"Rolling back to DEV with feedback", "warning")
+                            app.show_message("Rolling back to DEV with feedback", "warning")
                             save_state(state)
                             continue
                         else:
@@ -610,7 +604,43 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                 completion_event.wait()
 
                 if completion_result["value"] == "yes":
-                    app._workflow_result = "create_pr"
+                    # Run finalization within TUI
+                    app.set_status("finalizing", "creating PR...")
+
+                    def progress_callback(message, status):
+                        app.show_message(message, status)
+
+                    from galangal.commands.complete import finalize_task
+                    success, pr_url = finalize_task(
+                        state.task_name, state, force=True, progress_callback=progress_callback
+                    )
+
+                    if success:
+                        app.add_activity("")
+                        app.add_activity("[bold #b8bb26]Task completed successfully![/]", "✓")
+                        if pr_url and pr_url != "PR already exists":
+                            app.add_activity(f"[#83a598]PR: {pr_url}[/]", "")
+                        app.add_activity("")
+
+                    # Show post-completion options
+                    post_event = threading.Event()
+                    post_result = {"value": None}
+
+                    def handle_post_completion(choice):
+                        post_result["value"] = choice
+                        post_event.set()
+
+                    app.show_prompt(
+                        PromptType.POST_COMPLETION,
+                        "What would you like to do next?",
+                        handle_post_completion,
+                    )
+                    post_event.wait()
+
+                    if post_result["value"] == "new_task":
+                        app._workflow_result = "new_task"
+                    else:
+                        app._workflow_result = "done"
                 elif completion_result["value"] == "no":
                     state.stage = Stage.DEV
                     state.attempt = 1
@@ -638,14 +668,134 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
     # Handle result
     result = app._workflow_result or "paused"
 
-    if result == "create_pr":
-        from galangal.commands.complete import finalize_task
-        finalize_task(state.task_name, state, force=False)
+    if result == "new_task":
+        # Start new task flow - prompt for task type and description
+        return _start_new_task_tui()
+    elif result == "done":
+        # Clean exit after successful completion
+        console.print("\n[green]✓ All done![/green]")
+        return result
     elif result == "back_to_dev":
         # Restart workflow from DEV
         return _run_workflow_with_tui(state)
     elif result == "paused":
         _handle_pause(state)
+
+    return result
+
+
+def _start_new_task_tui() -> str:
+    """Start a new task with TUI prompts for type and description."""
+    import threading
+
+    from galangal.core.state import TaskType
+
+    # Create a minimal TUI app for task creation
+    app = WorkflowTUIApp("New Task", "SETUP", hidden_stages=frozenset())
+
+    task_info = {"type": None, "description": None, "name": None}
+    creation_done = threading.Event()
+
+    def task_creation_thread():
+        try:
+            app.add_activity("[bold]Starting new task...[/bold]", "🆕")
+            app.set_status("setup", "select task type")
+
+            # Step 1: Get task type
+            type_event = threading.Event()
+            type_result = {"value": None}
+
+            def handle_type(choice):
+                type_result["value"] = choice
+                type_event.set()
+
+            # Show task type selection (we have 3 options in the modal, offer more via text)
+            app.show_prompt(
+                PromptType.TASK_TYPE,
+                "Select task type:",
+                handle_type,
+            )
+            type_event.wait()
+
+            if type_result["value"] == "quit":
+                app._workflow_result = "cancelled"
+                creation_done.set()
+                app.call_from_thread(app.set_timer, 0.5, app.exit)
+                return
+
+            # Map selection to TaskType
+            type_map = {
+                "feature": TaskType.FEATURE,
+                "bugfix": TaskType.BUG_FIX,
+                "refactor": TaskType.REFACTOR,
+                "chore": TaskType.CHORE,
+                "docs": TaskType.DOCS,
+                "hotfix": TaskType.HOTFIX,
+            }
+            task_info["type"] = type_map.get(type_result["value"], TaskType.FEATURE)
+            app.show_message(f"Task type: {task_info['type'].display_name()}", "success")
+
+            # Step 2: Get task description
+            app.set_status("setup", "enter description")
+            desc_event = threading.Event()
+
+            def handle_description(desc):
+                task_info["description"] = desc
+                desc_event.set()
+
+            app.show_text_input("Enter task description:", "", handle_description)
+            desc_event.wait()
+
+            if not task_info["description"]:
+                app.show_message("Task creation cancelled", "warning")
+                app._workflow_result = "cancelled"
+                creation_done.set()
+                app.call_from_thread(app.set_timer, 0.5, app.exit)
+                return
+
+            # Step 3: Generate and confirm task name
+            app.set_status("setup", "generating task name")
+            from galangal.commands.start import create_task, generate_task_name
+
+            task_name = generate_task_name(task_info["description"])
+            task_info["name"] = task_name
+            app.show_message(f"Task name: {task_name}", "info")
+
+            # Create the task
+            app.set_status("setup", "creating task")
+            success, message = create_task(
+                task_name,
+                task_info["description"],
+                task_info["type"],
+            )
+
+            if success:
+                app.show_message(message, "success")
+                app._workflow_result = "task_created"
+            else:
+                app.show_message(f"Failed: {message}", "error")
+                app._workflow_result = "error"
+
+        except Exception as e:
+            app.show_message(f"Error: {e}", "error")
+            app._workflow_result = "error"
+        finally:
+            creation_done.set()
+            app.call_from_thread(app.set_timer, 0.5, app.exit)
+
+    # Start creation in background thread
+    thread = threading.Thread(target=task_creation_thread, daemon=True)
+    app.call_later(thread.start)
+    app.run()
+
+    result = app._workflow_result or "cancelled"
+
+    if result == "task_created" and task_info["name"]:
+        # Load new state and start workflow
+        from galangal.core.state import load_state
+        new_state = load_state(task_info["name"])
+        if new_state:
+            return _run_workflow_with_tui(new_state)
 
     return result
 

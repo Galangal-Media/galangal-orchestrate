@@ -7,19 +7,18 @@ import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from galangal.config.loader import (
-    get_project_root,
-    get_tasks_dir,
-    get_done_dir,
     get_active_file,
     get_config,
+    get_done_dir,
+    get_project_root,
+    get_tasks_dir,
 )
 from galangal.core.artifacts import run_command
 
 
-def get_active_task() -> Optional[str]:
+def get_active_task() -> str | None:
     """Get the currently active task name."""
     active_file = get_active_file()
     if active_file.exists():
@@ -77,7 +76,7 @@ def list_tasks() -> list[tuple[str, str, str, str]]:
     return sorted(tasks)
 
 
-def generate_task_name_ai(description: str) -> Optional[str]:
+def generate_task_name_ai(description: str) -> str | None:
     """Use AI to generate a concise, meaningful task name."""
     prompt = f"""Generate a short task name for this description. Rules:
 - 2-4 words, kebab-case (e.g., fix-auth-bug, add-user-export)

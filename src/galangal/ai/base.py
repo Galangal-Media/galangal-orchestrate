@@ -3,7 +3,7 @@ Abstract base class for AI backends.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from galangal.ui.tui import StageUI

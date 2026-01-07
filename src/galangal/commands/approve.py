@@ -7,11 +7,11 @@ from datetime import datetime, timezone
 
 from rich.prompt import Prompt
 
+from galangal.core.artifacts import artifact_exists, read_artifact, write_artifact
 from galangal.core.state import Stage, load_state, save_state
 from galangal.core.tasks import get_active_task
-from galangal.core.artifacts import artifact_exists, read_artifact, write_artifact
 from galangal.core.workflow import run_workflow
-from galangal.ui.console import console, print_error, print_success, print_info
+from galangal.ui.console import console, print_error, print_info, print_success
 
 
 def prompt_plan_approval(task_name: str, state) -> str:
@@ -23,7 +23,7 @@ def prompt_plan_approval(task_name: str, state) -> str:
     console.print("[bold yellow]⏸️  APPROVAL REQUIRED[/bold yellow]")
     console.print("=" * 60)
     console.print(f"\nTask: {task_name}")
-    console.print(f"Stage: PM → [yellow]APPROVAL GATE[/yellow] → DESIGN")
+    console.print("Stage: PM → [yellow]APPROVAL GATE[/yellow] → DESIGN")
 
     # Show PLAN.md content
     plan = read_artifact("PLAN.md", task_name)
@@ -81,7 +81,7 @@ def prompt_design_approval(task_name: str, state) -> str:
     console.print("[bold yellow]⏸️  DESIGN REVIEW REQUIRED[/bold yellow]")
     console.print("=" * 60)
     console.print(f"\nTask: {task_name}")
-    console.print(f"Stage: DESIGN → [yellow]REVIEW GATE[/yellow] → DEV")
+    console.print("Stage: DESIGN → [yellow]REVIEW GATE[/yellow] → DEV")
 
     # Show DESIGN.md content
     design = read_artifact("DESIGN.md", task_name)

@@ -3,11 +3,10 @@ Prompt building with project override support.
 """
 
 from pathlib import Path
-from typing import Optional
 
-from galangal.config.loader import get_project_root, get_prompts_dir, get_config
-from galangal.core.state import Stage, WorkflowState
+from galangal.config.loader import get_config, get_project_root, get_prompts_dir
 from galangal.core.artifacts import artifact_exists, read_artifact
+from galangal.core.state import Stage, WorkflowState
 
 
 class PromptBuilder:

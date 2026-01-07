@@ -4,10 +4,10 @@ galangal status - Show active task status.
 
 import argparse
 
+from galangal.core.artifacts import artifact_exists
 from galangal.core.state import load_state
 from galangal.core.tasks import get_active_task
-from galangal.core.artifacts import artifact_exists
-from galangal.ui.console import console, print_error, print_info, display_status
+from galangal.ui.console import display_status, print_error, print_info
 
 
 def cmd_status(args: argparse.Namespace) -> int:

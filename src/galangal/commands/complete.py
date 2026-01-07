@@ -10,12 +10,12 @@ from pathlib import Path
 
 from rich.prompt import Prompt
 
-from galangal.config.loader import get_project_root, get_config, get_done_dir
-from galangal.core.state import Stage, load_state, get_task_dir
-from galangal.core.tasks import get_active_task, clear_active_task, get_current_branch
-from galangal.core.artifacts import read_artifact, run_command
 from galangal.ai.claude import ClaudeBackend
-from galangal.ui.console import console, print_error, print_info, print_success, print_warning
+from galangal.config.loader import get_config, get_done_dir, get_project_root
+from galangal.core.artifacts import read_artifact, run_command
+from galangal.core.state import Stage, get_task_dir, load_state
+from galangal.core.tasks import clear_active_task, get_active_task
+from galangal.ui.console import console, print_error, print_success, print_warning
 
 
 def generate_pr_title(task_name: str, description: str, task_type: str) -> str:
@@ -195,8 +195,32 @@ Changes: {change_count} files"""
     return True, f"Committed {change_count} files"
 
 
-def finalize_task(task_name: str, state, force: bool = False) -> bool:
-    """Finalize a completed task: move to done/, commit, create PR."""
+def finalize_task(task_name: str, state, force: bool = False, progress_callback=None) -> tuple[bool, str]:
+    """Finalize a completed task: move to done/, commit, create PR.
+
+    Args:
+        task_name: Name of the task to finalize
+        state: WorkflowState object
+        force: If True, continue even on errors
+        progress_callback: Optional callback(message, status) for progress updates.
+                          status is one of: 'info', 'success', 'warning', 'error'
+
+    Returns:
+        Tuple of (success, pr_url_or_error_message)
+    """
+    def report(message: str, status: str = "info"):
+        if progress_callback:
+            progress_callback(message, status)
+        else:
+            if status == "success":
+                print_success(message)
+            elif status == "warning":
+                print_warning(message)
+            elif status == "error":
+                print_error(message)
+            else:
+                console.print(f"[dim]{message}[/dim]")
+
     config = get_config()
     project_root = get_project_root()
     done_dir = get_done_dir()
@@ -209,42 +233,45 @@ def finalize_task(task_name: str, state, force: bool = False) -> bool:
     if dest.exists():
         dest = done_dir / f"{task_name}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
-    console.print(f"[dim]Moving task to {dest.relative_to(project_root)}/...[/dim]")
+    report(f"Moving task to {dest.relative_to(project_root)}/...")
     shutil.move(str(task_dir), str(dest))
     clear_active_task()
 
     # 2. Commit changes
-    console.print("[dim]Committing changes...[/dim]")
+    report("Committing changes...")
     success, msg = commit_changes(task_name, state.task_description)
     if success:
-        print_success(msg)
+        report(msg, "success")
     else:
-        print_warning(msg)
-        if not force:
+        report(msg, "warning")
+        if not force and not progress_callback:
+            # Only prompt in non-TUI mode
             confirm = Prompt.ask("Continue anyway? [y/N]", default="n").strip().lower()
             if confirm != "y":
                 shutil.move(str(dest), str(task_dir))
                 from galangal.core.tasks import set_active_task
                 set_active_task(task_name)
-                print_info("Aborted. Task restored to original location.")
-                return False
+                report("Aborted. Task restored to original location.", "warning")
+                return False, "Aborted by user"
 
     # 3. Create PR
-    console.print("[dim]Creating pull request...[/dim]")
+    report("Creating pull request...")
     success, msg = create_pull_request(task_name, state.task_description, state.task_type.display_name())
+    pr_url = ""
     if success:
-        console.print(f"[green]PR:[/green] {msg}")
+        pr_url = msg
+        report(f"PR: {msg}", "success")
     else:
-        print_warning(f"Could not create PR: {msg}")
-        console.print("You may need to create the PR manually.")
+        report(f"Could not create PR: {msg}", "warning")
+        report("You may need to create the PR manually.", "info")
 
-    print_success(f"Task '{task_name}' completed and moved to {config.tasks_dir}/done/")
+    report(f"Task '{task_name}' completed and moved to {config.tasks_dir}/done/", "success")
 
     # 4. Switch back to main
     run_command(["git", "checkout", config.pr.base_branch])
-    console.print(f"[dim]Switched back to {config.pr.base_branch} branch[/dim]")
+    report(f"Switched back to {config.pr.base_branch} branch", "info")
 
-    return True
+    return True, pr_url
 
 
 def cmd_complete(args: argparse.Namespace) -> int:
@@ -264,5 +291,5 @@ def cmd_complete(args: argparse.Namespace) -> int:
         console.print("Run 'resume' to continue the workflow.")
         return 1
 
-    success = finalize_task(active, state, force=args.force)
+    success, _ = finalize_task(active, state, force=args.force)
     return 0 if success else 1

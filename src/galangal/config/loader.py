@@ -2,20 +2,18 @@
 Configuration loading and management.
 """
 
-import os
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
 from galangal.config.schema import GalangalConfig
 
 # Global config cache
-_config: Optional[GalangalConfig] = None
-_project_root: Optional[Path] = None
+_config: GalangalConfig | None = None
+_project_root: Path | None = None
 
 
-def find_project_root(start_path: Optional[Path] = None) -> Path:
+def find_project_root(start_path: Path | None = None) -> Path:
     """
     Find the project root by looking for .galangal/ directory.
     Falls back to git root, then current directory.
@@ -53,7 +51,7 @@ def set_project_root(path: Path) -> None:
     _config = None  # Reset config cache
 
 
-def load_config(project_root: Optional[Path] = None) -> GalangalConfig:
+def load_config(project_root: Path | None = None) -> GalangalConfig:
     """
     Load configuration from .galangal/config.yaml.
     Returns default config if file doesn't exist.

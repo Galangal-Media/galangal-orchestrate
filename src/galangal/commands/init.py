@@ -5,11 +5,11 @@ galangal init - Initialize galangal in a project.
 import argparse
 from pathlib import Path
 
-from rich.prompt import Prompt, Confirm
+from rich.prompt import Confirm, Prompt
 
 from galangal.config.defaults import generate_default_config
 from galangal.config.loader import find_project_root
-from galangal.ui.console import console, print_success, print_error, print_info
+from galangal.ui.console import console, print_info, print_success
 
 
 def detect_stacks(project_root: Path) -> list[dict[str, str]]:
@@ -148,8 +148,8 @@ def cmd_init(args: argparse.Namespace) -> int:
     )
     (galangal_dir / "config.yaml").write_text(config_content)
 
-    print_success(f"Created .galangal/config.yaml")
-    print_success(f"Created .galangal/prompts/ (empty - uses defaults)")
+    print_success("Created .galangal/config.yaml")
+    print_success("Created .galangal/prompts/ (empty - uses defaults)")
 
     # Add to .gitignore
     gitignore = project_root / ".gitignore"

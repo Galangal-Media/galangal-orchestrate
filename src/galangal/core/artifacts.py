@@ -4,13 +4,12 @@ Artifact management - reading and writing task artifacts.
 
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 from galangal.config.loader import get_project_root
 from galangal.core.state import get_task_dir
 
 
-def artifact_path(name: str, task_name: Optional[str] = None) -> Path:
+def artifact_path(name: str, task_name: str | None = None) -> Path:
     """Get path to an artifact file."""
     from galangal.core.tasks import get_active_task
 
@@ -21,7 +20,7 @@ def artifact_path(name: str, task_name: Optional[str] = None) -> Path:
     return get_task_dir(task_name) / name
 
 
-def artifact_exists(name: str, task_name: Optional[str] = None) -> bool:
+def artifact_exists(name: str, task_name: str | None = None) -> bool:
     """Check if an artifact exists."""
     try:
         return artifact_path(name, task_name).exists()
@@ -29,7 +28,7 @@ def artifact_exists(name: str, task_name: Optional[str] = None) -> bool:
         return False
 
 
-def read_artifact(name: str, task_name: Optional[str] = None) -> Optional[str]:
+def read_artifact(name: str, task_name: str | None = None) -> str | None:
     """Read an artifact file."""
     try:
         path = artifact_path(name, task_name)
@@ -40,7 +39,7 @@ def read_artifact(name: str, task_name: Optional[str] = None) -> Optional[str]:
     return None
 
 
-def write_artifact(name: str, content: str, task_name: Optional[str] = None) -> None:
+def write_artifact(name: str, content: str, task_name: str | None = None) -> None:
     """Write an artifact file."""
     path = artifact_path(name, task_name)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,7 +47,7 @@ def write_artifact(name: str, content: str, task_name: Optional[str] = None) -> 
 
 
 def run_command(
-    cmd: list[str], cwd: Optional[Path] = None, timeout: int = 300
+    cmd: list[str], cwd: Path | None = None, timeout: int = 300
 ) -> tuple[int, str, str]:
     """Run a command and return (exit_code, stdout, stderr)."""
     try:
