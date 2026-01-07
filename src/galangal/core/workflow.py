@@ -648,6 +648,47 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     else:
                         app._workflow_result = "done"
                 elif completion_result["value"] == "no":
+                    # Ask for feedback about what needs fixing
+                    app.set_status("feedback", "waiting for input")
+                    feedback_event = threading.Event()
+                    feedback_result = {"value": None}
+
+                    def handle_feedback(text):
+                        feedback_result["value"] = text
+                        feedback_event.set()
+
+                    app.show_text_input(
+                        "What needs to be fixed? (Enter feedback for DEV stage):",
+                        "",
+                        handle_feedback,
+                    )
+                    feedback_event.wait()
+
+                    feedback = feedback_result["value"]
+                    if feedback:
+                        # Create ROLLBACK.md with the feedback
+                        from datetime import datetime, timezone
+                        rollback_content = f"""# Manual Review Rollback
+
+## Source
+Manual review at COMPLETE stage
+
+## Date
+{datetime.now(timezone.utc).isoformat()}
+
+## Issues to Fix
+{feedback}
+
+## Instructions
+Please address the issues described above before proceeding.
+"""
+                        write_artifact("ROLLBACK.md", rollback_content, state.task_name)
+                        state.last_failure = f"Manual review feedback: {feedback}"
+                        app.show_message("Feedback recorded, rolling back to DEV", "warning")
+                    else:
+                        state.last_failure = "Manual review requested changes (no details provided)"
+                        app.show_message("Rolling back to DEV (no feedback provided)", "warning")
+
                     state.stage = Stage.DEV
                     state.attempt = 1
                     save_state(state)
