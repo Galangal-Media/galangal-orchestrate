@@ -32,10 +32,12 @@ class ClaudeBackend(AIBackend):
         pause_check: PauseCheck | None = None,
     ) -> StageResult:
         """Invoke Claude Code with a prompt."""
+        # Pass prompt via stdin to avoid "Argument list too long" errors
+        # when prompts exceed the ~128KB command line limit
         cmd = [
             "claude",
             "-p",
-            prompt,
+            "-",  # Read prompt from stdin
             "--output-format",
             "stream-json",
             "--verbose",
@@ -49,10 +51,16 @@ class ClaudeBackend(AIBackend):
             process = subprocess.Popen(
                 cmd,
                 cwd=get_project_root(),
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
             )
+
+            # Write prompt to stdin and close it
+            if process.stdin:
+                process.stdin.write(prompt)
+                process.stdin.close()
 
             output_lines: list[str] = []
             last_status_time = time.time()
@@ -256,9 +264,11 @@ class ClaudeBackend(AIBackend):
     def generate_text(self, prompt: str, timeout: int = 30) -> str:
         """Simple text generation."""
         try:
+            # Pass prompt via stdin to avoid "Argument list too long" errors
             result = subprocess.run(
-                ["claude", "-p", prompt, "--output-format", "text"],
+                ["claude", "-p", "-", "--output-format", "text"],
                 cwd=get_project_root(),
+                input=prompt,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
