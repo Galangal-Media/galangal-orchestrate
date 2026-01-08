@@ -3,16 +3,12 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from galangal.ai.claude import ClaudeBackend, set_pause_requested
+from galangal.ai.claude import ClaudeBackend
 from galangal.results import StageResult, StageResultType
 
 
 class TestClaudeBackendInvoke:
     """Tests for ClaudeBackend.invoke() StageResult returns."""
-
-    def setup_method(self):
-        """Reset pause flag before each test."""
-        set_pause_requested(False)
 
     def test_successful_invocation_returns_success_result(self):
         """Test that successful invocation returns StageResult.success."""
@@ -92,23 +88,48 @@ class TestClaudeBackendInvoke:
         assert result.success is False
         assert result.type == StageResultType.MAX_TURNS
 
-    def test_pause_requested_returns_paused_result(self):
-        """Test that pause request returns StageResult.paused."""
+    def test_pause_check_callback_returns_paused_result(self):
+        """Test that pause_check callback returning True returns StageResult.paused."""
         backend = ClaudeBackend()
-        set_pause_requested(True)
 
         mock_process = MagicMock()
         mock_process.poll.return_value = None
         mock_process.terminate = MagicMock()
         mock_process.wait = MagicMock()
 
+        # Use a callback that returns True (pause requested)
+        pause_check = lambda: True
+
         with patch("galangal.ai.claude.subprocess.Popen", return_value=mock_process):
             with patch("galangal.ai.claude.select.select", return_value=([], [], [])):
-                result = backend.invoke("test prompt")
+                result = backend.invoke("test prompt", pause_check=pause_check)
 
         assert isinstance(result, StageResult)
         assert result.success is False
         assert result.type == StageResultType.PAUSED
+
+    def test_pause_check_callback_false_continues(self):
+        """Test that pause_check callback returning False allows execution to continue."""
+        backend = ClaudeBackend()
+
+        result_json = json.dumps({"type": "result", "result": "Stage completed", "num_turns": 5})
+
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0]
+        mock_process.stdout.readline.side_effect = [result_json + "\n", ""]
+        mock_process.communicate.return_value = ("", "")
+        mock_process.returncode = 0
+
+        # Use a callback that returns False (no pause)
+        pause_check = lambda: False
+
+        with patch("galangal.ai.claude.subprocess.Popen", return_value=mock_process):
+            with patch("galangal.ai.claude.select.select", return_value=([mock_process.stdout], [], [])):
+                result = backend.invoke("test prompt", pause_check=pause_check)
+
+        assert isinstance(result, StageResult)
+        assert result.success is True
+        assert result.type == StageResultType.SUCCESS
 
     def test_exception_returns_error_result(self):
         """Test that exception returns StageResult.error."""

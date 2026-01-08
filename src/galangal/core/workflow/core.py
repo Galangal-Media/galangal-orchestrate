@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from galangal.ai.base import PauseCheck
 from galangal.ai.claude import ClaudeBackend
 from galangal.config.loader import get_config
 from galangal.core.artifacts import artifact_exists, artifact_path, read_artifact, write_artifact
@@ -76,8 +77,18 @@ def get_next_stage(
     return next_stage
 
 
-def execute_stage(state: WorkflowState, tui_app: WorkflowTUIApp) -> StageResult:
-    """Execute the current stage. Returns structured StageResult."""
+def execute_stage(
+    state: WorkflowState,
+    tui_app: WorkflowTUIApp,
+    pause_check: PauseCheck | None = None,
+) -> StageResult:
+    """Execute the current stage. Returns structured StageResult.
+
+    Args:
+        state: Current workflow state
+        tui_app: TUI application for UI feedback
+        pause_check: Optional callback that returns True if pause requested
+    """
     stage = state.stage
     task_name = state.task_name
 
@@ -142,6 +153,7 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         timeout=14400,
         max_turns=200,
         ui=ui,
+        pause_check=pause_check,
     )
 
     # Log the output

@@ -4,7 +4,6 @@ Pause handling for workflow execution.
 
 from rich.console import Console
 
-from galangal.ai.claude import set_pause_requested
 from galangal.core.state import WorkflowState, save_state
 
 console = Console()
@@ -12,7 +11,6 @@ console = Console()
 
 def _handle_pause(state: WorkflowState) -> None:
     """Handle a pause request. Called after TUI exits."""
-    set_pause_requested(False)
     save_state(state)
 
     console.print("\n" + "=" * 60)

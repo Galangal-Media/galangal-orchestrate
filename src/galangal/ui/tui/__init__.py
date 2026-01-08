@@ -12,7 +12,7 @@ This package provides:
 from galangal.ui.tui.adapters import PromptType, StageUI, TUIAdapter
 from galangal.ui.tui.app import StageTUIApp, WorkflowTUIApp
 from galangal.ui.tui.entry import run_stage_with_tui
-from galangal.ui.tui.modals import PromptModal, PromptOption, TextInputModal
+from galangal.ui.tui.modals import MultilineInputModal, PromptModal, PromptOption, TextInputModal
 from galangal.ui.tui.widgets import (
     CurrentActionWidget,
     FilesPanelWidget,
@@ -39,4 +39,5 @@ __all__ = [
     "PromptOption",
     "PromptModal",
     "TextInputModal",
+    "MultilineInputModal",
 ]

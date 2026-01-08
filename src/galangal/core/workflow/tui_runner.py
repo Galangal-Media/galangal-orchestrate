@@ -56,7 +56,8 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                 app.set_status("running", f"executing {state.stage.value}")
 
                 # Execute stage with the TUI app
-                result = execute_stage(state, tui_app=app)
+                # Pass pause_check callback so the backend can check for pause during execution
+                result = execute_stage(state, tui_app=app, pause_check=lambda: app._paused)
 
                 if app._paused:
                     app._workflow_result = "paused"
@@ -154,8 +155,9 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                                     failure_result["feedback"] = feedback
                                     failure_event.set()
 
-                                app.show_text_input(
-                                    "Describe what needs to be fixed:",
+                                app.show_multiline_input(
+                                    "Describe what needs to be fixed (Ctrl+S to submit):",
+                                    "",
                                     handle_feedback,
                                 )
                             else:
@@ -275,8 +277,8 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                             )
                         elif approval_result["value"] == "pending_reason":
                             approval_result["value"] = None  # Reset
-                            app.show_text_input(
-                                "Enter rejection reason:", "Needs revision", handle_rejection_reason
+                            app.show_multiline_input(
+                                "Enter rejection reason (Ctrl+S to submit):", "Needs revision", handle_rejection_reason
                             )
 
                     if approval_result["value"] == "quit":
@@ -380,8 +382,8 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                         feedback_result["value"] = text
                         feedback_event.set()
 
-                    app.show_text_input(
-                        "What needs to be fixed? (Enter feedback for DEV stage):",
+                    app.show_multiline_input(
+                        "What needs to be fixed? (Ctrl+S to submit):",
                         "",
                         handle_feedback,
                     )
@@ -510,7 +512,7 @@ def _start_new_task_tui() -> str:
                 task_info["description"] = desc
                 desc_event.set()
 
-            app.show_text_input("Enter task description:", "", handle_description)
+            app.show_multiline_input("Enter task description (Ctrl+S to submit):", "", handle_description)
             desc_event.wait()
 
             if not task_info["description"]:

@@ -3,12 +3,16 @@ Abstract base class for AI backends.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Optional
 
 from galangal.results import StageResult
 
 if TYPE_CHECKING:
     from galangal.ui.tui import StageUI
+
+# Type alias for pause check callback
+PauseCheck = Callable[[], bool]
 
 
 class AIBackend(ABC):
@@ -21,6 +25,7 @@ class AIBackend(ABC):
         timeout: int = 14400,
         max_turns: int = 200,
         ui: Optional["StageUI"] = None,
+        pause_check: PauseCheck | None = None,
     ) -> StageResult:
         """
         Invoke the AI with a prompt for a full stage execution.
@@ -30,6 +35,7 @@ class AIBackend(ABC):
             timeout: Maximum time in seconds
             max_turns: Maximum conversation turns
             ui: Optional TUI for progress display
+            pause_check: Optional callback that returns True if pause requested
 
         Returns:
             StageResult with success/failure and structured outcome type

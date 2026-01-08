@@ -9,7 +9,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Input, Static
+from textual.widgets import Input, Static, TextArea
 
 
 @dataclass(frozen=True)
@@ -184,6 +184,79 @@ class TextInputModal(ModalScreen):
         if event.input.id == "text-input-field":
             value = event.value.strip()
             self.dismiss(value if value else None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class MultilineInputModal(ModalScreen):
+    """Modal for collecting multi-line text input (task descriptions, briefs)."""
+
+    CSS = """
+    MultilineInputModal {
+        align: center middle;
+        layout: vertical;
+    }
+
+    #multiline-input-dialog {
+        width: 90%;
+        max-width: 100;
+        min-width: 50;
+        height: auto;
+        max-height: 80%;
+        background: #3c3836;
+        border: round #504945;
+        padding: 1 2;
+        layout: vertical;
+    }
+
+    #multiline-input-label {
+        color: #ebdbb2;
+        text-style: bold;
+        margin-bottom: 1;
+        text-wrap: wrap;
+    }
+
+    #multiline-input-field {
+        width: 100%;
+        height: 12;
+        min-height: 6;
+        background: #282828;
+        border: solid #504945;
+    }
+
+    #multiline-input-hint {
+        color: #7c6f64;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+        Binding("ctrl+s", "submit", "Submit", show=True, priority=True),
+    ]
+
+    def __init__(self, label: str, default: str = ""):
+        super().__init__()
+        self._label = label
+        self._default = default
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="multiline-input-dialog"):
+            yield Static(self._label, id="multiline-input-label")
+            yield TextArea(self._default, id="multiline-input-field")
+            yield Static("Ctrl+S to submit, Esc to cancel", id="multiline-input-hint")
+
+    def on_mount(self) -> None:
+        field = self.query_one("#multiline-input-field", TextArea)
+        self.set_focus(field)
+        # Move cursor to end of text
+        field.move_cursor(field.document.end)
+
+    def action_submit(self) -> None:
+        field = self.query_one("#multiline-input-field", TextArea)
+        value = field.text.strip()
+        self.dismiss(value if value else None)
 
     def action_cancel(self) -> None:
         self.dismiss(None)

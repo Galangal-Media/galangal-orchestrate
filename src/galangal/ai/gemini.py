@@ -4,7 +4,7 @@ Gemini backend implementation (stub for future use).
 
 from typing import TYPE_CHECKING, Optional
 
-from galangal.ai.base import AIBackend
+from galangal.ai.base import AIBackend, PauseCheck
 from galangal.results import StageResult
 
 if TYPE_CHECKING:
@@ -28,6 +28,7 @@ class GeminiBackend(AIBackend):
         timeout: int = 14400,
         max_turns: int = 200,
         ui: Optional["StageUI"] = None,
+        pause_check: PauseCheck | None = None,
     ) -> StageResult:
         """Invoke Gemini with a prompt."""
         # TODO: Implement Gemini invocation

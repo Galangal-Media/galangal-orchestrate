@@ -116,7 +116,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                     task_info["description"] = desc
                     desc_event.set()
 
-                app.show_text_input("Enter task description:", "", handle_description)
+                app.show_multiline_input("Enter task description (Ctrl+S to submit):", "", handle_description)
                 desc_event.wait()
 
                 if not task_info["description"]:

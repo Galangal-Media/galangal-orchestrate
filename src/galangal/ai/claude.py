@@ -8,26 +8,12 @@ import subprocess
 import time
 from typing import TYPE_CHECKING, Optional
 
-from galangal.ai.base import AIBackend
+from galangal.ai.base import AIBackend, PauseCheck
 from galangal.config.loader import get_project_root
 from galangal.results import StageResult
 
 if TYPE_CHECKING:
     from galangal.ui.tui import StageUI
-
-# Reference to global pause flag
-_pause_requested = False
-
-
-def set_pause_requested(value: bool) -> None:
-    """Set the pause requested flag."""
-    global _pause_requested
-    _pause_requested = value
-
-
-def get_pause_requested() -> bool:
-    """Get the pause requested flag."""
-    return _pause_requested
 
 
 class ClaudeBackend(AIBackend):
@@ -43,6 +29,7 @@ class ClaudeBackend(AIBackend):
         timeout: int = 14400,
         max_turns: int = 200,
         ui: Optional["StageUI"] = None,
+        pause_check: PauseCheck | None = None,
     ) -> StageResult:
         """Invoke Claude Code with a prompt."""
         cmd = [
@@ -101,7 +88,8 @@ class ClaudeBackend(AIBackend):
                 if retcode is not None:
                     break
 
-                if _pause_requested:
+                # Check for pause request via callback
+                if pause_check and pause_check():
                     process.terminate()
                     try:
                         process.wait(timeout=5)

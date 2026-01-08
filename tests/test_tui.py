@@ -52,6 +52,65 @@ class TestTextInput:
             assert callback_result == [None]
 
 
+class TestMultilineInput:
+    """Tests for multiline text input modal functionality."""
+
+    @pytest.mark.asyncio
+    async def test_multiline_input_submit_with_ctrl_s(self, app):
+        """Test that Ctrl+S submits multiline text input."""
+        async with app.run_test() as pilot:
+            callback_result = []
+            app.show_multiline_input("Enter description:", "", lambda v: callback_result.append(v))
+
+            # Wait for modal to appear
+            await pilot.pause()
+            await pilot.pause()
+
+            # Type some text
+            await pilot.press("h", "e", "l", "l", "o")
+            await pilot.pause()
+
+            # Submit with Ctrl+S
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+
+            assert callback_result == ["hello"]
+
+    @pytest.mark.asyncio
+    async def test_multiline_input_escape_cancels(self, app):
+        """Test that Escape key cancels multiline text input."""
+        async with app.run_test() as pilot:
+            callback_result = []
+            app.show_multiline_input("Enter description:", "", lambda v: callback_result.append(v))
+
+            await pilot.pause()
+
+            # Type then cancel
+            await pilot.press("t", "e", "s", "t")
+            await pilot.press("escape")
+            await pilot.pause()
+
+            # Callback should receive None for cancelled
+            assert callback_result == [None]
+
+    @pytest.mark.asyncio
+    async def test_multiline_input_with_default(self, app):
+        """Test multiline input with default value."""
+        async with app.run_test() as pilot:
+            callback_result = []
+            app.show_multiline_input("Edit:", "default text", lambda v: callback_result.append(v))
+
+            # Wait for modal to appear
+            await pilot.pause()
+            await pilot.pause()
+
+            # Submit without changes
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+
+            assert callback_result == ["default text"]
+
+
 class TestPromptActions:
     """Tests for approval prompt modal actions."""
 

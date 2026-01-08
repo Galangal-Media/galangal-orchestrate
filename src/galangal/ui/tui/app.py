@@ -30,7 +30,7 @@ from textual.containers import Container, Horizontal, VerticalScroll
 from textual.widgets import Footer, RichLog
 
 from galangal.ui.tui.adapters import PromptType, TUIAdapter
-from galangal.ui.tui.modals import PromptModal, PromptOption, TextInputModal
+from galangal.ui.tui.modals import MultilineInputModal, PromptModal, PromptOption, TextInputModal
 from galangal.ui.tui.widgets import (
     CurrentActionWidget,
     FilesPanelWidget,
@@ -429,6 +429,30 @@ class WorkflowTUIApp(App):
             self.call_from_thread(_hide)
         except Exception:
             _hide()
+
+    def show_multiline_input(self, label: str, default: str, callback: Callable) -> None:
+        """Show multiline text input prompt for task descriptions and briefs."""
+        self._input_callback = callback
+
+        def _show():
+            try:
+
+                def _handle(result: str | None) -> None:
+                    self._active_input_screen = None
+                    self._input_callback = None
+                    callback(result if result else None)
+
+                screen = MultilineInputModal(label, default)
+                self._active_input_screen = screen
+                self.push_screen(screen, _handle)
+            except Exception as e:
+                log = self.query_one("#activity-log", RichLog)
+                log.write(f"[#fb4934]⚠ Input error: {e}[/]")
+
+        try:
+            self.call_from_thread(_show)
+        except Exception:
+            _show()
 
     # -------------------------------------------------------------------------
     # Actions
