@@ -314,8 +314,11 @@ class WorkflowTUIApp(App):
         def _add():
             # Only show activity in compact (non-verbose) mode
             if not self.verbose:
-                log = self.query_one("#activity-log", RichLog)
-                log.write(entry.format_display())
+                try:
+                    log = self.query_one("#activity-log", RichLog)
+                    log.write(entry.format_display())
+                except Exception:
+                    pass  # Widget may not exist during screen transitions
 
         try:
             self.call_from_thread(_add)
@@ -326,8 +329,11 @@ class WorkflowTUIApp(App):
         """Add file to files panel."""
 
         def _add():
-            files = self.query_one("#files-container", FilesPanelWidget)
-            files.add_file(action, path)
+            try:
+                files = self.query_one("#files-container", FilesPanelWidget)
+                files.add_file(action, path)
+            except Exception:
+                pass  # Widget may not exist during screen transitions
 
         try:
             self.call_from_thread(_add)
@@ -407,10 +413,8 @@ class WorkflowTUIApp(App):
                 screen = PromptModal(message, options)
                 self._active_prompt_screen = screen
                 self.push_screen(screen, _handle)
-            except Exception as e:
-                # Log error to activity - use internal method to avoid threading issues
-                log = self.query_one("#activity-log", RichLog)
-                log.write(f"[#fb4934]⚠ Prompt error: {e}[/]")
+            except Exception:
+                pass  # Silently ignore prompt errors during screen transitions
 
         try:
             self.call_from_thread(_show)
@@ -460,9 +464,8 @@ class WorkflowTUIApp(App):
                 screen = TextInputModal(label, default)
                 self._active_input_screen = screen
                 self.push_screen(screen, _handle)
-            except Exception as e:
-                log = self.query_one("#activity-log", RichLog)
-                log.write(f"[#fb4934]⚠ Input error: {e}[/]")
+            except Exception:
+                pass  # Silently ignore input errors during screen transitions
 
         try:
             self.call_from_thread(_show)

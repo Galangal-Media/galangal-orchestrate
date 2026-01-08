@@ -74,24 +74,28 @@ class ClaudeBackend(AIBackend):
                 retcode = process.poll()
 
                 if process.stdout:
-                    ready, _, _ = select.select([process.stdout], [], [], 0.5)
+                    try:
+                        ready, _, _ = select.select([process.stdout], [], [], 0.5)
 
-                    if ready:
-                        line = process.stdout.readline()
-                        if line:
-                            output_lines.append(line)
-                            if ui:
-                                ui.add_raw_line(line)
-                            self._process_stream_line(line, ui, pending_tools)
-                    else:
-                        idle_time = time.time() - last_status_time
-                        if idle_time > 3 and ui:
-                            if pending_tools:
-                                tool_name = pending_tools[-1][1]
-                                ui.set_status("waiting", f"{tool_name}...")
-                            else:
-                                ui.set_status("waiting", "API response")
-                            last_status_time = time.time()
+                        if ready:
+                            line = process.stdout.readline()
+                            if line:
+                                output_lines.append(line)
+                                if ui:
+                                    ui.add_raw_line(line)
+                                self._process_stream_line(line, ui, pending_tools)
+                        else:
+                            idle_time = time.time() - last_status_time
+                            if idle_time > 3 and ui:
+                                if pending_tools:
+                                    tool_name = pending_tools[-1][1]
+                                    ui.set_status("waiting", f"{tool_name}...")
+                                else:
+                                    ui.set_status("waiting", "API response")
+                                last_status_time = time.time()
+                    except (OSError, ValueError):
+                        # stdout closed or invalid, break out of loop
+                        break
 
                 if retcode is not None:
                     break
