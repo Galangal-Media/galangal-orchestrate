@@ -23,6 +23,7 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -31,6 +32,7 @@ from textual.widgets import Footer, RichLog
 
 from galangal.ui.tui.adapters import PromptType, TUIAdapter
 from galangal.ui.tui.modals import MultilineInputModal, PromptModal, PromptOption, TextInputModal
+from galangal.ui.tui.types import ActivityCategory, ActivityEntry, ActivityLevel, export_activity_log
 from galangal.ui.tui.widgets import (
     CurrentActionWidget,
     FilesPanelWidget,
@@ -163,7 +165,7 @@ class WorkflowTUIApp(App):
 
         # Raw lines storage for verbose replay
         self._raw_lines: list[str] = []
-        self._activity_lines: list[tuple[str, str]] = []  # (icon, message)
+        self._activity_entries: list[ActivityEntry] = []
 
         # Workflow control
         self._prompt_type = PromptType.NONE
@@ -277,17 +279,38 @@ class WorkflowTUIApp(App):
         except Exception:
             _update()
 
-    def add_activity(self, activity: str, icon: str = "•") -> None:
-        """Add activity to log."""
-        # Store for replay when toggling modes
-        self._activity_lines.append((icon, activity))
+    def add_activity(
+        self,
+        activity: str,
+        icon: str = "•",
+        level: ActivityLevel = ActivityLevel.INFO,
+        category: ActivityCategory = ActivityCategory.SYSTEM,
+        details: str | None = None,
+    ) -> None:
+        """
+        Add activity to log.
+
+        Args:
+            activity: Message to display.
+            icon: Icon prefix for the entry.
+            level: Severity level (info, success, warning, error).
+            category: Category for filtering (stage, validation, claude, file, system).
+            details: Optional additional details for export.
+        """
+        entry = ActivityEntry(
+            message=activity,
+            icon=icon,
+            level=level,
+            category=category,
+            details=details,
+        )
+        self._activity_entries.append(entry)
 
         def _add():
             # Only show activity in compact (non-verbose) mode
             if not self.verbose:
                 log = self.query_one("#activity-log", RichLog)
-                timestamp = datetime.now().strftime("%H:%M:%S")
-                log.write(f"[#928374]{timestamp}[/] {icon} {activity}")
+                log.write(entry.format_display())
 
         try:
             self.call_from_thread(_add)
@@ -306,20 +329,37 @@ class WorkflowTUIApp(App):
         except Exception:
             _add()
 
-    def show_message(self, message: str, style: str = "info") -> None:
-        """Show a styled message."""
+    def show_message(
+        self,
+        message: str,
+        style: str = "info",
+        category: ActivityCategory = ActivityCategory.SYSTEM,
+    ) -> None:
+        """
+        Show a styled message.
+
+        Args:
+            message: Message to display.
+            style: Style name (info, success, error, warning).
+            category: Category for filtering.
+        """
         icons = {"info": "ℹ", "success": "✓", "error": "✗", "warning": "⚠"}
-        colors = {"info": "#83a598", "success": "#b8bb26", "error": "#fb4934", "warning": "#fabd2f"}
+        levels = {
+            "info": ActivityLevel.INFO,
+            "success": ActivityLevel.SUCCESS,
+            "error": ActivityLevel.ERROR,
+            "warning": ActivityLevel.WARNING,
+        }
         icon = icons.get(style, "•")
-        color = colors.get(style, "#ebdbb2")
-        self.add_activity(f"[{color}]{message}[/]", icon)
+        level = levels.get(style, ActivityLevel.INFO)
+        self.add_activity(message, icon, level=level, category=category)
 
     def show_stage_complete(self, stage: str, success: bool) -> None:
         """Show stage completion."""
         if success:
-            self.show_message(f"Stage {stage} completed", "success")
+            self.show_message(f"Stage {stage} completed", "success", ActivityCategory.STAGE)
         else:
-            self.show_message(f"Stage {stage} failed", "error")
+            self.show_message(f"Stage {stage} failed", "error", ActivityCategory.STAGE)
 
     def show_workflow_complete(self) -> None:
         """Show workflow completion banner."""
@@ -577,9 +617,9 @@ class WorkflowTUIApp(App):
                 log.write(f"[#7c6f64]{display}[/]")
         else:
             log.write("[#b8bb26]Switched to COMPACT mode[/]")
-            # Replay recent activity
-            for icon, activity in self._activity_lines[-30:]:
-                log.write(f"  {icon} {activity}")
+            # Replay recent activity entries
+            for entry in self._activity_entries[-30:]:
+                log.write(entry.format_display())
 
     def action_toggle_files(self) -> None:
         self._files_visible = not self._files_visible
@@ -593,6 +633,32 @@ class WorkflowTUIApp(App):
         else:
             files.display = False
             activity.styles.width = "100%"
+
+    # -------------------------------------------------------------------------
+    # Activity log access
+    # -------------------------------------------------------------------------
+
+    @property
+    def activity_entries(self) -> list[ActivityEntry]:
+        """Get all activity entries for filtering or export."""
+        return self._activity_entries.copy()
+
+    def export_activity_log(self, path: str | Path) -> None:
+        """
+        Export activity log to a file.
+
+        Args:
+            path: File path to write the log to.
+        """
+        export_activity_log(self._activity_entries, Path(path))
+
+    def get_entries_by_level(self, level: ActivityLevel) -> list[ActivityEntry]:
+        """Filter entries by severity level."""
+        return [e for e in self._activity_entries if e.level == level]
+
+    def get_entries_by_category(self, category: ActivityCategory) -> list[ActivityEntry]:
+        """Filter entries by category."""
+        return [e for e in self._activity_entries if e.category == category]
 
 
 class StageTUIApp(WorkflowTUIApp):

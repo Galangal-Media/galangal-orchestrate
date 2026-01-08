@@ -50,6 +50,29 @@ class TaskType(str, Enum):
         }[self]
 
 
+@dataclass(frozen=True)
+class StageMetadata:
+    """
+    Rich metadata for a workflow stage.
+
+    Provides centralized information about each stage including:
+    - Display properties (name, description)
+    - Behavioral flags (conditional, requires approval, skippable)
+    - Artifact dependencies (produces, requires)
+
+    This metadata is used by the TUI, validation, and workflow logic.
+    """
+
+    display_name: str
+    description: str
+    is_conditional: bool = False
+    requires_approval: bool = False
+    is_skippable: bool = False
+    produces_artifacts: tuple[str, ...] = ()
+    requires_artifacts: tuple[str, ...] = ()
+    skip_artifact: str | None = None  # e.g., "MIGRATION_SKIP.md"
+
+
 class Stage(str, Enum):
     """Workflow stages."""
 
@@ -71,19 +94,18 @@ class Stage(str, Enum):
     def from_str(cls, value: str) -> "Stage":
         return cls(value.upper())
 
+    @property
+    def metadata(self) -> StageMetadata:
+        """Get rich metadata for this stage."""
+        return STAGE_METADATA[self]
+
     def is_conditional(self) -> bool:
         """Return True if this stage only runs when conditions are met."""
-        return self in (Stage.MIGRATION, Stage.CONTRACT, Stage.BENCHMARK)
+        return self.metadata.is_conditional
 
     def is_skippable(self) -> bool:
         """Return True if this stage can be manually skipped."""
-        return self in (
-            Stage.DESIGN,
-            Stage.MIGRATION,
-            Stage.CONTRACT,
-            Stage.BENCHMARK,
-            Stage.SECURITY,
-        )
+        return self.metadata.is_skippable
 
 
 # Stage order - the canonical sequence
@@ -102,6 +124,91 @@ STAGE_ORDER = [
     Stage.DOCS,
     Stage.COMPLETE,
 ]
+
+
+# Rich metadata for each stage
+STAGE_METADATA: dict[Stage, StageMetadata] = {
+    Stage.PM: StageMetadata(
+        display_name="PM",
+        description="Define requirements and generate spec",
+        requires_approval=True,
+        produces_artifacts=("SPEC.md", "PLAN.md"),
+    ),
+    Stage.DESIGN: StageMetadata(
+        display_name="Design",
+        description="Create implementation plan and architecture",
+        requires_approval=True,
+        is_skippable=True,
+        requires_artifacts=("SPEC.md",),
+        produces_artifacts=("DESIGN.md",),
+        skip_artifact="DESIGN_SKIP.md",
+    ),
+    Stage.PREFLIGHT: StageMetadata(
+        display_name="Preflight",
+        description="Verify environment and dependencies",
+        produces_artifacts=("PREFLIGHT_REPORT.md",),
+    ),
+    Stage.DEV: StageMetadata(
+        display_name="Development",
+        description="Implement the feature or fix",
+        requires_artifacts=("SPEC.md", "PLAN.md"),
+        produces_artifacts=("DEVELOPMENT.md",),
+    ),
+    Stage.MIGRATION: StageMetadata(
+        display_name="Migration",
+        description="Database and data migrations",
+        is_conditional=True,
+        is_skippable=True,
+        produces_artifacts=("MIGRATION_REPORT.md",),
+        skip_artifact="MIGRATION_SKIP.md",
+    ),
+    Stage.TEST: StageMetadata(
+        display_name="Test",
+        description="Write and run tests",
+        produces_artifacts=("TEST_PLAN.md",),
+    ),
+    Stage.CONTRACT: StageMetadata(
+        display_name="Contract",
+        description="API contract testing",
+        is_conditional=True,
+        is_skippable=True,
+        produces_artifacts=("CONTRACT_REPORT.md",),
+        skip_artifact="CONTRACT_SKIP.md",
+    ),
+    Stage.QA: StageMetadata(
+        display_name="QA",
+        description="Quality assurance review",
+        produces_artifacts=("QA_REPORT.md",),
+    ),
+    Stage.BENCHMARK: StageMetadata(
+        display_name="Benchmark",
+        description="Performance benchmarking",
+        is_conditional=True,
+        is_skippable=True,
+        produces_artifacts=("BENCHMARK_REPORT.md",),
+        skip_artifact="BENCHMARK_SKIP.md",
+    ),
+    Stage.SECURITY: StageMetadata(
+        display_name="Security",
+        description="Security review and audit",
+        is_skippable=True,
+        produces_artifacts=("SECURITY_CHECKLIST.md",),
+    ),
+    Stage.REVIEW: StageMetadata(
+        display_name="Review",
+        description="Code review and final checks",
+        produces_artifacts=("REVIEW_NOTES.md",),
+    ),
+    Stage.DOCS: StageMetadata(
+        display_name="Docs",
+        description="Update documentation",
+        produces_artifacts=("DOCS_REPORT.md",),
+    ),
+    Stage.COMPLETE: StageMetadata(
+        display_name="Complete",
+        description="Workflow completed",
+    ),
+}
 
 
 # Stages that are always skipped for each task type
@@ -133,6 +240,20 @@ TASK_TYPE_SKIP_STAGES: dict[TaskType, set[Stage]] = {
 def should_skip_for_task_type(stage: Stage, task_type: TaskType) -> bool:
     """Check if a stage should be skipped based on task type."""
     return stage in TASK_TYPE_SKIP_STAGES.get(task_type, set())
+
+
+def get_conditional_stages() -> dict[Stage, str]:
+    """
+    Get mapping of conditional stages to their skip artifact names.
+
+    Returns:
+        Dict mapping Stage -> skip artifact filename (e.g., "MIGRATION_SKIP.md")
+    """
+    return {
+        stage: metadata.skip_artifact
+        for stage, metadata in STAGE_METADATA.items()
+        if metadata.is_conditional and metadata.skip_artifact
+    }
 
 
 def get_hidden_stages_for_task_type(task_type: TaskType, config_skip: list[str] = None) -> set[str]:

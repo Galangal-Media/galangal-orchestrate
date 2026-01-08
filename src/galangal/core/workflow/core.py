@@ -15,6 +15,7 @@ from galangal.core.state import (
     STAGE_ORDER,
     Stage,
     WorkflowState,
+    get_conditional_stages,
     get_task_dir,
     save_state,
     should_skip_for_task_type,
@@ -28,12 +29,8 @@ if TYPE_CHECKING:
     from galangal.ui.tui import WorkflowTUIApp
 
 
-# Mapping of conditional stages to their skip artifact names
-CONDITIONAL_STAGES: dict[Stage, str] = {
-    Stage.MIGRATION: "MIGRATION_SKIP.md",
-    Stage.CONTRACT: "CONTRACT_SKIP.md",
-    Stage.BENCHMARK: "BENCHMARK_SKIP.md",
-}
+# Get conditional stages from metadata (cached at module load)
+CONDITIONAL_STAGES: dict[Stage, str] = get_conditional_stages()
 
 
 def _should_skip_conditional_stage(
