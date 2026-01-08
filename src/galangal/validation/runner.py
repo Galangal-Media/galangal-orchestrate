@@ -22,12 +22,14 @@ class ValidationResult:
         message: Human-readable description of the result.
         output: Optional detailed output (e.g., test results, command stdout).
         rollback_to: If validation failed, the stage to roll back to (e.g., "DEV").
+        skipped: True if the stage was skipped due to skip_if conditions.
     """
 
     success: bool
     message: str
     output: str | None = None
     rollback_to: str | None = None  # Stage to rollback to on failure
+    skipped: bool = False  # True if stage was skipped due to conditions
 
 
 class ValidationRunner:
@@ -92,7 +94,7 @@ class ValidationRunner:
         if stage_config.skip_if:
             if self._should_skip(stage_config.skip_if, task_name):
                 self._write_skip_artifact(stage, task_name, "Condition met")
-                return ValidationResult(True, f"{stage} skipped (condition met)")
+                return ValidationResult(True, f"{stage} skipped (condition met)", skipped=True)
 
         # SECURITY stage: if checklist says APPROVED, skip validation commands
         # (the AI has already run scans and documented waivers)

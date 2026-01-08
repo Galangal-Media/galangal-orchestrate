@@ -276,9 +276,9 @@ class TestGetNextStage:
         with patch("galangal.core.workflow.core.get_config", return_value=self.config):
             with patch("galangal.core.workflow.core.artifact_exists", return_value=False):
                 mock_runner = MagicMock()
-                # Return condition met for MIGRATION
+                # Return condition met for MIGRATION (skipped=True)
                 mock_runner.validate_stage.return_value = ValidationResult(
-                    True, "MIGRATION skipped (condition met)"
+                    True, "MIGRATION skipped (condition met)", skipped=True
                 )
                 with patch("galangal.core.workflow.core.ValidationRunner", return_value=mock_runner):
                     next_stage = get_next_stage(Stage.DEV, state)

@@ -28,6 +28,46 @@ if TYPE_CHECKING:
     from galangal.ui.tui import WorkflowTUIApp
 
 
+# Mapping of conditional stages to their skip artifact names
+CONDITIONAL_STAGES: dict[Stage, str] = {
+    Stage.MIGRATION: "MIGRATION_SKIP.md",
+    Stage.CONTRACT: "CONTRACT_SKIP.md",
+    Stage.BENCHMARK: "BENCHMARK_SKIP.md",
+}
+
+
+def _should_skip_conditional_stage(
+    stage: Stage, task_name: str, runner: ValidationRunner
+) -> bool:
+    """
+    Check if a conditional stage should be skipped.
+
+    Conditional stages (MIGRATION, CONTRACT, BENCHMARK) can be skipped if:
+    1. A manual skip artifact exists (e.g., MIGRATION_SKIP.md)
+    2. The validation runner's skip_if condition is met (e.g., no matching files)
+
+    Args:
+        stage: The stage to check.
+        task_name: Name of the task for artifact lookup.
+        runner: ValidationRunner instance for checking skip conditions.
+
+    Returns:
+        True if the stage should be skipped, False otherwise.
+    """
+    if stage not in CONDITIONAL_STAGES:
+        return False
+
+    skip_artifact = CONDITIONAL_STAGES[stage]
+
+    # Check for manual skip artifact
+    if artifact_exists(skip_artifact, task_name):
+        return True
+
+    # Check validation skip condition
+    result = runner.validate_stage(stage.value.upper(), task_name)
+    return result.skipped
+
+
 def get_next_stage(
     current: Stage, state: WorkflowState
 ) -> Stage | None:
@@ -69,28 +109,10 @@ def get_next_stage(
     if should_skip_for_task_type(next_stage, task_type):
         return get_next_stage(next_stage, state)
 
-    # Check conditional stages via validation runner
-    runner = ValidationRunner()
-    if next_stage == Stage.MIGRATION:
-        if artifact_exists("MIGRATION_SKIP.md", task_name):
-            return get_next_stage(next_stage, state)
-        # Check skip condition
-        result = runner.validate_stage("MIGRATION", task_name)
-        if result.message.endswith("(condition met)"):
-            return get_next_stage(next_stage, state)
-
-    elif next_stage == Stage.CONTRACT:
-        if artifact_exists("CONTRACT_SKIP.md", task_name):
-            return get_next_stage(next_stage, state)
-        result = runner.validate_stage("CONTRACT", task_name)
-        if result.message.endswith("(condition met)"):
-            return get_next_stage(next_stage, state)
-
-    elif next_stage == Stage.BENCHMARK:
-        if artifact_exists("BENCHMARK_SKIP.md", task_name):
-            return get_next_stage(next_stage, state)
-        result = runner.validate_stage("BENCHMARK", task_name)
-        if result.message.endswith("(condition met)"):
+    # Check conditional stages (MIGRATION, CONTRACT, BENCHMARK)
+    if next_stage in CONDITIONAL_STAGES:
+        runner = ValidationRunner()
+        if _should_skip_conditional_stage(next_stage, task_name, runner):
             return get_next_stage(next_stage, state)
 
     return next_stage
