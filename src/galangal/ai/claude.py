@@ -34,16 +34,25 @@ class ClaudeBackend(AIBackend):
         pause_check: PauseCheck | None = None,
     ) -> StageResult:
         """Invoke Claude Code with a prompt."""
+        import sys
+        debug = os.environ.get("GALANGAL_DEBUG", "").lower() in ("1", "true", "yes")
+
+        def _debug(msg: str) -> None:
+            if debug:
+                print(f"[DEBUG claude.py] {msg}", file=sys.stderr)
+
         # Write prompt to a temporary file and pipe it to claude via stdin
         # This avoids "Argument list too long" errors when prompts exceed ~128KB
         prompt_file = None
         try:
+            _debug(f"Creating temp file for prompt ({len(prompt)} chars)")
             # Create temp file with prompt content
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".txt", delete=False, encoding="utf-8"
             ) as f:
                 f.write(prompt)
                 prompt_file = f.name
+            _debug(f"Temp file created: {prompt_file}")
 
             # Use shell to pipe file content to claude stdin
             # Claude CLI reads from stdin when content is piped to it
@@ -52,6 +61,7 @@ class ClaudeBackend(AIBackend):
                 f"--output-format stream-json --verbose "
                 f"--max-turns {max_turns} --permission-mode acceptEdits"
             )
+            _debug(f"Starting subprocess: {shell_cmd[:100]}...")
 
             process = subprocess.Popen(
                 shell_cmd,
@@ -61,14 +71,17 @@ class ClaudeBackend(AIBackend):
                 stderr=subprocess.PIPE,
                 text=True,
             )
+            _debug(f"Subprocess started with PID {process.pid}")
 
             output_lines: list[str] = []
             last_status_time = time.time()
             start_time = time.time()
             pending_tools: list[tuple[str, str]] = []
 
+            _debug("Setting initial UI status")
             if ui:
                 ui.set_status("starting", "initializing Claude")
+            _debug("Entering main read loop")
 
             while True:
                 retcode = process.poll()
@@ -118,9 +131,12 @@ class ClaudeBackend(AIBackend):
                         ui.add_activity(f"Timeout after {timeout}s", "❌")
                     return StageResult.timeout(timeout)
 
-            remaining_out, _ = process.communicate(timeout=10)
-            if remaining_out:
-                output_lines.append(remaining_out)
+            try:
+                remaining_out, _ = process.communicate(timeout=10)
+                if remaining_out:
+                    output_lines.append(remaining_out)
+            except (OSError, ValueError):
+                pass  # Process already terminated or pipe closed
 
             full_output = "".join(output_lines)
 
@@ -155,6 +171,9 @@ class ClaudeBackend(AIBackend):
             process.kill()
             return StageResult.timeout(timeout)
         except Exception as e:
+            import traceback
+            _debug(f"Exception caught: {type(e).__name__}: {e}")
+            _debug(f"Traceback:\n{traceback.format_exc()}")
             return StageResult.error(f"Claude invocation error: {e}")
         finally:
             # Clean up temp file
