@@ -34,12 +34,21 @@ class ClaudeBackend(AIBackend):
         pause_check: PauseCheck | None = None,
     ) -> StageResult:
         """Invoke Claude Code with a prompt."""
-        import sys
+        from datetime import datetime
         debug = os.environ.get("GALANGAL_DEBUG", "").lower() in ("1", "true", "yes")
+        debug_log_file = None
+
+        if debug:
+            # Create logs directory in project root if it doesn't exist
+            logs_dir = get_project_root() / "logs"
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            debug_log_file = logs_dir / "galangal_debug.log"
 
         def _debug(msg: str) -> None:
-            if debug:
-                print(f"[DEBUG claude.py] {msg}", file=sys.stderr)
+            if debug and debug_log_file:
+                timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                with open(debug_log_file, "a") as f:
+                    f.write(f"[{timestamp}] {msg}\n")
 
         # Write prompt to a temporary file and pipe it to claude via stdin
         # This avoids "Argument list too long" errors when prompts exceed ~128KB
