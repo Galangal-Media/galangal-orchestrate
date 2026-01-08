@@ -59,8 +59,8 @@ def prompt_plan_approval(task_name: str, state) -> str:
         elif choice in ["n", "no", "reject"]:
             reason = Prompt.ask("Rejection reason", default="Needs revision")
             state.stage = Stage.PM
-            state.attempt = 1
             state.last_failure = f"Plan rejected: {reason}"
+            state.reset_attempts(clear_failure=False)
             save_state(state)
             print_info("Plan rejected. Restarting PM stage.")
             return "rejected"
@@ -120,8 +120,8 @@ Design reviewed and approved for implementation.
         elif choice in ["n", "no", "reject"]:
             reason = Prompt.ask("Rejection reason", default="Needs revision")
             state.stage = Stage.DESIGN
-            state.attempt = 1
             state.last_failure = f"Design rejected: {reason}"
+            state.reset_attempts(clear_failure=False)
             save_state(state)
             print_info("Design rejected. Restarting DESIGN stage.")
             return "rejected"

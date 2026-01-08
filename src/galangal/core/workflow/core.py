@@ -343,8 +343,8 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
     write_artifact("ROLLBACK.md", new_content, task_name)
 
     state.stage = target_stage
-    state.attempt = 1
     state.last_failure = f"Rollback from {from_stage.value}: {reason}"
+    state.reset_attempts(clear_failure=False)
     save_state(state)
 
     return True

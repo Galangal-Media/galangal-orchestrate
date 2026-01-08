@@ -173,6 +173,52 @@ class WorkflowState:
     task_name: str
     task_type: TaskType = TaskType.FEATURE
 
+    # -------------------------------------------------------------------------
+    # Retry management methods
+    # -------------------------------------------------------------------------
+
+    def record_failure(self, error: str) -> None:
+        """
+        Record a failed attempt.
+
+        Increments the attempt counter and stores the error message
+        for context in the next retry.
+
+        Args:
+            error: Error message from the failed attempt.
+        """
+        self.attempt += 1
+        self.last_failure = error
+
+    def can_retry(self, max_retries: int) -> bool:
+        """
+        Check if another retry attempt is allowed.
+
+        Args:
+            max_retries: Maximum number of attempts allowed.
+
+        Returns:
+            True if attempt <= max_retries, False if exhausted.
+        """
+        return self.attempt <= max_retries
+
+    def reset_attempts(self, clear_failure: bool = True) -> None:
+        """
+        Reset attempt counter for a new stage or after user intervention.
+
+        Called when:
+        - Advancing to a new stage (clear_failure=True)
+        - User chooses to retry after max attempts (clear_failure=True)
+        - Rolling back to an earlier stage (clear_failure=False to preserve context)
+
+        Args:
+            clear_failure: If True, also clears last_failure. Set to False
+                when rolling back to preserve feedback context for the next attempt.
+        """
+        self.attempt = 1
+        if clear_failure:
+            self.last_failure = None
+
     def to_dict(self) -> dict:
         d = asdict(self)
         d["stage"] = self.stage.value

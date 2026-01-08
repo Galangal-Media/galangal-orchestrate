@@ -200,8 +200,7 @@ def cmd_skip_to(args: argparse.Namespace) -> int:
 
     # Update state
     state.stage = target_stage
-    state.attempt = 1
-    state.last_failure = None
+    state.reset_attempts()
     state.awaiting_approval = False
     state.clarification_required = False
     save_state(state)

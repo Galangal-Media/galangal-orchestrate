@@ -159,10 +159,9 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     # Get error message for display
                     error_message = result.output or result.message
 
-                    state.attempt += 1
-                    state.last_failure = error_message
+                    state.record_failure(error_message)
 
-                    if state.attempt > max_retries:
+                    if not state.can_retry(max_retries):
                         # Build modal message with error details
                         error_preview = error_message[:800].strip()
                         if len(error_message) > 800:
@@ -203,7 +202,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                         failure_event.wait()
 
                         if failure_result["value"] == "retry":
-                            state.attempt = 1  # Reset attempts
+                            state.reset_attempts()
                             app.show_message("Retrying stage...", "info")
                             save_state(state)
                             continue
@@ -212,11 +211,11 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                             # Roll back to DEV with feedback
                             failing_stage = state.stage.value
                             state.stage = Stage.DEV
-                            state.attempt = 1
                             state.last_failure = (
                                 f"Feedback from {failing_stage} failure: {feedback}\n\n"
                                 f"Original error:\n{error_message[:1500]}"
                             )
+                            state.reset_attempts(clear_failure=False)
                             app.show_message("Rolling back to DEV with feedback", "warning")
                             save_state(state)
                             continue
@@ -281,8 +280,8 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                             approval_result["value"] = "rejected"
                             approval_result["reason"] = reason
                             state.stage = Stage.PM
-                            state.attempt = 1
                             state.last_failure = f"Plan rejected: {reason}"
+                            state.reset_attempts(clear_failure=False)
                             save_state(state)
                             app.show_message(f"Plan rejected: {reason}", "warning")
                         else:
@@ -333,8 +332,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                             app.show_message(f"Skipped {s.value} (condition not met)", "info")
 
                     state.stage = next_stage
-                    state.attempt = 1
-                    state.last_failure = None
+                    state.reset_attempts()
                     state.awaiting_approval = False
                     state.clarification_required = False
                     save_state(state)
@@ -447,7 +445,7 @@ Please address the issues described above before proceeding.
                         app.show_message("Rolling back to DEV (no feedback provided)", "warning")
 
                     state.stage = Stage.DEV
-                    state.attempt = 1
+                    state.reset_attempts(clear_failure=False)
                     save_state(state)
                     app._workflow_result = "back_to_dev"
                 else:
