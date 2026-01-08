@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "galangal-orchestrate"
-version = "0.2.22"
+dynamic = ["version"]
 description = "AI-driven development workflow orchestrator"
 readme = "README.md"
 license = "MIT"
@@ -50,6 +50,9 @@ galangal = "galangal.cli:main"
 Homepage = "https://github.com/Galangal-Media/galangal-orchestrate"
 Repository = "https://github.com/Galangal-Media/galangal-orchestrate"
 Issues = "https://github.com/Galangal-Media/galangal-orchestrate/issues"
+
+[tool.hatch.version]
+path = "src/galangal/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/galangal"]
