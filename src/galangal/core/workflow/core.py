@@ -31,7 +31,26 @@ if TYPE_CHECKING:
 def get_next_stage(
     current: Stage, state: WorkflowState
 ) -> Stage | None:
-    """Get the next stage, handling conditional stages and task type skipping."""
+    """
+    Determine the next stage in the workflow pipeline.
+
+    Walks the STAGE_ORDER list starting from the current stage, skipping
+    stages that should be bypassed based on:
+    1. Config-level skipping (config.stages.skip)
+    2. Task type skipping (e.g., DOCS tasks skip TEST, BENCHMARK)
+    3. Conditional stages with skip_if conditions (MIGRATION, CONTRACT, BENCHMARK)
+    4. Manual skip artifacts (e.g., MIGRATION_SKIP.md)
+
+    This function is recursive - if the next stage should be skipped, it
+    calls itself to find the next non-skipped stage.
+
+    Args:
+        current: The stage that just completed.
+        state: Current workflow state containing task_name and task_type.
+
+    Returns:
+        The next stage to execute, or None if current is the last stage.
+    """
     config = get_config()
     task_name = state.task_name
     task_type = state.task_type
@@ -82,12 +101,35 @@ def execute_stage(
     tui_app: WorkflowTUIApp,
     pause_check: PauseCheck | None = None,
 ) -> StageResult:
-    """Execute the current stage. Returns structured StageResult.
+    """
+    Execute a single workflow stage and validate its output.
+
+    This function handles the full lifecycle of a stage execution:
+    1. Check for pending clarifications (QUESTIONS.md without ANSWERS.md)
+    2. For PREFLIGHT stage: run validation checks directly
+    3. For other stages: build prompt, invoke AI backend, validate output
+
+    The prompt is built using PromptBuilder which merges default prompts
+    with project-specific overrides. Retry context is appended when
+    state.attempt > 1.
+
+    All prompts and outputs are logged to the task's logs/ directory.
 
     Args:
-        state: Current workflow state
-        tui_app: TUI application for UI feedback
-        pause_check: Optional callback that returns True if pause requested
+        state: Current workflow state containing stage, task_name, attempt count,
+            and last_failure for retry context.
+        tui_app: TUI application instance for displaying progress and messages.
+        pause_check: Optional callback that returns True if a pause was requested
+            (e.g., user pressed Ctrl+C). Passed to ClaudeBackend for graceful stop.
+
+    Returns:
+        StageResult with one of:
+        - SUCCESS: Stage completed and validated successfully
+        - PREFLIGHT_FAILED: Preflight checks failed
+        - VALIDATION_FAILED: Stage output failed validation
+        - ROLLBACK_REQUIRED: Validation indicated rollback needed
+        - CLARIFICATION_NEEDED: Questions pending without answers
+        - PAUSED/TIMEOUT/ERROR: AI execution issues
     """
     stage = state.stage
     task_name = state.task_name
@@ -189,7 +231,21 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
 
 
 def archive_rollback_if_exists(task_name: str, tui_app: WorkflowTUIApp) -> None:
-    """Archive ROLLBACK.md after DEV stage succeeds."""
+    """
+    Archive ROLLBACK.md to ROLLBACK_RESOLVED.md after DEV stage succeeds.
+
+    When validation failures or manual review trigger a rollback to DEV,
+    the issues are recorded in ROLLBACK.md. Once DEV completes successfully,
+    this function moves the rollback content to ROLLBACK_RESOLVED.md with
+    a resolution timestamp.
+
+    Multiple rollbacks are accumulated in ROLLBACK_RESOLVED.md, separated
+    by horizontal rules, providing a history of issues encountered.
+
+    Args:
+        task_name: Name of the task to archive rollback for.
+        tui_app: TUI app for displaying archive notification.
+    """
     if not artifact_exists("ROLLBACK.md", task_name):
         return
 
@@ -213,17 +269,26 @@ def archive_rollback_if_exists(task_name: str, tui_app: WorkflowTUIApp) -> None:
 
 
 def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
-    """Handle a rollback from a StageResult.
+    """
+    Process a rollback from validation failure.
 
-    Updates state and writes to ROLLBACK.md. The caller is responsible
-    for showing any UI feedback.
+    When validation indicates a rollback is needed (e.g., QA fails and needs
+    to go back to DEV), this function:
+    1. Appends the rollback details to ROLLBACK.md
+    2. Updates the workflow state to target stage
+    3. Resets attempt counter and records failure reason
+
+    The ROLLBACK.md file serves as context for the target stage, describing
+    what issues need to be fixed.
 
     Args:
-        state: Current workflow state
-        result: StageResult with type=ROLLBACK_REQUIRED and rollback_to set
+        state: Current workflow state to update. Modified in place.
+        result: StageResult with type=ROLLBACK_REQUIRED and rollback_to set.
+            The message field describes what needs to be fixed.
 
     Returns:
-        True if rollback was handled, False if result wasn't a rollback
+        True if rollback was processed (result was ROLLBACK_REQUIRED type).
+        False if result was not a rollback (caller should handle differently).
     """
     if result.type != StageResultType.ROLLBACK_REQUIRED or result.rollback_to is None:
         return False

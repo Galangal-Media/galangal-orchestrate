@@ -40,7 +40,34 @@ from galangal.ui.tui.widgets import (
 
 
 class WorkflowTUIApp(App):
-    """Textual app for entire workflow execution with panels."""
+    """
+    Textual TUI application for workflow execution.
+
+    This is the main UI for interactive workflow execution. It displays:
+    - Header: Task name, stage, attempt count, elapsed time, turn count
+    - Progress bar: Visual representation of stage progression
+    - Activity log: Real-time updates of AI actions
+    - Files panel: List of files read/written
+    - Current action: Spinner with current activity
+
+    The app supports:
+    - Modal prompts for approvals and choices (PromptModal)
+    - Text input dialogs (TextInputModal, MultilineInputModal)
+    - Verbose mode for raw JSON output (Ctrl+D)
+    - Files panel toggle (Ctrl+F)
+    - Graceful quit (Ctrl+Q)
+
+    Threading Model:
+        The TUI runs in the main thread (Textual event loop). All UI updates
+        from background threads must use `call_from_thread()` to be thread-safe.
+
+    Attributes:
+        task_name: Name of the current task.
+        current_stage: Current workflow stage.
+        verbose: If True, show raw JSON output instead of activity log.
+        _paused: Set to True when user requests pause.
+        _workflow_result: Result string set by workflow thread.
+    """
 
     TITLE = "Galangal"
 
@@ -303,7 +330,20 @@ class WorkflowTUIApp(App):
         self.add_activity("")
 
     def show_prompt(self, prompt_type: PromptType, message: str, callback: Callable) -> None:
-        """Show a prompt."""
+        """
+        Show a modal prompt for user choice.
+
+        Displays a modal dialog with options based on the prompt type.
+        The callback is invoked with the user's selection when they
+        choose an option or press Escape (returns "quit").
+
+        This method is thread-safe and can be called from background threads.
+
+        Args:
+            prompt_type: Type of prompt determining available options.
+            message: Message to display in the modal.
+            callback: Function called with the selected option string.
+        """
         self._prompt_type = prompt_type
         self._prompt_callback = callback
 
@@ -393,7 +433,19 @@ class WorkflowTUIApp(App):
             _hide()
 
     def show_text_input(self, label: str, default: str, callback: Callable) -> None:
-        """Show text input prompt."""
+        """
+        Show a single-line text input modal.
+
+        Displays a modal with an input field. User submits with Enter,
+        cancels with Escape. Callback receives the text or None if cancelled.
+
+        This method is thread-safe and can be called from background threads.
+
+        Args:
+            label: Prompt label displayed above the input field.
+            default: Default value pre-filled in the input.
+            callback: Function called with input text or None if cancelled.
+        """
         self._input_callback = callback
 
         def _show():
@@ -431,7 +483,20 @@ class WorkflowTUIApp(App):
             _hide()
 
     def show_multiline_input(self, label: str, default: str, callback: Callable) -> None:
-        """Show multiline text input prompt for task descriptions and briefs."""
+        """
+        Show a multi-line text input modal.
+
+        Displays a modal with a TextArea for multi-line input (task descriptions,
+        feedback, rejection reasons). User submits with Ctrl+S, cancels with Escape.
+        Callback receives the text or None if cancelled.
+
+        This method is thread-safe and can be called from background threads.
+
+        Args:
+            label: Prompt label displayed above the text area.
+            default: Default value pre-filled in the text area.
+            callback: Function called with input text or None if cancelled.
+        """
         self._input_callback = callback
 
         def _show():
@@ -531,7 +596,15 @@ class WorkflowTUIApp(App):
 
 
 class StageTUIApp(WorkflowTUIApp):
-    """Single-stage TUI app."""
+    """
+    Single-stage TUI application for `galangal run` command.
+
+    A simplified version of WorkflowTUIApp that executes a single stage
+    and exits. Used for manual stage re-runs outside the normal workflow.
+
+    The stage execution happens in a background thread, with the TUI
+    displaying progress until completion.
+    """
 
     def __init__(
         self,

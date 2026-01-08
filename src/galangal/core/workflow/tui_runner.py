@@ -30,7 +30,38 @@ console = Console()
 
 
 def _run_workflow_with_tui(state: WorkflowState) -> str:
-    """Run workflow with persistent TUI. Returns result string."""
+    """
+    Execute the workflow loop with a persistent Textual TUI.
+
+    This is the main entry point for running workflows interactively. It creates
+    a WorkflowTUIApp and runs the stage pipeline in a background thread while
+    the TUI handles user interactions in the main thread.
+
+    The workflow progresses through stages (PM → DESIGN → DEV → ... → COMPLETE),
+    handling:
+    - Stage execution via ClaudeBackend
+    - Approval gates (PM stage requires explicit approval)
+    - Retries on failure (up to max_retries)
+    - Rollbacks when validation fails
+    - User-initiated pauses (Ctrl+C)
+
+    Threading Model:
+        - Main thread: Runs the Textual TUI event loop
+        - Background thread: Executes workflow logic, communicates with TUI
+          via thread-safe methods (show_prompt, show_message, etc.)
+
+    Args:
+        state: Current workflow state containing task info, current stage,
+            attempt count, and failure information.
+
+    Returns:
+        Result string indicating outcome:
+        - "done": Workflow completed successfully and user chose to exit
+        - "new_task": User chose to create a new task after completion
+        - "paused": Workflow was paused (Ctrl+C or user quit)
+        - "back_to_dev": User requested changes at completion, rolling back
+        - "error": An exception occurred during execution
+    """
     config = get_config()
     max_retries = config.stages.max_retries
 
@@ -458,7 +489,26 @@ Please address the issues described above before proceeding.
 
 
 def _start_new_task_tui() -> str:
-    """Start a new task with TUI prompts for type and description."""
+    """
+    Create a new task using TUI prompts for task type and description.
+
+    This function is called when a user completes a workflow and chooses
+    to start a new task. It guides the user through:
+    1. Selecting task type (feature, bugfix, refactor, etc.)
+    2. Entering a task description (multiline)
+    3. Generating a task name from the description
+
+    Once the task is created, the workflow is automatically started.
+
+    Threading Model:
+        Same as _run_workflow_with_tui - TUI in main thread, logic in background.
+
+    Returns:
+        Result string indicating outcome:
+        - Result from _run_workflow_with_tui if task was created and workflow started
+        - "cancelled": User cancelled task creation
+        - "error": An exception occurred
+    """
     # Create a minimal TUI app for task creation
     app = WorkflowTUIApp("New Task", "SETUP", hidden_stages=frozenset())
 

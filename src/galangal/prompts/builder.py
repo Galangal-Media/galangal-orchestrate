@@ -10,7 +10,30 @@ from galangal.core.state import Stage, WorkflowState
 
 
 class PromptBuilder:
-    """Build prompts for stages with project overrides."""
+    """
+    Build prompts for workflow stages with project override support.
+
+    This class constructs prompts by merging:
+    1. Base prompts from `galangal/prompts/defaults/` (built into package)
+    2. Project prompts from `.galangal/prompts/` (project-specific)
+    3. Task context (description, artifacts, state)
+    4. Config context (prompt_context, stage_context)
+
+    Project prompts can either:
+    - Supplement: Include `# BASE` marker where default prompt is inserted
+    - Override: No marker means complete replacement of base prompt
+
+    Example supplement prompt:
+        ```markdown
+        # Project-Specific Instructions
+        Follow our coding style guide.
+
+        # BASE
+
+        # Additional Notes
+        Use our custom test framework.
+        ```
+    """
 
     def __init__(self):
         self.config = get_config()
@@ -61,7 +84,27 @@ class PromptBuilder:
         return project_prompt
 
     def build_full_prompt(self, stage: Stage, state: WorkflowState) -> str:
-        """Build the complete prompt for a stage execution."""
+        """
+        Build the complete prompt for a stage execution.
+
+        Assembles a full prompt by combining:
+        1. Task metadata (name, type, description, attempt)
+        2. Relevant artifacts (SPEC.md, PLAN.md, ROLLBACK.md, etc.)
+        3. Global prompt_context from config
+        4. Stage-specific stage_context from config
+        5. Documentation config (for DOCS and SECURITY stages)
+        6. The stage prompt (from get_stage_prompt)
+
+        The artifacts included vary by stage - later stages receive more
+        context from earlier artifacts.
+
+        Args:
+            stage: The workflow stage to build prompt for.
+            state: Current workflow state with task info and history.
+
+        Returns:
+            Complete prompt string ready for AI invocation.
+        """
         base_prompt = self.get_stage_prompt(stage)
         task_name = state.task_name
 
@@ -112,7 +155,23 @@ Only update documentation types marked as YES above.""")
         return f"{context}\n\n---\n\n{base_prompt}"
 
     def _get_artifact_context(self, stage: Stage, task_name: str) -> list[str]:
-        """Get relevant artifact content for the stage."""
+        """
+        Get relevant artifact content for inclusion in the stage prompt.
+
+        Different stages need different context:
+        - All stages after PM: SPEC.md, PLAN.md
+        - After DESIGN: DESIGN.md or DESIGN_SKIP.md
+        - DEV: DEVELOPMENT.md (for resume), ROLLBACK.md (issues to fix)
+        - TEST: ROLLBACK.md, previous reports
+        - Later stages: Various reports (QA, Security, etc.)
+
+        Args:
+            stage: Current stage to get context for.
+            task_name: Task name for artifact lookups.
+
+        Returns:
+            List of formatted artifact sections (e.g., "# SPEC.md\\n{content}").
+        """
         parts = []
 
         # SPEC and PLAN for all stages after PM

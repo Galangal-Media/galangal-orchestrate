@@ -14,7 +14,15 @@ from galangal.core.artifacts import artifact_exists, read_artifact, write_artifa
 
 @dataclass
 class ValidationResult:
-    """Result of a validation check."""
+    """
+    Result of a validation check.
+
+    Attributes:
+        success: Whether the validation passed.
+        message: Human-readable description of the result.
+        output: Optional detailed output (e.g., test results, command stdout).
+        rollback_to: If validation failed, the stage to roll back to (e.g., "DEV").
+    """
 
     success: bool
     message: str
@@ -23,7 +31,19 @@ class ValidationResult:
 
 
 class ValidationRunner:
-    """Run config-driven validation for stages."""
+    """
+    Config-driven validation runner for workflow stages.
+
+    This class validates stage outputs based on configuration in `.galangal/config.yaml`.
+    Each stage can define:
+    - `checks`: Preflight checks (path existence, command execution)
+    - `commands`: Shell commands to run (e.g., tests, linting)
+    - `artifact`/`pass_marker`/`fail_marker`: Artifact content validation
+    - `skip_if`: Conditions to skip the stage
+    - `artifacts_required`: List of artifacts that must exist
+
+    If no config exists for a stage, default validation logic is used.
+    """
 
     def __init__(self):
         self.config = get_config()
@@ -34,7 +54,28 @@ class ValidationRunner:
         stage: str,
         task_name: str,
     ) -> ValidationResult:
-        """Run validation for a stage based on config."""
+        """
+        Validate a workflow stage based on config.
+
+        Executes the validation pipeline for a stage:
+        1. Check skip conditions (no_files_match, manual skip artifacts)
+        2. Run preflight checks (for PREFLIGHT stage)
+        3. Run validation commands
+        4. Check artifact markers (APPROVED, PASS, etc.)
+        5. Verify required artifacts exist
+
+        Special handling for:
+        - PREFLIGHT: Runs environment checks, generates PREFLIGHT_REPORT.md
+        - SECURITY: Checks SECURITY_CHECKLIST.md for APPROVED/REJECTED
+        - QA: Checks QA_REPORT.md for Status: PASS/FAIL
+
+        Args:
+            stage: The stage name (e.g., "PM", "DEV", "QA").
+            task_name: Name of the task being validated.
+
+        Returns:
+            ValidationResult indicating success/failure with optional rollback target.
+        """
         stage_lower = stage.lower()
 
         # Get stage validation config
@@ -106,7 +147,20 @@ class ValidationRunner:
         return ValidationResult(True, f"{stage} validation passed")
 
     def _should_skip(self, skip_condition, task_name: str) -> bool:
-        """Check if skip condition is met."""
+        """
+        Check if a stage's skip condition is met.
+
+        Currently supports `no_files_match` condition which checks if any files
+        in `git diff main...HEAD` match the given glob patterns. If no files
+        match, the stage should be skipped.
+
+        Args:
+            skip_condition: Config object with skip criteria (e.g., no_files_match).
+            task_name: Name of the task (unused, for future conditions).
+
+        Returns:
+            True if the stage should be skipped, False otherwise.
+        """
         if skip_condition.no_files_match:
             # Check if any files match the glob pattern(s) in git diff
             try:
@@ -149,7 +203,28 @@ Reason: {reason}
     def _run_preflight_checks(
         self, checks: list[PreflightCheck], task_name: str
     ) -> ValidationResult:
-        """Run preflight environment checks."""
+        """
+        Run preflight environment checks and generate PREFLIGHT_REPORT.md.
+
+        Preflight checks verify the development environment is ready:
+        - Path existence checks (e.g., config files, virtual envs)
+        - Command execution checks (e.g., git status, tool versions)
+
+        Each check can be:
+        - Required: Failure stops the workflow
+        - warn_only: Failure logs a warning but continues
+
+        The function generates PREFLIGHT_REPORT.md with detailed results
+        for each check.
+
+        Args:
+            checks: List of PreflightCheck configs to run.
+            task_name: Task name for writing the report artifact.
+
+        Returns:
+            ValidationResult with success=True if all required checks pass.
+            Output contains the generated report content.
+        """
         from datetime import datetime, timezone
 
         results: dict[str, dict] = {}
@@ -251,7 +326,23 @@ Reason: {reason}
     def _run_command(
         self, cmd_config: ValidationCommand, task_name: str, default_timeout: int
     ) -> ValidationResult:
-        """Run a single validation command."""
+        """
+        Execute a validation command and return the result.
+
+        Runs a shell command (e.g., pytest, ruff check) and interprets the
+        exit code to determine success. The command can use `{task_dir}`
+        placeholder which is replaced with the task's directory path.
+
+        Args:
+            cmd_config: Command configuration with name, command string,
+                timeout, and optional/allow_failure flags.
+            task_name: Task name for {task_dir} substitution.
+            default_timeout: Timeout to use if not specified in config.
+
+        Returns:
+            ValidationResult with success based on exit code.
+            Failure results include rollback_to="DEV".
+        """
         command = cmd_config.command.replace("{task_dir}", str(get_project_root() / get_config().tasks_dir / task_name))
         timeout = cmd_config.timeout if cmd_config.timeout is not None else default_timeout
 
@@ -366,7 +457,27 @@ Reason: {reason}
     def _validate_with_defaults(
         self, stage: str, task_name: str
     ) -> ValidationResult:
-        """Validate using default logic when no config is provided."""
+        """
+        Validate a stage using built-in default logic.
+
+        Used when no validation config exists for a stage. Implements
+        sensible defaults for each stage:
+        - PM: Requires SPEC.md and PLAN.md
+        - DESIGN: Requires DESIGN.md or DESIGN_SKIP.md
+        - DEV: Always passes (QA will validate)
+        - TEST: Requires TEST_PLAN.md
+        - QA: Checks QA_REPORT.md for PASS/FAIL
+        - SECURITY: Checks SECURITY_CHECKLIST.md for APPROVED/REJECTED
+        - REVIEW: Checks REVIEW_NOTES.md for APPROVE/REQUEST_CHANGES
+        - DOCS: Requires DOCS_REPORT.md
+
+        Args:
+            stage: The stage name (case-insensitive).
+            task_name: Task name for artifact lookups.
+
+        Returns:
+            ValidationResult based on stage-specific defaults.
+        """
         stage_upper = stage.upper()
 
         # PM stage - check for SPEC.md and PLAN.md
