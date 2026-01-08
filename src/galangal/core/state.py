@@ -350,18 +350,23 @@ class WorkflowState:
     # Retry management methods
     # -------------------------------------------------------------------------
 
-    def record_failure(self, error: str) -> None:
+    def record_failure(self, error: str, max_length: int = 4000) -> None:
         """
         Record a failed attempt.
 
-        Increments the attempt counter and stores the error message
-        for context in the next retry.
+        Increments the attempt counter and stores a truncated error message
+        for context in the next retry. Full output is preserved in logs/.
 
         Args:
             error: Error message from the failed attempt.
+            max_length: Maximum characters to store (default 4000). Prevents
+                prompt size from exceeding shell argument limits (~128KB).
         """
         self.attempt += 1
-        self.last_failure = error
+        if len(error) > max_length:
+            self.last_failure = error[:max_length] + "\n\n[... truncated, see logs/ for full output]"
+        else:
+            self.last_failure = error
 
     def can_retry(self, max_retries: int) -> bool:
         """

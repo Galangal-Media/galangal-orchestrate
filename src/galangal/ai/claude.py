@@ -3,8 +3,10 @@ Claude CLI backend implementation.
 """
 
 import json
+import os
 import select
 import subprocess
+import tempfile
 import time
 from typing import TYPE_CHECKING, Optional
 
@@ -32,35 +34,33 @@ class ClaudeBackend(AIBackend):
         pause_check: PauseCheck | None = None,
     ) -> StageResult:
         """Invoke Claude Code with a prompt."""
-        # Pass prompt via stdin to avoid "Argument list too long" errors
-        # when prompts exceed the ~128KB command line limit
-        cmd = [
-            "claude",
-            "-p",
-            "-",  # Read prompt from stdin
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "--max-turns",
-            str(max_turns),
-            "--permission-mode",
-            "acceptEdits",
-        ]
-
+        # Write prompt to a temporary file and pipe it to claude via stdin
+        # This avoids "Argument list too long" errors when prompts exceed ~128KB
+        prompt_file = None
         try:
+            # Create temp file with prompt content
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(prompt)
+                prompt_file = f.name
+
+            # Use shell to pipe file content to claude stdin
+            # Claude CLI reads from stdin when content is piped to it
+            shell_cmd = (
+                f"cat '{prompt_file}' | claude "
+                f"--output-format stream-json --verbose "
+                f"--max-turns {max_turns} --permission-mode acceptEdits"
+            )
+
             process = subprocess.Popen(
-                cmd,
+                shell_cmd,
+                shell=True,
                 cwd=get_project_root(),
-                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
             )
-
-            # Write prompt to stdin and close it
-            if process.stdin:
-                process.stdin.write(prompt)
-                process.stdin.close()
 
             output_lines: list[str] = []
             last_status_time = time.time()
@@ -152,6 +152,13 @@ class ClaudeBackend(AIBackend):
             return StageResult.timeout(timeout)
         except Exception as e:
             return StageResult.error(f"Claude invocation error: {e}")
+        finally:
+            # Clean up temp file
+            if prompt_file and os.path.exists(prompt_file):
+                try:
+                    os.unlink(prompt_file)
+                except OSError:
+                    pass
 
     def _process_stream_line(
         self,
@@ -263,12 +270,21 @@ class ClaudeBackend(AIBackend):
 
     def generate_text(self, prompt: str, timeout: int = 30) -> str:
         """Simple text generation."""
+        prompt_file = None
         try:
-            # Pass prompt via stdin to avoid "Argument list too long" errors
+            # Write prompt to temp file to avoid "Argument list too long" errors
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(prompt)
+                prompt_file = f.name
+
+            # Pipe file content to claude via stdin
+            shell_cmd = f"cat '{prompt_file}' | claude --output-format text"
             result = subprocess.run(
-                ["claude", "-p", "-", "--output-format", "text"],
+                shell_cmd,
+                shell=True,
                 cwd=get_project_root(),
-                input=prompt,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -277,4 +293,10 @@ class ClaudeBackend(AIBackend):
                 return result.stdout.strip()
         except (subprocess.TimeoutExpired, Exception):
             pass
+        finally:
+            if prompt_file and os.path.exists(prompt_file):
+                try:
+                    os.unlink(prompt_file)
+                except OSError:
+                    pass
         return ""

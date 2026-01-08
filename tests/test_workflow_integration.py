@@ -459,6 +459,29 @@ class TestRetryBehavior:
         assert state.attempt == 3
         assert state.last_failure == "Second failure"
 
+    def test_record_failure_truncates_large_errors(self):
+        """Test that record_failure truncates errors exceeding max_length."""
+        state = make_state(attempt=1)
+
+        # Create a large error message (10KB)
+        large_error = "x" * 10000
+
+        state.record_failure(large_error)
+        assert state.attempt == 2
+        # Default max_length is 4000
+        assert len(state.last_failure) < 4100  # 4000 + truncation message
+        assert state.last_failure.startswith("x" * 100)
+        assert "[... truncated, see logs/ for full output]" in state.last_failure
+
+    def test_record_failure_preserves_small_errors(self):
+        """Test that record_failure preserves errors under max_length."""
+        state = make_state(attempt=1)
+
+        small_error = "Short error message"
+        state.record_failure(small_error)
+        assert state.last_failure == small_error
+        assert "[... truncated" not in state.last_failure
+
     def test_can_retry_check(self):
         """Test can_retry logic."""
         state = make_state(attempt=1)

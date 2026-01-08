@@ -153,18 +153,16 @@ class TestClaudeBackendName:
         assert backend.name == "claude"
 
 
-class TestClaudeBackendStdinPrompt:
-    """Tests for passing prompts via stdin to avoid argument list too long errors."""
+class TestClaudeBackendTempFilePrompt:
+    """Tests for passing prompts via temp file to avoid argument list too long errors."""
 
-    def test_invoke_passes_prompt_via_stdin(self):
-        """Test that invoke() uses stdin for the prompt instead of command line args."""
+    def test_invoke_uses_temp_file_for_prompt(self):
+        """Test that invoke() uses a temp file and pipes to claude."""
         backend = ClaudeBackend()
 
         result_json = json.dumps({"type": "result", "result": "Done", "num_turns": 1})
 
-        mock_stdin = MagicMock()
         mock_process = MagicMock()
-        mock_process.stdin = mock_stdin
         mock_process.poll.side_effect = [None, 0]
         mock_process.stdout.readline.side_effect = [result_json + "\n", ""]
         mock_process.communicate.return_value = ("", "")
@@ -174,17 +172,15 @@ class TestClaudeBackendStdinPrompt:
             with patch("galangal.ai.claude.select.select", return_value=([mock_process.stdout], [], [])):
                 backend.invoke("my test prompt")
 
-        # Verify command uses stdin mode
+        # Verify shell=True is used (for piping)
         call_args = mock_popen.call_args
-        cmd = call_args[0][0]
-        assert "-p" in cmd
-        assert "-" in cmd  # stdin marker
-        assert "my test prompt" not in cmd  # prompt NOT in command line
+        assert call_args[1].get("shell") is True
 
-        # Verify stdin was used
-        assert call_args[1].get("stdin") is not None
-        mock_stdin.write.assert_called_once_with("my test prompt")
-        mock_stdin.close.assert_called_once()
+        # Verify the command uses cat | claude pattern
+        cmd = call_args[0][0]
+        assert "cat " in cmd
+        assert "| claude" in cmd
+        assert "my test prompt" not in cmd  # prompt NOT in command line
 
     def test_invoke_handles_large_prompt(self):
         """Test that invoke() can handle prompts exceeding 128KB (Linux arg limit)."""
@@ -195,9 +191,7 @@ class TestClaudeBackendStdinPrompt:
 
         result_json = json.dumps({"type": "result", "result": "Done", "num_turns": 1})
 
-        mock_stdin = MagicMock()
         mock_process = MagicMock()
-        mock_process.stdin = mock_stdin
         mock_process.poll.side_effect = [None, 0]
         mock_process.stdout.readline.side_effect = [result_json + "\n", ""]
         mock_process.communicate.return_value = ("", "")
@@ -207,15 +201,14 @@ class TestClaudeBackendStdinPrompt:
             with patch("galangal.ai.claude.select.select", return_value=([mock_process.stdout], [], [])):
                 result = backend.invoke(large_prompt)
 
-        # Verify the large prompt was written to stdin (not passed as arg)
+        # Verify the large prompt is NOT in the command line
         call_args = mock_popen.call_args
         cmd = call_args[0][0]
-        assert large_prompt not in cmd  # Not in command line
-        mock_stdin.write.assert_called_once_with(large_prompt)
+        assert large_prompt not in cmd
         assert result.success is True
 
-    def test_generate_text_passes_prompt_via_stdin(self):
-        """Test that generate_text() uses stdin for the prompt."""
+    def test_generate_text_uses_temp_file(self):
+        """Test that generate_text() uses temp file and pipes to claude."""
         backend = ClaudeBackend()
 
         with patch("galangal.ai.claude.subprocess.run") as mock_run:
@@ -224,10 +217,10 @@ class TestClaudeBackendStdinPrompt:
 
         call_args = mock_run.call_args
         cmd = call_args[0][0]
-        assert "-p" in cmd
-        assert "-" in cmd
+        assert "cat " in cmd
+        assert "| claude" in cmd
         assert "my prompt" not in cmd
-        assert call_args[1].get("input") == "my prompt"
+        assert call_args[1].get("shell") is True
 
     def test_generate_text_handles_large_prompt(self):
         """Test that generate_text() can handle prompts exceeding 128KB."""
@@ -242,5 +235,4 @@ class TestClaudeBackendStdinPrompt:
         call_args = mock_run.call_args
         cmd = call_args[0][0]
         assert large_prompt not in cmd
-        assert call_args[1].get("input") == large_prompt
         assert result == "Generated text"
