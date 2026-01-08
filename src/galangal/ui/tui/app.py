@@ -30,8 +30,8 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.widgets import Footer, RichLog
 
-from galangal.ui.tui.adapters import PromptType, TUIAdapter
-from galangal.ui.tui.modals import MultilineInputModal, PromptModal, PromptOption, TextInputModal
+from galangal.ui.tui.adapters import PromptType, TUIAdapter, get_prompt_options
+from galangal.ui.tui.modals import MultilineInputModal, PromptModal, TextInputModal
 from galangal.ui.tui.types import (
     ActivityCategory,
     ActivityEntry,
@@ -392,51 +392,7 @@ class WorkflowTUIApp(App):
         self._prompt_type = prompt_type
         self._prompt_callback = callback
 
-        options = {
-            PromptType.PLAN_APPROVAL: [
-                PromptOption("1", "Approve", "yes", "#b8bb26"),
-                PromptOption("2", "Reject", "no", "#fb4934"),
-                PromptOption("3", "Quit", "quit", "#fabd2f"),
-            ],
-            PromptType.DESIGN_APPROVAL: [
-                PromptOption("1", "Approve", "yes", "#b8bb26"),
-                PromptOption("2", "Reject", "no", "#fb4934"),
-                PromptOption("3", "Quit", "quit", "#fabd2f"),
-            ],
-            PromptType.COMPLETION: [
-                PromptOption("1", "Create PR", "yes", "#b8bb26"),
-                PromptOption("2", "Back to DEV", "no", "#fb4934"),
-                PromptOption("3", "Quit", "quit", "#fabd2f"),
-            ],
-            PromptType.PREFLIGHT_RETRY: [
-                PromptOption("1", "Retry", "retry", "#b8bb26"),
-                PromptOption("2", "Quit", "quit", "#fb4934"),
-            ],
-            PromptType.STAGE_FAILURE: [
-                PromptOption("1", "Retry", "retry", "#b8bb26"),
-                PromptOption("2", "Fix in DEV", "fix_in_dev", "#fabd2f"),
-                PromptOption("3", "Quit", "quit", "#fb4934"),
-            ],
-            PromptType.POST_COMPLETION: [
-                PromptOption("1", "New Task", "new_task", "#b8bb26"),
-                PromptOption("2", "Quit", "quit", "#fabd2f"),
-            ],
-            PromptType.TASK_TYPE: [
-                PromptOption("1", "Feature - New functionality", "feature", "#b8bb26"),
-                PromptOption("2", "Bug Fix - Fix broken behavior", "bugfix", "#fb4934"),
-                PromptOption("3", "Refactor - Restructure code", "refactor", "#83a598"),
-                PromptOption("4", "Chore - Dependencies, config", "chore", "#fabd2f"),
-                PromptOption("5", "Docs - Documentation only", "docs", "#d3869b"),
-                PromptOption("6", "Hotfix - Critical fix", "hotfix", "#fe8019"),
-            ],
-        }.get(
-            prompt_type,
-            [
-                PromptOption("1", "Yes", "yes", "#b8bb26"),
-                PromptOption("2", "No", "no", "#fb4934"),
-                PromptOption("3", "Quit", "quit", "#fabd2f"),
-            ],
-        )
+        options = get_prompt_options(prompt_type)
 
         def _show():
             try:
