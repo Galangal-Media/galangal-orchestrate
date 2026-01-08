@@ -509,7 +509,8 @@ class WorkflowTUIApp(App):
 
         def callback(result: str) -> None:
             if not future.done():
-                self.call_from_thread(lambda: future.set_result(result))
+                # Callback runs in main thread, so set result directly
+                future.set_result(result)
 
         self.show_prompt(prompt_type, message, callback)
         return await future
@@ -532,7 +533,8 @@ class WorkflowTUIApp(App):
 
         def callback(result: str | None) -> None:
             if not future.done():
-                self.call_from_thread(lambda: future.set_result(result))
+                # Callback runs in main thread, so set result directly
+                future.set_result(result)
 
         self.show_text_input(label, default, callback)
         return await future
@@ -555,7 +557,8 @@ class WorkflowTUIApp(App):
 
         def callback(result: str | None) -> None:
             if not future.done():
-                self.call_from_thread(lambda: future.set_result(result))
+                # Callback runs in main thread, so set result directly
+                future.set_result(result)
 
         self.show_multiline_input(label, default, callback)
         return await future
