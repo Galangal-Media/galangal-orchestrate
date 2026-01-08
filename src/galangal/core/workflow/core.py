@@ -19,6 +19,7 @@ from galangal.core.state import (
     should_skip_for_task_type,
 )
 from galangal.prompts.builder import PromptBuilder
+from galangal.results import StageResult, StageResultType
 from galangal.ui.tui import TUIAdapter
 from galangal.validation.runner import ValidationRunner
 
@@ -75,13 +76,13 @@ def get_next_stage(
     return next_stage
 
 
-def execute_stage(state: WorkflowState, tui_app: WorkflowTUIApp) -> tuple[bool, str]:
-    """Execute the current stage. Returns (success, message)."""
+def execute_stage(state: WorkflowState, tui_app: WorkflowTUIApp) -> StageResult:
+    """Execute the current stage. Returns structured StageResult."""
     stage = state.stage
     task_name = state.task_name
 
     if stage == Stage.COMPLETE:
-        return True, "Workflow complete"
+        return StageResult.success("Workflow complete")
 
     # Check for clarification
     if artifact_exists("QUESTIONS.md", task_name) and not artifact_exists(
@@ -89,7 +90,7 @@ def execute_stage(state: WorkflowState, tui_app: WorkflowTUIApp) -> tuple[bool, 
     ):
         state.clarification_required = True
         save_state(state)
-        return False, "Clarification required. Please provide ANSWERS.md."
+        return StageResult.clarification_needed()
 
     # PREFLIGHT runs validation directly
     if stage == Stage.PREFLIGHT:
@@ -100,14 +101,12 @@ def execute_stage(state: WorkflowState, tui_app: WorkflowTUIApp) -> tuple[bool, 
 
         if result.success:
             tui_app.show_message(f"Preflight: {result.message}", "success")
-            return True, result.message
+            return StageResult.success(result.message)
         else:
-            # Include detailed output in the failure message for display
-            detailed_message = result.message
-            if result.output:
-                detailed_message = f"{result.message}\n\n{result.output}"
-            # Return special marker so workflow knows this is preflight failure
-            return False, f"PREFLIGHT_FAILED:{detailed_message}"
+            return StageResult.preflight_failed(
+                message=result.message,
+                details=result.output or "",
+            )
 
     # Build prompt
     builder = PromptBuilder()
@@ -138,7 +137,7 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     # Run stage with TUI
     backend = ClaudeBackend()
     ui = TUIAdapter(tui_app)
-    success, output = backend.invoke(
+    invoke_result = backend.invoke(
         prompt=prompt,
         timeout=14400,
         max_turns=200,
@@ -147,10 +146,11 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
 
     # Log the output
     with open(log_file, "a") as f:
-        f.write(f"=== Output ===\n{output}\n")
+        f.write(f"=== Output ===\n{invoke_result.output or invoke_result.message}\n")
 
-    if not success:
-        return False, output
+    # Return early if AI invocation failed
+    if not invoke_result.success:
+        return invoke_result
 
     # Validate stage
     tui_app.add_activity("Validating stage outputs...", "⚙")
@@ -163,14 +163,17 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
 
     if result.success:
         tui_app.show_message(result.message, "success")
+        return StageResult.success(result.message, output=invoke_result.output)
     else:
         tui_app.show_message(result.message, "error")
-
-    # Include rollback target in message if validation failed
-    if not result.success and result.rollback_to:
-        return False, f"ROLLBACK:{result.rollback_to}:{result.message}"
-
-    return result.success, result.message
+        # Check if rollback is required
+        if result.rollback_to:
+            return StageResult.rollback_required(
+                message=result.message,
+                rollback_to=Stage.from_str(result.rollback_to),
+                output=invoke_result.output,
+            )
+        return StageResult.validation_failed(result.message)
 
 
 def archive_rollback_if_exists(task_name: str, tui_app: WorkflowTUIApp) -> None:
@@ -197,31 +200,26 @@ def archive_rollback_if_exists(task_name: str, tui_app: WorkflowTUIApp) -> None:
     tui_app.add_activity("Archived ROLLBACK.md → ROLLBACK_RESOLVED.md", "📋")
 
 
-def handle_rollback(state: WorkflowState, message: str) -> bool:
-    """Handle a rollback signal from a stage validator.
+def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
+    """Handle a rollback from a StageResult.
 
     Updates state and writes to ROLLBACK.md. The caller is responsible
     for showing any UI feedback.
+
+    Args:
+        state: Current workflow state
+        result: StageResult with type=ROLLBACK_REQUIRED and rollback_to set
+
+    Returns:
+        True if rollback was handled, False if result wasn't a rollback
     """
-    # Check for rollback_to in validation result
-    if not message.startswith("ROLLBACK:") and "rollback" not in message.lower():
+    if result.type != StageResultType.ROLLBACK_REQUIRED or result.rollback_to is None:
         return False
-
-    # Parse rollback target
-    target_stage = Stage.DEV  # Default rollback target
-
-    if message.startswith("ROLLBACK:"):
-        parts = message.split(":", 2)
-        if len(parts) >= 2:
-            try:
-                target_stage = Stage.from_str(parts[1])
-            except ValueError:
-                pass
 
     task_name = state.task_name
     from_stage = state.stage
-
-    reason = message.split(":", 2)[-1] if ":" in message else message
+    target_stage = result.rollback_to
+    reason = result.message
 
     rollback_entry = f"""
 ## Rollback from {from_stage.value}

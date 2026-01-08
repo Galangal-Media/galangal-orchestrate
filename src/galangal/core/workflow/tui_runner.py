@@ -23,6 +23,7 @@ from galangal.core.workflow.core import (
     handle_rollback,
 )
 from galangal.core.workflow.pause import _handle_pause
+from galangal.results import StageResultType
 from galangal.ui.tui import PromptType, WorkflowTUIApp
 
 console = Console()
@@ -55,18 +56,18 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                 app.set_status("running", f"executing {state.stage.value}")
 
                 # Execute stage with the TUI app
-                success, message = execute_stage(state, tui_app=app)
+                result = execute_stage(state, tui_app=app)
 
                 if app._paused:
                     app._workflow_result = "paused"
                     break
 
-                if not success:
+                if not result.success:
                     app.show_stage_complete(state.stage.value, False)
 
                     # Handle preflight failures specially - don't auto-retry
-                    if message.startswith("PREFLIGHT_FAILED:"):
-                        detailed_error = message[len("PREFLIGHT_FAILED:") :]
+                    if result.type == StageResultType.PREFLIGHT_FAILED:
+                        detailed_error = result.output or result.message
 
                         # Extract failed checks for display in modal
                         failed_lines = []
@@ -110,23 +111,29 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                             app._workflow_result = "paused"
                             break
 
-                    if state.awaiting_approval or state.clarification_required:
-                        app.show_message(message, "warning")
+                    # Handle clarification needed
+                    if result.type == StageResultType.CLARIFICATION_NEEDED:
+                        app.show_message(result.message, "warning")
                         save_state(state)
                         app._workflow_result = "paused"
                         break
 
-                    if handle_rollback(state, message):
-                        app.show_message(f"Rolling back: {message[:80]}", "warning")
-                        continue
+                    # Handle rollback required
+                    if result.type == StageResultType.ROLLBACK_REQUIRED:
+                        if handle_rollback(state, result):
+                            app.show_message(f"Rolling back: {result.message[:80]}", "warning")
+                            continue
+
+                    # Get error message for display
+                    error_message = result.output or result.message
 
                     state.attempt += 1
-                    state.last_failure = message
+                    state.last_failure = error_message
 
                     if state.attempt > max_retries:
                         # Build modal message with error details
-                        error_preview = message[:800].strip()
-                        if len(message) > 800:
+                        error_preview = error_message[:800].strip()
+                        if len(error_message) > 800:
                             error_preview += "..."
 
                         modal_message = (
@@ -175,7 +182,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                             state.attempt = 1
                             state.last_failure = (
                                 f"Feedback from {failing_stage} failure: {feedback}\n\n"
-                                f"Original error:\n{message[:1500]}"
+                                f"Original error:\n{error_message[:1500]}"
                             )
                             app.show_message("Rolling back to DEV with feedback", "warning")
                             save_state(state)

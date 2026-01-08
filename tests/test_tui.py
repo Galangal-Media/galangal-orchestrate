@@ -3,10 +3,8 @@ Tests for the TUI components using Textual's pilot framework.
 """
 
 import pytest
-from textual.pilot import Pilot
-from textual.widgets import Input
 
-from galangal.ui.tui import WorkflowTUIApp, PromptType, TextInputModal, PromptModal
+from galangal.ui.tui import PromptType, WorkflowTUIApp
 
 
 @pytest.fixture
@@ -105,7 +103,7 @@ class TestPromptActions:
     @pytest.mark.asyncio
     async def test_check_action_blocks_when_input_active(self, app):
         """Test that check_action returns False when input is active."""
-        async with app.run_test() as pilot:
+        async with app.run_test() as _:
             # When no input active, check_action should return True
             assert app.check_action_quit_workflow() is True
 

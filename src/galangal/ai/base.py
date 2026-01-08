@@ -5,6 +5,8 @@ Abstract base class for AI backends.
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Optional
 
+from galangal.results import StageResult
+
 if TYPE_CHECKING:
     from galangal.ui.tui import StageUI
 
@@ -19,7 +21,7 @@ class AIBackend(ABC):
         timeout: int = 14400,
         max_turns: int = 200,
         ui: Optional["StageUI"] = None,
-    ) -> tuple[bool, str]:
+    ) -> StageResult:
         """
         Invoke the AI with a prompt for a full stage execution.
 
@@ -30,7 +32,7 @@ class AIBackend(ABC):
             ui: Optional TUI for progress display
 
         Returns:
-            (success, output) tuple
+            StageResult with success/failure and structured outcome type
         """
         pass
 

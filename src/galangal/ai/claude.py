@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Optional
 
 from galangal.ai.base import AIBackend
 from galangal.config.loader import get_project_root
+from galangal.results import StageResult
 
 if TYPE_CHECKING:
     from galangal.ui.tui import StageUI
@@ -42,7 +43,7 @@ class ClaudeBackend(AIBackend):
         timeout: int = 14400,
         max_turns: int = 200,
         ui: Optional["StageUI"] = None,
-    ) -> tuple[bool, str]:
+    ) -> StageResult:
         """Invoke Claude Code with a prompt."""
         cmd = [
             "claude",
@@ -109,13 +110,13 @@ class ClaudeBackend(AIBackend):
                     if ui:
                         ui.add_activity("Paused by user request", "⏸️")
                         ui.finish(success=False)
-                    return False, "PAUSED: User requested pause"
+                    return StageResult.paused()
 
                 if time.time() - start_time > timeout:
                     process.kill()
                     if ui:
                         ui.add_activity(f"Timeout after {timeout}s", "❌")
-                    return False, f"Claude timed out after {timeout}s"
+                    return StageResult.timeout(timeout)
 
             remaining_out, _ = process.communicate(timeout=10)
             if remaining_out:
@@ -126,10 +127,7 @@ class ClaudeBackend(AIBackend):
             if "max turns" in full_output.lower() or "reached max" in full_output.lower():
                 if ui:
                     ui.add_activity("Max turns reached", "❌")
-                return (
-                    False,
-                    "Claude reached max turns limit - task may be too complex or stuck in a loop",
-                )
+                return StageResult.max_turns(full_output)
 
             result_text = ""
             for line in output_lines:
@@ -144,14 +142,20 @@ class ClaudeBackend(AIBackend):
                     pass
 
             if process.returncode == 0:
-                return True, result_text or full_output
-            return False, f"Claude failed (exit {process.returncode}):\n{full_output}"
+                return StageResult.success(
+                    message=result_text or "Stage completed",
+                    output=full_output,
+                )
+            return StageResult.error(
+                message=f"Claude failed (exit {process.returncode})",
+                output=full_output,
+            )
 
         except subprocess.TimeoutExpired:
             process.kill()
-            return False, f"Claude timed out after {timeout}s"
+            return StageResult.timeout(timeout)
         except Exception as e:
-            return False, f"Claude invocation error: {e}"
+            return StageResult.error(f"Claude invocation error: {e}")
 
     def _process_stream_line(
         self,
