@@ -1,8 +1,12 @@
 """
-TUI-based workflow runner using persistent Textual app.
+TUI-based workflow runner using persistent Textual app with async/await.
+
+This module uses Textual's async capabilities for cleaner coordination
+between UI events and workflow logic, eliminating manual threading.Event
+coordination in favor of asyncio.Future-based prompts.
 """
 
-import threading
+import asyncio
 
 from rich.console import Console
 
@@ -34,21 +38,13 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
     Execute the workflow loop with a persistent Textual TUI.
 
     This is the main entry point for running workflows interactively. It creates
-    a WorkflowTUIApp and runs the stage pipeline in a background thread while
-    the TUI handles user interactions in the main thread.
+    a WorkflowTUIApp and runs the stage pipeline using async/await for clean
+    coordination between UI and workflow logic.
 
-    The workflow progresses through stages (PM → DESIGN → DEV → ... → COMPLETE),
-    handling:
-    - Stage execution via ClaudeBackend
-    - Approval gates (PM stage requires explicit approval)
-    - Retries on failure (up to max_retries)
-    - Rollbacks when validation fails
-    - User-initiated pauses (Ctrl+C)
-
-    Threading Model:
+    Threading Model (Async):
         - Main thread: Runs the Textual TUI event loop
-        - Background thread: Executes workflow logic, communicates with TUI
-          via thread-safe methods (show_prompt, show_message, etc.)
+        - Async worker: Executes workflow logic using Textual's run_worker()
+        - Blocking operations (execute_stage) run in thread executor
 
     Args:
         state: Current workflow state containing task info, current stage,
@@ -63,7 +59,6 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
         - "error": An exception occurred during execution
     """
     config = get_config()
-    max_retries = config.stages.max_retries
 
     # Compute hidden stages based on task type and config
     hidden_stages = frozenset(
@@ -76,19 +71,22 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
         hidden_stages=hidden_stages,
     )
 
-    # Shared state for thread communication
-    workflow_done = threading.Event()
+    async def workflow_loop():
+        """Async workflow loop running within Textual's event loop."""
+        max_retries = config.stages.max_retries
 
-    def workflow_thread():
-        """Run the workflow loop in a background thread."""
         try:
             while state.stage != Stage.COMPLETE and not app._paused:
                 app.update_stage(state.stage.value, state.attempt)
                 app.set_status("running", f"executing {state.stage.value}")
 
-                # Execute stage with the TUI app
-                # Pass pause_check callback so the backend can check for pause during execution
-                result = execute_stage(state, tui_app=app, pause_check=lambda: app._paused)
+                # Execute stage in thread executor (blocking operation)
+                result = await asyncio.to_thread(
+                    execute_stage,
+                    state,
+                    tui_app=app,
+                    pause_check=lambda: app._paused,
+                )
 
                 if app._paused:
                     app._workflow_result = "paused"
@@ -97,47 +95,16 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                 if not result.success:
                     app.show_stage_complete(state.stage.value, False)
 
-                    # Handle preflight failures specially - don't auto-retry
+                    # Handle preflight failures - prompt for retry
                     if result.type == StageResultType.PREFLIGHT_FAILED:
-                        detailed_error = result.output or result.message
-
-                        # Extract failed checks for display in modal
-                        failed_lines = []
-                        for line in detailed_error.split("\n"):
-                            if (
-                                line.strip().startswith("✗")
-                                or "Failed" in line
-                                or "Missing" in line
-                                or "Error" in line
-                            ):
-                                failed_lines.append(line.strip())
-
-                        # Build modal message with error details
-                        modal_message = "Preflight checks failed:\n\n"
-                        if failed_lines:
-                            modal_message += "\n".join(failed_lines[:10])  # Limit to 10 lines
-                        else:
-                            modal_message += detailed_error[:500]
-                        modal_message += "\n\nFix issues and retry?"
-
-                        # Prompt user to retry after fixing
-                        retry_event = threading.Event()
-                        retry_result = {"value": None}
-
-                        def handle_preflight_retry(choice):
-                            retry_result["value"] = choice
-                            retry_event.set()
-
-                        app.show_prompt(
-                            PromptType.PREFLIGHT_RETRY,
-                            modal_message,
-                            handle_preflight_retry,
+                        modal_message = _build_preflight_error_message(result)
+                        choice = await app.prompt_async(
+                            PromptType.PREFLIGHT_RETRY, modal_message
                         )
 
-                        retry_event.wait()
-                        if retry_result["value"] == "retry":
+                        if choice == "retry":
                             app.show_message("Retrying preflight checks...", "info")
-                            continue  # Retry without incrementing attempt
+                            continue
                         else:
                             save_state(state)
                             app._workflow_result = "paused"
@@ -153,71 +120,28 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     # Handle rollback required
                     if result.type == StageResultType.ROLLBACK_REQUIRED:
                         if handle_rollback(state, result):
-                            app.show_message(f"Rolling back: {result.message[:80]}", "warning")
+                            app.show_message(
+                                f"Rolling back: {result.message[:80]}", "warning"
+                            )
                             continue
 
-                    # Get error message for display
+                    # Handle stage failure with retries
                     error_message = result.output or result.message
-
                     state.record_failure(error_message)
 
                     if not state.can_retry(max_retries):
-                        # Build modal message with error details
-                        error_preview = error_message[:800].strip()
-                        if len(error_message) > 800:
-                            error_preview += "..."
-
-                        modal_message = (
-                            f"Stage {state.stage.value} failed after {max_retries} attempts.\n\n"
-                        )
-                        modal_message += f"Error:\n{error_preview}\n\n"
-                        modal_message += "What would you like to do?"
-
-                        # Prompt user for what to do
-                        failure_event = threading.Event()
-                        failure_result = {"value": None, "feedback": None}
-
-                        def handle_failure_choice(choice):
-                            failure_result["value"] = choice
-                            if choice == "fix_in_dev":
-                                # Need to get feedback first
-                                def handle_feedback(feedback):
-                                    failure_result["feedback"] = feedback
-                                    failure_event.set()
-
-                                app.show_multiline_input(
-                                    "Describe what needs to be fixed (Ctrl+S to submit):",
-                                    "",
-                                    handle_feedback,
-                                )
-                            else:
-                                failure_event.set()
-
-                        app.show_prompt(
-                            PromptType.STAGE_FAILURE,
-                            modal_message,
-                            handle_failure_choice,
+                        # Max retries exceeded - prompt user
+                        choice = await _handle_max_retries_exceeded(
+                            app, state, error_message, max_retries
                         )
 
-                        failure_event.wait()
-
-                        if failure_result["value"] == "retry":
+                        if choice == "retry":
                             state.reset_attempts()
                             app.show_message("Retrying stage...", "info")
                             save_state(state)
                             continue
-                        elif failure_result["value"] == "fix_in_dev":
-                            feedback = failure_result["feedback"] or "Fix the failing stage"
-                            # Roll back to DEV with feedback
-                            failing_stage = state.stage.value
-                            state.stage = Stage.DEV
-                            state.last_failure = (
-                                f"Feedback from {failing_stage} failure: {feedback}\n\n"
-                                f"Original error:\n{error_message[:1500]}"
-                            )
-                            state.reset_attempts(clear_failure=False)
-                            app.show_message("Rolling back to DEV with feedback", "warning")
-                            save_state(state)
+                        elif choice == "fix_in_dev":
+                            # Handled in _handle_max_retries_exceeded
                             continue
                         else:
                             save_state(state)
@@ -225,112 +149,33 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                             break
 
                     app.show_message(
-                        f"Retrying (attempt {state.attempt}/{max_retries})...", "warning"
+                        f"Retrying (attempt {state.attempt}/{max_retries})...",
+                        "warning",
                     )
                     save_state(state)
                     continue
 
+                # Stage succeeded
                 app.show_stage_complete(state.stage.value, True)
 
-                # Plan approval gate - handle in TUI with two-step flow
-                if state.stage == Stage.PM and not artifact_exists("APPROVAL.md", state.task_name):
-                    approval_event = threading.Event()
-                    approval_result = {"value": None, "approver": None, "reason": None}
+                # Plan approval gate
+                if state.stage == Stage.PM and not artifact_exists(
+                    "APPROVAL.md", state.task_name
+                ):
+                    should_continue = await _handle_plan_approval(app, state, config)
+                    if not should_continue:
+                        if app._workflow_result == "paused":
+                            break
+                        continue  # Rejected - loop back to PM
 
-                    # Get default approver name from config
-                    default_approver = config.project.approver_name or ""
-
-                    def handle_approval(choice):
-                        if choice == "yes":
-                            approval_result["value"] = "pending_name"
-                            # Don't set event yet - wait for name input
-                        elif choice == "no":
-                            approval_result["value"] = "pending_reason"
-                            # Don't set event yet - wait for rejection reason
-                        else:
-                            approval_result["value"] = "quit"
-                            approval_event.set()
-
-                    def handle_approver_name(name):
-                        if name:
-                            approval_result["value"] = "approved"
-                            approval_result["approver"] = name
-                            # Write approval artifact with approver name
-                            from datetime import datetime, timezone
-
-                            approval_content = f"""# Plan Approval
-
-- **Status:** Approved
-- **Approved By:** {name}
-- **Date:** {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
-"""
-                            write_artifact("APPROVAL.md", approval_content, state.task_name)
-                            app.show_message(f"Plan approved by {name}", "success")
-                        else:
-                            # Cancelled - go back to approval prompt
-                            approval_result["value"] = None
-                            app.show_prompt(
-                                PromptType.PLAN_APPROVAL, "Approve plan to continue?", handle_approval
-                            )
-                            return  # Don't set event - wait for new choice
-                        approval_event.set()
-
-                    def handle_rejection_reason(reason):
-                        if reason:
-                            approval_result["value"] = "rejected"
-                            approval_result["reason"] = reason
-                            state.stage = Stage.PM
-                            state.last_failure = f"Plan rejected: {reason}"
-                            state.reset_attempts(clear_failure=False)
-                            save_state(state)
-                            app.show_message(f"Plan rejected: {reason}", "warning")
-                        else:
-                            # Cancelled - go back to approval prompt
-                            approval_result["value"] = None
-                            app.show_prompt(
-                                PromptType.PLAN_APPROVAL, "Approve plan to continue?", handle_approval
-                            )
-                            return  # Don't set event - wait for new choice
-                        approval_event.set()
-
-                    app.show_prompt(
-                        PromptType.PLAN_APPROVAL, "Approve plan to continue?", handle_approval
-                    )
-
-                    # Wait for choice, then potentially for name or reason
-                    while not approval_event.is_set():
-                        approval_event.wait(timeout=0.1)
-                        if approval_result["value"] == "pending_name":
-                            approval_result["value"] = None  # Reset
-                            app.show_text_input(
-                                "Enter approver name:", default_approver, handle_approver_name
-                            )
-                        elif approval_result["value"] == "pending_reason":
-                            approval_result["value"] = None  # Reset
-                            app.show_multiline_input(
-                                "Enter rejection reason (Ctrl+S to submit):", "Needs revision", handle_rejection_reason
-                            )
-
-                    if approval_result["value"] == "quit":
-                        app._workflow_result = "paused"
-                        break
-                    elif approval_result["value"] == "rejected":
-                        app.show_message("Restarting PM stage with feedback...", "info")
-                        continue
-
+                # Archive rollback after successful DEV
                 if state.stage == Stage.DEV:
                     archive_rollback_if_exists(state.task_name, app)
 
-                # Get next stage
+                # Advance to next stage
                 next_stage = get_next_stage(state.stage, state)
                 if next_stage:
-                    expected_next_idx = STAGE_ORDER.index(state.stage) + 1
-                    actual_next_idx = STAGE_ORDER.index(next_stage)
-                    if actual_next_idx > expected_next_idx:
-                        skipped = STAGE_ORDER[expected_next_idx:actual_next_idx]
-                        for s in skipped:
-                            app.show_message(f"Skipped {s.value} (condition not met)", "info")
-
+                    _show_skipped_stages(app, state.stage, next_stage)
                     state.stage = next_stage
                     state.reset_attempts()
                     state.awaiting_approval = False
@@ -342,88 +187,222 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
 
             # Workflow complete
             if state.stage == Stage.COMPLETE:
-                app.show_workflow_complete()
-                app.update_stage("COMPLETE")
-                app.set_status("complete", "workflow finished")
+                await _handle_workflow_complete(app, state)
 
-                completion_event = threading.Event()
-                completion_result = {"value": None}
+        except Exception as e:
+            app.show_message(f"Error: {e}", "error")
+            app._workflow_result = "error"
+        finally:
+            app.set_timer(0.5, app.exit)
 
-                def handle_completion(choice):
-                    completion_result["value"] = choice
-                    completion_event.set()
+    # Start workflow as async worker
+    app.call_later(lambda: app.run_worker(workflow_loop(), exclusive=True))
+    app.run()
 
-                app.show_prompt(PromptType.COMPLETION, "Workflow complete!", handle_completion)
-                completion_event.wait()
+    # Handle result
+    result = app._workflow_result or "paused"
 
-                if completion_result["value"] == "yes":
-                    # Run finalization within TUI
-                    app.set_status("finalizing", "creating PR...")
+    if result == "new_task":
+        return _start_new_task_tui()
+    elif result == "done":
+        console.print("\n[green]✓ All done![/green]")
+        return result
+    elif result == "back_to_dev":
+        return _run_workflow_with_tui(state)
+    elif result == "paused":
+        _handle_pause(state)
 
-                    def progress_callback(message, status):
-                        app.show_message(message, status)
+    return result
 
-                    from galangal.commands.complete import finalize_task
 
-                    success, pr_url = finalize_task(
-                        state.task_name, state, force=True, progress_callback=progress_callback
-                    )
+# -----------------------------------------------------------------------------
+# Helper functions for workflow logic
+# -----------------------------------------------------------------------------
 
-                    if success:
-                        app.add_activity("")
-                        app.add_activity("[bold #b8bb26]Task completed successfully![/]", "✓")
-                        if pr_url and pr_url != "PR already exists":
-                            app.add_activity(f"[#83a598]PR: {pr_url}[/]", "")
-                        app.add_activity("")
 
-                    # Show post-completion options with PR URL
-                    post_event = threading.Event()
-                    post_result = {"value": None}
+def _build_preflight_error_message(result) -> str:
+    """Build error message for preflight failure modal."""
+    detailed_error = result.output or result.message
 
-                    def handle_post_completion(choice):
-                        post_result["value"] = choice
-                        post_event.set()
+    failed_lines = []
+    for line in detailed_error.split("\n"):
+        if (
+            line.strip().startswith("✗")
+            or "Failed" in line
+            or "Missing" in line
+            or "Error" in line
+        ):
+            failed_lines.append(line.strip())
 
-                    # Build completion message with PR URL if available
-                    completion_msg = "Task completed successfully!"
-                    if pr_url and pr_url.startswith("http"):
-                        completion_msg += f"\n\nPull Request:\n{pr_url}"
-                    completion_msg += "\n\nWhat would you like to do next?"
+    modal_message = "Preflight checks failed:\n\n"
+    if failed_lines:
+        modal_message += "\n".join(failed_lines[:10])
+    else:
+        modal_message += detailed_error[:500]
+    modal_message += "\n\nFix issues and retry?"
 
-                    app.show_prompt(
-                        PromptType.POST_COMPLETION,
-                        completion_msg,
-                        handle_post_completion,
-                    )
-                    post_event.wait()
+    return modal_message
 
-                    if post_result["value"] == "new_task":
-                        app._workflow_result = "new_task"
-                    else:
-                        app._workflow_result = "done"
-                elif completion_result["value"] == "no":
-                    # Ask for feedback about what needs fixing
-                    app.set_status("feedback", "waiting for input")
-                    feedback_event = threading.Event()
-                    feedback_result = {"value": None}
 
-                    def handle_feedback(text):
-                        feedback_result["value"] = text
-                        feedback_event.set()
+async def _handle_max_retries_exceeded(
+    app: WorkflowTUIApp,
+    state: WorkflowState,
+    error_message: str,
+    max_retries: int,
+) -> str:
+    """Handle stage failure after max retries exceeded."""
+    error_preview = error_message[:800].strip()
+    if len(error_message) > 800:
+        error_preview += "..."
 
-                    app.show_multiline_input(
-                        "What needs to be fixed? (Ctrl+S to submit):",
-                        "",
-                        handle_feedback,
-                    )
-                    feedback_event.wait()
+    modal_message = (
+        f"Stage {state.stage.value} failed after {max_retries} attempts.\n\n"
+        f"Error:\n{error_preview}\n\n"
+        "What would you like to do?"
+    )
 
-                    feedback = feedback_result["value"]
-                    if feedback:
-                        # Create ROLLBACK.md with the feedback
-                        from datetime import datetime, timezone
+    choice = await app.prompt_async(PromptType.STAGE_FAILURE, modal_message)
 
-                        rollback_content = f"""# Manual Review Rollback
+    if choice == "fix_in_dev":
+        feedback = await app.multiline_input_async(
+            "Describe what needs to be fixed (Ctrl+S to submit):", ""
+        )
+        feedback = feedback or "Fix the failing stage"
+
+        failing_stage = state.stage.value
+        state.stage = Stage.DEV
+        state.last_failure = (
+            f"Feedback from {failing_stage} failure: {feedback}\n\n"
+            f"Original error:\n{error_message[:1500]}"
+        )
+        state.reset_attempts(clear_failure=False)
+        app.show_message("Rolling back to DEV with feedback", "warning")
+        save_state(state)
+
+    return choice
+
+
+async def _handle_plan_approval(
+    app: WorkflowTUIApp, state: WorkflowState, config
+) -> bool:
+    """
+    Handle plan approval gate after PM stage.
+
+    Returns True if workflow should continue, False if rejected/quit.
+    """
+    default_approver = config.project.approver_name or ""
+
+    choice = await app.prompt_async(
+        PromptType.PLAN_APPROVAL, "Approve plan to continue?"
+    )
+
+    if choice == "yes":
+        name = await app.text_input_async("Enter approver name:", default_approver)
+        if name:
+            from datetime import datetime, timezone
+
+            approval_content = f"""# Plan Approval
+
+- **Status:** Approved
+- **Approved By:** {name}
+- **Date:** {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
+"""
+            write_artifact("APPROVAL.md", approval_content, state.task_name)
+            app.show_message(f"Plan approved by {name}", "success")
+            return True
+        else:
+            # Cancelled - ask again
+            return await _handle_plan_approval(app, state, config)
+
+    elif choice == "no":
+        reason = await app.multiline_input_async(
+            "Enter rejection reason (Ctrl+S to submit):", "Needs revision"
+        )
+        if reason:
+            state.stage = Stage.PM
+            state.last_failure = f"Plan rejected: {reason}"
+            state.reset_attempts(clear_failure=False)
+            save_state(state)
+            app.show_message(f"Plan rejected: {reason}", "warning")
+            app.show_message("Restarting PM stage with feedback...", "info")
+            return False
+        else:
+            # Cancelled - ask again
+            return await _handle_plan_approval(app, state, config)
+
+    else:  # quit
+        app._workflow_result = "paused"
+        return False
+
+
+def _show_skipped_stages(
+    app: WorkflowTUIApp, current_stage: Stage, next_stage: Stage
+) -> None:
+    """Show messages for any stages that were skipped."""
+    expected_next_idx = STAGE_ORDER.index(current_stage) + 1
+    actual_next_idx = STAGE_ORDER.index(next_stage)
+    if actual_next_idx > expected_next_idx:
+        skipped = STAGE_ORDER[expected_next_idx:actual_next_idx]
+        for s in skipped:
+            app.show_message(f"Skipped {s.value} (condition not met)", "info")
+
+
+async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -> None:
+    """Handle workflow completion - finalization and post-completion options."""
+    app.show_workflow_complete()
+    app.update_stage("COMPLETE")
+    app.set_status("complete", "workflow finished")
+
+    choice = await app.prompt_async(PromptType.COMPLETION, "Workflow complete!")
+
+    if choice == "yes":
+        # Run finalization
+        app.set_status("finalizing", "creating PR...")
+
+        def progress_callback(message, status):
+            app.show_message(message, status)
+
+        from galangal.commands.complete import finalize_task
+
+        success, pr_url = await asyncio.to_thread(
+            finalize_task,
+            state.task_name,
+            state,
+            force=True,
+            progress_callback=progress_callback,
+        )
+
+        if success:
+            app.add_activity("")
+            app.add_activity("[bold #b8bb26]Task completed successfully![/]", "✓")
+            if pr_url and pr_url != "PR already exists":
+                app.add_activity(f"[#83a598]PR: {pr_url}[/]", "")
+            app.add_activity("")
+
+        # Show post-completion options
+        completion_msg = "Task completed successfully!"
+        if pr_url and pr_url.startswith("http"):
+            completion_msg += f"\n\nPull Request:\n{pr_url}"
+        completion_msg += "\n\nWhat would you like to do next?"
+
+        post_choice = await app.prompt_async(PromptType.POST_COMPLETION, completion_msg)
+
+        if post_choice == "new_task":
+            app._workflow_result = "new_task"
+        else:
+            app._workflow_result = "done"
+
+    elif choice == "no":
+        # Ask for feedback
+        app.set_status("feedback", "waiting for input")
+        feedback = await app.multiline_input_async(
+            "What needs to be fixed? (Ctrl+S to submit):", ""
+        )
+
+        if feedback:
+            from datetime import datetime, timezone
+
+            rollback_content = f"""# Manual Review Rollback
 
 ## Source
 Manual review at COMPLETE stage
@@ -437,107 +416,47 @@ Manual review at COMPLETE stage
 ## Instructions
 Please address the issues described above before proceeding.
 """
-                        write_artifact("ROLLBACK.md", rollback_content, state.task_name)
-                        state.last_failure = f"Manual review feedback: {feedback}"
-                        app.show_message("Feedback recorded, rolling back to DEV", "warning")
-                    else:
-                        state.last_failure = "Manual review requested changes (no details provided)"
-                        app.show_message("Rolling back to DEV (no feedback provided)", "warning")
+            write_artifact("ROLLBACK.md", rollback_content, state.task_name)
+            state.last_failure = f"Manual review feedback: {feedback}"
+            app.show_message("Feedback recorded, rolling back to DEV", "warning")
+        else:
+            state.last_failure = "Manual review requested changes (no details provided)"
+            app.show_message("Rolling back to DEV (no feedback provided)", "warning")
 
-                    state.stage = Stage.DEV
-                    state.reset_attempts(clear_failure=False)
-                    save_state(state)
-                    app._workflow_result = "back_to_dev"
-                else:
-                    app._workflow_result = "paused"
+        state.stage = Stage.DEV
+        state.reset_attempts(clear_failure=False)
+        save_state(state)
+        app._workflow_result = "back_to_dev"
 
-        except Exception as e:
-            app.show_message(f"Error: {e}", "error")
-            app._workflow_result = "error"
-        finally:
-            workflow_done.set()
-            app.call_from_thread(app.set_timer, 0.5, app.exit)
-
-    # Start workflow in background thread
-    thread = threading.Thread(target=workflow_thread, daemon=True)
-
-    def start_thread():
-        thread.start()
-
-    app.call_later(start_thread)
-    app.run()
-
-    # Handle result
-    result = app._workflow_result or "paused"
-
-    if result == "new_task":
-        # Start new task flow - prompt for task type and description
-        return _start_new_task_tui()
-    elif result == "done":
-        # Clean exit after successful completion
-        console.print("\n[green]✓ All done![/green]")
-        return result
-    elif result == "back_to_dev":
-        # Restart workflow from DEV
-        return _run_workflow_with_tui(state)
-    elif result == "paused":
-        _handle_pause(state)
-
-    return result
+    else:
+        app._workflow_result = "paused"
 
 
 def _start_new_task_tui() -> str:
     """
     Create a new task using TUI prompts for task type and description.
 
-    This function is called when a user completes a workflow and chooses
-    to start a new task. It guides the user through:
-    1. Selecting task type (feature, bugfix, refactor, etc.)
-    2. Entering a task description (multiline)
-    3. Generating a task name from the description
-
-    Once the task is created, the workflow is automatically started.
-
-    Threading Model:
-        Same as _run_workflow_with_tui - TUI in main thread, logic in background.
-
     Returns:
-        Result string indicating outcome:
-        - Result from _run_workflow_with_tui if task was created and workflow started
-        - "cancelled": User cancelled task creation
-        - "error": An exception occurred
+        Result string indicating outcome.
     """
-    # Create a minimal TUI app for task creation
     app = WorkflowTUIApp("New Task", "SETUP", hidden_stages=frozenset())
 
     task_info = {"type": None, "description": None, "name": None}
-    creation_done = threading.Event()
 
-    def task_creation_thread():
+    async def task_creation_loop():
+        """Async task creation flow."""
         try:
             app.add_activity("[bold]Starting new task...[/bold]", "🆕")
             app.set_status("setup", "select task type")
 
             # Step 1: Get task type
-            type_event = threading.Event()
-            type_result = {"value": None}
-
-            def handle_type(choice):
-                type_result["value"] = choice
-                type_event.set()
-
-            # Show task type selection (we have 3 options in the modal, offer more via text)
-            app.show_prompt(
-                PromptType.TASK_TYPE,
-                "Select task type:",
-                handle_type,
+            type_choice = await app.prompt_async(
+                PromptType.TASK_TYPE, "Select task type:"
             )
-            type_event.wait()
 
-            if type_result["value"] == "quit":
+            if type_choice == "quit":
                 app._workflow_result = "cancelled"
-                creation_done.set()
-                app.call_from_thread(app.set_timer, 0.5, app.exit)
+                app.set_timer(0.5, app.exit)
                 return
 
             # Map selection to TaskType
@@ -549,38 +468,37 @@ def _start_new_task_tui() -> str:
                 "docs": TaskType.DOCS,
                 "hotfix": TaskType.HOTFIX,
             }
-            task_info["type"] = type_map.get(type_result["value"], TaskType.FEATURE)
+            task_info["type"] = type_map.get(type_choice, TaskType.FEATURE)
             app.show_message(f"Task type: {task_info['type'].display_name()}", "success")
 
             # Step 2: Get task description
             app.set_status("setup", "enter description")
-            desc_event = threading.Event()
+            description = await app.multiline_input_async(
+                "Enter task description (Ctrl+S to submit):", ""
+            )
 
-            def handle_description(desc):
-                task_info["description"] = desc
-                desc_event.set()
-
-            app.show_multiline_input("Enter task description (Ctrl+S to submit):", "", handle_description)
-            desc_event.wait()
-
-            if not task_info["description"]:
+            if not description:
                 app.show_message("Task creation cancelled", "warning")
                 app._workflow_result = "cancelled"
-                creation_done.set()
-                app.call_from_thread(app.set_timer, 0.5, app.exit)
+                app.set_timer(0.5, app.exit)
                 return
 
-            # Step 3: Generate and confirm task name
+            task_info["description"] = description
+
+            # Step 3: Generate and create task
             app.set_status("setup", "generating task name")
             from galangal.commands.start import create_task, generate_task_name
 
-            task_name = generate_task_name(task_info["description"])
+            task_name = await asyncio.to_thread(
+                generate_task_name, task_info["description"]
+            )
             task_info["name"] = task_name
             app.show_message(f"Task name: {task_name}", "info")
 
             # Create the task
             app.set_status("setup", "creating task")
-            success, message = create_task(
+            success, message = await asyncio.to_thread(
+                create_task,
                 task_name,
                 task_info["description"],
                 task_info["type"],
@@ -597,18 +515,15 @@ def _start_new_task_tui() -> str:
             app.show_message(f"Error: {e}", "error")
             app._workflow_result = "error"
         finally:
-            creation_done.set()
-            app.call_from_thread(app.set_timer, 0.5, app.exit)
+            app.set_timer(0.5, app.exit)
 
-    # Start creation in background thread
-    thread = threading.Thread(target=task_creation_thread, daemon=True)
-    app.call_later(thread.start)
+    # Start creation as async worker
+    app.call_later(lambda: app.run_worker(task_creation_loop(), exclusive=True))
     app.run()
 
     result = app._workflow_result or "cancelled"
 
     if result == "task_created" and task_info["name"]:
-        # Load new state and start workflow
         from galangal.core.state import load_state
 
         new_state = load_state(task_info["name"])

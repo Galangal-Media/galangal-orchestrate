@@ -19,10 +19,10 @@ Layout:
 └──────────────────────────────────────────────────────────────────┘
 """
 
+import asyncio
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime
 from pathlib import Path
 
 from textual.app import App, ComposeResult
@@ -32,7 +32,12 @@ from textual.widgets import Footer, RichLog
 
 from galangal.ui.tui.adapters import PromptType, TUIAdapter
 from galangal.ui.tui.modals import MultilineInputModal, PromptModal, PromptOption, TextInputModal
-from galangal.ui.tui.types import ActivityCategory, ActivityEntry, ActivityLevel, export_activity_log
+from galangal.ui.tui.types import (
+    ActivityCategory,
+    ActivityEntry,
+    ActivityLevel,
+    export_activity_log,
+)
 from galangal.ui.tui.widgets import (
     CurrentActionWidget,
     FilesPanelWidget,
@@ -521,6 +526,80 @@ class WorkflowTUIApp(App):
             self.call_from_thread(_hide)
         except Exception:
             _hide()
+
+    # -------------------------------------------------------------------------
+    # Async prompt methods (simplified threading model)
+    # -------------------------------------------------------------------------
+
+    async def prompt_async(self, prompt_type: PromptType, message: str) -> str:
+        """
+        Show a modal prompt and await the result.
+
+        This is the async version of show_prompt() that eliminates the need
+        for callbacks and threading.Event coordination. Use this from async
+        workflow code instead of the callback-based version.
+
+        Args:
+            prompt_type: Type of prompt determining available options.
+            message: Message to display in the modal.
+
+        Returns:
+            The selected option string (e.g., "yes", "no", "quit").
+        """
+        future: asyncio.Future[str] = asyncio.Future()
+
+        def callback(result: str) -> None:
+            if not future.done():
+                self.call_from_thread(lambda: future.set_result(result))
+
+        self.show_prompt(prompt_type, message, callback)
+        return await future
+
+    async def text_input_async(self, label: str, default: str = "") -> str | None:
+        """
+        Show a text input modal and await the result.
+
+        This is the async version of show_text_input() that eliminates the need
+        for callbacks and threading.Event coordination.
+
+        Args:
+            label: Prompt label displayed above the input field.
+            default: Default value pre-filled in the input.
+
+        Returns:
+            The entered text, or None if cancelled.
+        """
+        future: asyncio.Future[str | None] = asyncio.Future()
+
+        def callback(result: str | None) -> None:
+            if not future.done():
+                self.call_from_thread(lambda: future.set_result(result))
+
+        self.show_text_input(label, default, callback)
+        return await future
+
+    async def multiline_input_async(self, label: str, default: str = "") -> str | None:
+        """
+        Show a multiline input modal and await the result.
+
+        This is the async version of show_multiline_input() that eliminates
+        the need for callbacks and threading.Event coordination.
+
+        Args:
+            label: Prompt label displayed above the text area.
+            default: Default value pre-filled in the text area.
+
+        Returns:
+            The entered text, or None if cancelled.
+        """
+        future: asyncio.Future[str | None] = asyncio.Future()
+
+        def callback(result: str | None) -> None:
+            if not future.done():
+                self.call_from_thread(lambda: future.set_result(result))
+
+        self.show_multiline_input(label, default, callback)
+        return await future
 
     def show_multiline_input(self, label: str, default: str, callback: Callable) -> None:
         """
