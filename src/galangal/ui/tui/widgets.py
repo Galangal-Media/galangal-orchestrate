@@ -6,6 +6,7 @@ from rich.text import Text
 from textual.reactive import reactive
 from textual.widgets import Static
 
+from galangal import __version__
 from galangal.core.state import STAGE_ORDER
 
 
@@ -33,6 +34,7 @@ class HeaderWidget(Static):
         text.append(self.elapsed, style="bold #ebdbb2")
         text.append("  Turns: ", style="#928374")
         text.append(str(self.turns), style="bold #b8bb26")
+        text.append(f"  v{__version__}", style="#665c54")
 
         return text
 
