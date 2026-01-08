@@ -3,8 +3,8 @@ Workflow state management - Stage, TaskType, and WorkflowState.
 """
 
 import json
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 
@@ -280,6 +280,57 @@ def get_hidden_stages_for_task_type(task_type: TaskType, config_skip: list[str] 
     return hidden
 
 
+# Maximum rollbacks to the same stage within the time window
+MAX_ROLLBACKS_PER_STAGE = 3
+ROLLBACK_TIME_WINDOW_HOURS = 1
+
+
+@dataclass
+class RollbackEvent:
+    """
+    Record of a rollback event in the workflow.
+
+    Tracks when a stage failed validation and triggered a rollback
+    to an earlier stage. Used to detect rollback loops and prevent
+    infinite retry cycles.
+
+    Attributes:
+        timestamp: When the rollback occurred (ISO format string).
+        from_stage: Stage that failed and triggered the rollback.
+        to_stage: Target stage to roll back to.
+        reason: Description of why the rollback was needed.
+    """
+
+    timestamp: str
+    from_stage: str
+    to_stage: str
+    reason: str
+
+    @classmethod
+    def create(cls, from_stage: "Stage", to_stage: "Stage", reason: str) -> "RollbackEvent":
+        """Create a new rollback event with current timestamp."""
+        return cls(
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            from_stage=from_stage.value,
+            to_stage=to_stage.value,
+            reason=reason,
+        )
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "RollbackEvent":
+        """Create from dictionary."""
+        return cls(
+            timestamp=d["timestamp"],
+            from_stage=d["from_stage"],
+            to_stage=d["to_stage"],
+            reason=d["reason"],
+        )
+
+
 @dataclass
 class WorkflowState:
     """Persistent workflow state for a task."""
@@ -293,6 +344,7 @@ class WorkflowState:
     task_description: str
     task_name: str
     task_type: TaskType = TaskType.FEATURE
+    rollback_history: list[RollbackEvent] = field(default_factory=list)
 
     # -------------------------------------------------------------------------
     # Retry management methods
@@ -340,14 +392,80 @@ class WorkflowState:
         if clear_failure:
             self.last_failure = None
 
+    # -------------------------------------------------------------------------
+    # Rollback management methods
+    # -------------------------------------------------------------------------
+
+    def record_rollback(self, from_stage: Stage, to_stage: Stage, reason: str) -> None:
+        """
+        Record a rollback event in the history.
+
+        Called when validation fails and triggers a rollback to an earlier stage.
+        The history is used to detect rollback loops and prevent infinite retries.
+
+        Args:
+            from_stage: Stage that failed and triggered the rollback.
+            to_stage: Target stage to roll back to.
+            reason: Description of why the rollback was needed.
+        """
+        event = RollbackEvent.create(from_stage, to_stage, reason)
+        self.rollback_history.append(event)
+
+    def should_allow_rollback(self, target_stage: Stage) -> bool:
+        """
+        Check if a rollback to the target stage is allowed.
+
+        Prevents infinite rollback loops by limiting the number of rollbacks
+        to the same stage within a time window.
+
+        Args:
+            target_stage: Stage to potentially roll back to.
+
+        Returns:
+            True if rollback is allowed, False if too many recent rollbacks.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=ROLLBACK_TIME_WINDOW_HOURS)
+        cutoff_str = cutoff.isoformat()
+
+        recent_rollbacks = [
+            r for r in self.rollback_history
+            if r.to_stage == target_stage.value and r.timestamp > cutoff_str
+        ]
+
+        return len(recent_rollbacks) < MAX_ROLLBACKS_PER_STAGE
+
+    def get_rollback_count(self, target_stage: Stage) -> int:
+        """
+        Get the number of recent rollbacks to a stage.
+
+        Args:
+            target_stage: Stage to count rollbacks for.
+
+        Returns:
+            Number of rollbacks to this stage in the time window.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=ROLLBACK_TIME_WINDOW_HOURS)
+        cutoff_str = cutoff.isoformat()
+
+        return len([
+            r for r in self.rollback_history
+            if r.to_stage == target_stage.value and r.timestamp > cutoff_str
+        ])
+
     def to_dict(self) -> dict:
         d = asdict(self)
         d["stage"] = self.stage.value
         d["task_type"] = self.task_type.value
+        # rollback_history is already converted to list of dicts by asdict
         return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "WorkflowState":
+        # Parse rollback history if present
+        rollback_history = [
+            RollbackEvent.from_dict(r) for r in d.get("rollback_history", [])
+        ]
+
         return cls(
             stage=Stage.from_str(d["stage"]),
             attempt=d.get("attempt", 1),
@@ -358,6 +476,7 @@ class WorkflowState:
             task_description=d.get("task_description", ""),
             task_name=d.get("task_name", ""),
             task_type=TaskType.from_str(d.get("task_type", "feature")),
+            rollback_history=rollback_history,
         )
 
     @classmethod

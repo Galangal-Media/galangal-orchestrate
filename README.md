@@ -120,11 +120,34 @@ pr:
   codex_review: true
   base_branch: main
 
+logging:
+  enabled: true
+  level: info
+  file: logs/galangal.jsonl
+  json_format: true
+  console: false
+
 prompt_context: |
   ## Project Patterns
   - Use repository pattern for data access
   - API responses use api_success() / api_error()
 ```
+
+### New in v0.2.22: Structured Logging
+
+If you're upgrading from an earlier version, you can add the optional `logging` section to your existing `config.yaml`:
+
+```yaml
+# Add to .galangal/config.yaml
+logging:
+  enabled: true           # Enable structured logging
+  level: info             # debug, info, warning, error
+  file: logs/galangal.jsonl  # Log file path (JSON Lines format)
+  json_format: true       # JSON output (false for pretty console)
+  console: false          # Also output to stderr
+```
+
+When enabled, logs workflow events like `stage_started`, `stage_completed`, `rollback`, etc. in JSON format for easy parsing and aggregation.
 
 ## Customizing Prompts
 

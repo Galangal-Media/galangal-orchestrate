@@ -156,6 +156,21 @@ class DocsConfig(BaseModel):
     )
 
 
+class LoggingConfig(BaseModel):
+    """Structured logging configuration."""
+
+    enabled: bool = Field(default=False, description="Enable structured logging to file")
+    level: str = Field(default="info", description="Log level: debug, info, warning, error")
+    file: str | None = Field(
+        default=None,
+        description="Log file path (e.g., 'logs/galangal.jsonl'). If not set, logs only to console.",
+    )
+    json_format: bool = Field(
+        default=True, description="Output JSON format (False for pretty console format)"
+    )
+    console: bool = Field(default=False, description="Also output to console (stderr)")
+
+
 class PRConfig(BaseModel):
     """Pull request configuration."""
 
@@ -178,6 +193,7 @@ class GalangalConfig(BaseModel):
     ai: AIConfig = Field(default_factory=AIConfig)
     pr: PRConfig = Field(default_factory=PRConfig)
     docs: DocsConfig = Field(default_factory=DocsConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     prompt_context: str = Field(
         default="", description="Global context added to all prompts"
     )

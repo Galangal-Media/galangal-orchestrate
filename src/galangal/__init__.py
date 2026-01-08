@@ -12,13 +12,25 @@ from galangal.exceptions import (
     ValidationError,
     WorkflowError,
 )
+from galangal.logging import (
+    WorkflowLogger,
+    configure_logging,
+    get_logger,
+    workflow_logger,
+)
 
-__version__ = "0.2.21"
+__version__ = "0.2.22"
 
 __all__ = [
+    # Exceptions
     "GalangalError",
     "ConfigError",
     "ValidationError",
     "WorkflowError",
     "TaskError",
+    # Logging
+    "configure_logging",
+    "get_logger",
+    "WorkflowLogger",
+    "workflow_logger",
 ]

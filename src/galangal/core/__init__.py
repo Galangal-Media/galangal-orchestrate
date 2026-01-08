@@ -2,8 +2,11 @@
 
 from galangal.core.artifacts import artifact_exists, read_artifact, write_artifact
 from galangal.core.state import (
+    MAX_ROLLBACKS_PER_STAGE,
+    ROLLBACK_TIME_WINDOW_HOURS,
     STAGE_METADATA,
     STAGE_ORDER,
+    RollbackEvent,
     Stage,
     StageMetadata,
     TaskType,
@@ -18,6 +21,9 @@ __all__ = [
     "TaskType",
     "WorkflowState",
     "STAGE_ORDER",
+    "RollbackEvent",
+    "MAX_ROLLBACKS_PER_STAGE",
+    "ROLLBACK_TIME_WINDOW_HOURS",
     "artifact_exists",
     "read_artifact",
     "write_artifact",

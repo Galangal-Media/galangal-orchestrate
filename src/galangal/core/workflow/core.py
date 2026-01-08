@@ -4,6 +4,7 @@ Core workflow utilities - stage execution, rollback handling.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -150,8 +151,20 @@ def execute_stage(
         - CLARIFICATION_NEEDED: Questions pending without answers
         - PAUSED/TIMEOUT/ERROR: AI execution issues
     """
+    from galangal.logging import workflow_logger
+
     stage = state.stage
     task_name = state.task_name
+    config = get_config()
+    start_time = time.time()
+
+    # Log stage start
+    workflow_logger.stage_started(
+        stage=stage.value,
+        task_name=task_name,
+        attempt=state.attempt,
+        max_retries=config.stages.max_retries,
+    )
 
     if stage == Stage.COMPLETE:
         return StageResult.success("Workflow complete")
@@ -234,11 +247,34 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     with open(log_file, "a") as f:
         f.write(f"\n=== Validation ===\n{result.message}\n")
 
+    duration = time.time() - start_time
+
+    # Log validation result
+    workflow_logger.validation_result(
+        stage=stage.value,
+        task_name=task_name,
+        success=result.success,
+        message=result.message,
+        skipped=result.skipped,
+    )
+
     if result.success:
         tui_app.show_message(result.message, "success")
+        workflow_logger.stage_completed(
+            stage=stage.value,
+            task_name=task_name,
+            success=True,
+            duration=duration,
+        )
         return StageResult.success(result.message, output=invoke_result.output)
     else:
         tui_app.show_message(result.message, "error")
+        workflow_logger.stage_failed(
+            stage=stage.value,
+            task_name=task_name,
+            error=result.message,
+            attempt=state.attempt,
+        )
         # Check if rollback is required
         if result.rollback_to:
             return StageResult.rollback_required(
@@ -293,12 +329,18 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
 
     When validation indicates a rollback is needed (e.g., QA fails and needs
     to go back to DEV), this function:
-    1. Appends the rollback details to ROLLBACK.md
-    2. Updates the workflow state to target stage
-    3. Resets attempt counter and records failure reason
+    1. Checks if rollback is allowed (prevents infinite loops)
+    2. Records the rollback in state history
+    3. Appends the rollback details to ROLLBACK.md
+    4. Updates the workflow state to target stage
+    5. Resets attempt counter and records failure reason
 
     The ROLLBACK.md file serves as context for the target stage, describing
     what issues need to be fixed.
+
+    Rollback loop prevention: If too many rollbacks to the same stage occur
+    within the time window (default: 3 within 1 hour), the rollback is blocked
+    and returns False.
 
     Args:
         state: Current workflow state to update. Modified in place.
@@ -307,7 +349,8 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
 
     Returns:
         True if rollback was processed (result was ROLLBACK_REQUIRED type).
-        False if result was not a rollback (caller should handle differently).
+        False if result was not a rollback or rollback was blocked due to
+        too many recent rollbacks to the same stage.
     """
     if result.type != StageResultType.ROLLBACK_REQUIRED or result.rollback_to is None:
         return False
@@ -316,6 +359,26 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
     from_stage = state.stage
     target_stage = result.rollback_to
     reason = result.message
+
+    # Check for rollback loops
+    if not state.should_allow_rollback(target_stage):
+        from galangal.logging import workflow_logger
+
+        rollback_count = state.get_rollback_count(target_stage)
+        loop_msg = (
+            f"Rollback loop detected: {rollback_count} rollbacks to {target_stage.value} "
+            f"in the last hour. Manual intervention required."
+        )
+        workflow_logger.rollback(
+            from_stage=from_stage.value,
+            to_stage=target_stage.value,
+            task_name=task_name,
+            reason=f"BLOCKED: {loop_msg}",
+        )
+        return False
+
+    # Record rollback in state history
+    state.record_rollback(from_stage, target_stage, reason)
 
     rollback_entry = f"""
 ## Rollback from {from_stage.value}
@@ -338,6 +401,16 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
         new_content = f"# Rollback Log\n\nThis file tracks issues that required rolling back to earlier stages.\n{rollback_entry}"
 
     write_artifact("ROLLBACK.md", new_content, task_name)
+
+    # Log rollback event
+    from galangal.logging import workflow_logger
+
+    workflow_logger.rollback(
+        from_stage=from_stage.value,
+        to_stage=target_stage.value,
+        task_name=task_name,
+        reason=reason,
+    )
 
     state.stage = target_stage
     state.last_failure = f"Rollback from {from_stage.value}: {reason}"
