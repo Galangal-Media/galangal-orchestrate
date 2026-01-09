@@ -132,7 +132,7 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         display_name="PM",
         description="Define requirements and generate spec",
         requires_approval=True,
-        produces_artifacts=("SPEC.md", "PLAN.md"),
+        produces_artifacts=("SPEC.md", "PLAN.md", "DISCOVERY_LOG.md"),
     ),
     Stage.DESIGN: StageMetadata(
         display_name="Design",
@@ -346,6 +346,11 @@ class WorkflowState:
     task_type: TaskType = TaskType.FEATURE
     rollback_history: list[RollbackEvent] = field(default_factory=list)
 
+    # PM Discovery Q&A tracking
+    pm_subphase: str | None = None  # "analyzing", "questioning", "answering", "specifying"
+    qa_rounds: list[dict] | None = None  # [{"questions": [...], "answers": [...]}]
+    qa_complete: bool = False
+
     # -------------------------------------------------------------------------
     # Retry management methods
     # -------------------------------------------------------------------------
@@ -482,6 +487,9 @@ class WorkflowState:
             task_name=d.get("task_name", ""),
             task_type=TaskType.from_str(d.get("task_type", "feature")),
             rollback_history=rollback_history,
+            pm_subphase=d.get("pm_subphase"),
+            qa_rounds=d.get("qa_rounds"),
+            qa_complete=d.get("qa_complete", False),
         )
 
     @classmethod

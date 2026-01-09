@@ -85,6 +85,10 @@ Tip: Press Ctrl+C during execution to pause gracefully.
         choices=["feature", "bugfix", "refactor", "chore", "docs", "hotfix", "1", "2", "3", "4", "5", "6"],
         help="Task type (skip interactive selection)"
     )
+    start_parser.add_argument(
+        "--skip-discovery", action="store_true",
+        help="Skip the discovery Q&A phase and go straight to spec generation"
+    )
     start_parser.set_defaults(func=_cmd_start)
 
     # list
@@ -98,6 +102,10 @@ Tip: Press Ctrl+C during execution to pause gracefully.
 
     # resume
     resume_parser = subparsers.add_parser("resume", help="Resume active task")
+    resume_parser.add_argument(
+        "--skip-discovery", action="store_true",
+        help="Skip remaining discovery Q&A and go straight to spec generation"
+    )
     resume_parser.set_defaults(func=_cmd_resume)
 
     # pause

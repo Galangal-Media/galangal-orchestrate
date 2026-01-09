@@ -31,6 +31,7 @@ class PromptType(Enum):
     STAGE_FAILURE = "stage_failure"
     POST_COMPLETION = "post_completion"
     TASK_TYPE = "task_type"
+    YES_NO = "yes_no"  # Simple yes/no prompt for discovery Q&A
 
 
 # Default options for prompts without specific configuration
@@ -78,6 +79,10 @@ PROMPT_OPTIONS: dict[PromptType, list[PromptOption]] = {
         PromptOption("4", "Chore - Dependencies, config", "chore", "#fabd2f"),
         PromptOption("5", "Docs - Documentation only", "docs", "#d3869b"),
         PromptOption("6", "Hotfix - Critical fix", "hotfix", "#fe8019"),
+    ],
+    PromptType.YES_NO: [
+        PromptOption("1", "Yes", "yes", "#b8bb26"),
+        PromptOption("2", "No", "no", "#fb4934"),
     ],
 }
 

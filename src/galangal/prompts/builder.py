@@ -41,6 +41,98 @@ class PromptBuilder:
         self.override_dir = get_prompts_dir()
         self.defaults_dir = Path(__file__).parent / "defaults"
 
+    def get_prompt_by_name(self, name: str) -> str:
+        """Get a prompt by filename (without .md extension).
+
+        Supports project override/supplement like get_stage_prompt.
+        Used for non-stage prompts like 'pm_questions'.
+
+        Args:
+            name: Prompt name, e.g., 'pm_questions'
+
+        Returns:
+            Prompt content with project overrides applied.
+        """
+        # Get base prompt
+        default_path = self.defaults_dir / f"{name}.md"
+        base_prompt = ""
+        if default_path.exists():
+            base_prompt = default_path.read_text()
+
+        # Check for project prompt
+        project_path = self.override_dir / f"{name}.md"
+        if not project_path.exists():
+            return base_prompt or f"Execute {name}."
+
+        project_prompt = project_path.read_text()
+
+        # Check for # BASE marker (supplement mode)
+        if "# BASE" in project_prompt:
+            parts = project_prompt.split("# BASE", 1)
+            header = parts[0].rstrip()
+            footer = parts[1].lstrip() if len(parts) > 1 else ""
+
+            result_parts = []
+            if header:
+                result_parts.append(header)
+            if base_prompt:
+                result_parts.append(base_prompt)
+            if footer:
+                result_parts.append(footer)
+
+            return "\n\n".join(result_parts)
+
+        # No marker = full override
+        return project_prompt
+
+    def build_discovery_prompt(self, state: WorkflowState, qa_history: list[dict] | None = None) -> str:
+        """Build the prompt for PM discovery questions.
+
+        Args:
+            state: Current workflow state with task info.
+            qa_history: Previous Q&A rounds, if any.
+
+        Returns:
+            Complete prompt for generating discovery questions.
+        """
+        base_prompt = self.get_prompt_by_name("pm_questions")
+        task_name = state.task_name
+
+        # Build context
+        context_parts = [
+            f"# Task: {task_name}",
+            f"# Task Type: {state.task_type.display_name()}",
+            f"# Brief\n{state.task_description}",
+        ]
+
+        # Add previous Q&A history
+        if qa_history:
+            qa_text = self._format_qa_history(qa_history)
+            context_parts.append(f"\n# Previous Q&A Rounds\n{qa_text}")
+        else:
+            context_parts.append("\n# Previous Q&A Rounds\nNone - this is the first round.")
+
+        # Add global prompt context from config
+        if self.config.prompt_context:
+            context_parts.append(f"\n# Project Context\n{self.config.prompt_context}")
+
+        context = "\n".join(context_parts)
+        return f"{context}\n\n---\n\n{base_prompt}"
+
+    def _format_qa_history(self, qa_history: list[dict]) -> str:
+        """Format Q&A history for prompt inclusion."""
+        parts = []
+        for i, round_data in enumerate(qa_history, 1):
+            parts.append(f"## Round {i}")
+            parts.append("### Questions")
+            for j, q in enumerate(round_data.get("questions", []), 1):
+                parts.append(f"{j}. {q}")
+            parts.append("### Answers")
+            for j, a in enumerate(round_data.get("answers", []), 1):
+                parts.append(f"{j}. {a}")
+            parts.append("")
+        return "\n".join(parts)
+
     def get_stage_prompt(self, stage: Stage) -> str:
         """Get the prompt for a stage, with project override/supplement support.
 
@@ -159,6 +251,7 @@ Only update documentation types marked as YES above.""")
         Get relevant artifact content for inclusion in the stage prompt.
 
         Different stages need different context:
+        - PM: DISCOVERY_LOG.md (Q&A from brief refinement)
         - All stages after PM: SPEC.md, PLAN.md
         - After DESIGN: DESIGN.md or DESIGN_SKIP.md
         - DEV: DEVELOPMENT.md (for resume), ROLLBACK.md (issues to fix)
@@ -173,6 +266,13 @@ Only update documentation types marked as YES above.""")
             List of formatted artifact sections (e.g., "# SPEC.md\\n{content}").
         """
         parts = []
+
+        # DISCOVERY_LOG for PM stage (from brief refinement Q&A)
+        if stage == Stage.PM:
+            if artifact_exists("DISCOVERY_LOG.md", task_name):
+                parts.append(
+                    f"\n# DISCOVERY_LOG.md (User Q&A - use these answers!)\n{read_artifact('DISCOVERY_LOG.md', task_name)}"
+                )
 
         # SPEC and PLAN for all stages after PM
         if stage != Stage.PM:

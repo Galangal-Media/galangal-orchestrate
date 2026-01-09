@@ -31,7 +31,13 @@ from textual.containers import Container, Horizontal, VerticalScroll
 from textual.widgets import Footer, RichLog
 
 from galangal.ui.tui.adapters import PromptType, TUIAdapter, get_prompt_options
-from galangal.ui.tui.modals import MultilineInputModal, PromptModal, TextInputModal
+from galangal.ui.tui.modals import (
+    MultilineInputModal,
+    PromptModal,
+    QuestionAnswerModal,
+    TextInputModal,
+    UserQuestionsModal,
+)
 from galangal.ui.tui.types import (
     ActivityCategory,
     ActivityEntry,
@@ -633,6 +639,85 @@ class WorkflowTUIApp(App):
                 future.set_result(result)
 
         self.show_multiline_input(label, default, callback)
+        return await future
+
+    # -------------------------------------------------------------------------
+    # Discovery Q&A async methods
+    # -------------------------------------------------------------------------
+
+    async def question_answer_session_async(self, questions: list[str]) -> list[str] | None:
+        """
+        Show a Q&A modal and await all answers.
+
+        Displays all questions and collects answers one at a time.
+        User answers each question sequentially.
+
+        Args:
+            questions: List of questions to ask.
+
+        Returns:
+            List of answers (same length as questions), or None if cancelled.
+        """
+        future: asyncio.Future[list[str] | None] = asyncio.Future()
+
+        def _show():
+            try:
+                def _handle(result: list[str] | None) -> None:
+                    if not future.done():
+                        future.set_result(result)
+
+                screen = QuestionAnswerModal(questions)
+                self.push_screen(screen, _handle)
+            except Exception:
+                if not future.done():
+                    future.set_result(None)
+
+        try:
+            self.call_from_thread(_show)
+        except Exception:
+            _show()
+
+        return await future
+
+    async def ask_yes_no_async(self, prompt: str) -> bool:
+        """
+        Show a simple yes/no prompt and await the result.
+
+        Args:
+            prompt: Question to ask.
+
+        Returns:
+            True if user selected yes, False otherwise.
+        """
+        result = await self.prompt_async(PromptType.YES_NO, prompt)
+        return result == "yes"
+
+    async def get_user_questions_async(self) -> list[str] | None:
+        """
+        Show a modal for user to enter their own questions.
+
+        Returns:
+            List of questions (one per line), or None if cancelled/empty.
+        """
+        future: asyncio.Future[list[str] | None] = asyncio.Future()
+
+        def _show():
+            try:
+                def _handle(result: list[str] | None) -> None:
+                    if not future.done():
+                        future.set_result(result)
+
+                screen = UserQuestionsModal()
+                self.push_screen(screen, _handle)
+            except Exception:
+                if not future.done():
+                    future.set_result(None)
+
+        try:
+            self.call_from_thread(_show)
+        except Exception:
+            _show()
+
         return await future
 
     def show_multiline_input(self, label: str, default: str, callback: Callable) -> None:

@@ -183,6 +183,9 @@ def cmd_start(args: argparse.Namespace) -> int:
     if app._workflow_result == "task_created" and task_info["name"]:
         state = load_state(task_info["name"])
         if state:
+            # Pass skip_discovery flag via state attribute
+            if getattr(args, 'skip_discovery', False):
+                state._skip_discovery = True
             run_workflow(state)
 
     return result_code["value"]

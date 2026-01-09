@@ -18,6 +18,7 @@ from galangal.core.state import (
     TaskType,
     WorkflowState,
     get_hidden_stages_for_task_type,
+    get_task_dir,
     save_state,
 )
 from galangal.core.workflow.core import (
@@ -27,6 +28,7 @@ from galangal.core.workflow.core import (
     handle_rollback,
 )
 from galangal.core.workflow.pause import _handle_pause
+from galangal.prompts.builder import PromptBuilder
 from galangal.results import StageResultType
 from galangal.ui.tui import PromptType, WorkflowTUIApp
 
@@ -79,6 +81,16 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
             while state.stage != Stage.COMPLETE and not app._paused:
                 app.update_stage(state.stage.value, state.attempt)
                 app.set_status("running", f"executing {state.stage.value}")
+
+                # Run PM discovery Q&A before PM stage execution
+                if state.stage == Stage.PM and not state.qa_complete:
+                    # Check for skip flag (passed via state or config)
+                    skip_discovery = getattr(state, '_skip_discovery', False)
+                    discovery_ok = await _run_pm_discovery(app, state, skip_discovery)
+                    if not discovery_ok:
+                        app._workflow_result = "paused"
+                        break
+                    app.set_status("running", f"executing {state.stage.value}")
 
                 # Execute stage in thread executor (blocking operation)
                 result = await asyncio.to_thread(
@@ -214,6 +226,212 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
         _handle_pause(state)
 
     return result
+
+
+# -----------------------------------------------------------------------------
+# PM Discovery Q&A functions
+# -----------------------------------------------------------------------------
+
+
+async def _run_pm_discovery(
+    app: WorkflowTUIApp,
+    state: WorkflowState,
+    skip_discovery: bool = False,
+) -> bool:
+    """
+    Run the PM discovery Q&A loop to refine the brief.
+
+    This function handles the interactive Q&A process before PM stage execution:
+    1. Generate clarifying questions from the AI
+    2. Present questions to user via TUI
+    3. Collect answers
+    4. Loop until user is satisfied
+    5. Write DISCOVERY_LOG.md artifact
+
+    Args:
+        app: TUI application for user interaction.
+        state: Current workflow state to update with Q&A progress.
+        skip_discovery: If True, skip the Q&A loop entirely.
+
+    Returns:
+        True if discovery completed (or was skipped), False if user cancelled/quit.
+    """
+    # Check if discovery should be skipped
+    if skip_discovery or state.qa_complete:
+        if state.qa_complete:
+            app.show_message("Discovery Q&A already completed", "info")
+        return True
+
+    # Check if task type should skip discovery
+    config = get_config()
+    task_type_settings = config.task_type_settings.get(state.task_type.value)
+    if task_type_settings and task_type_settings.skip_discovery:
+        app.show_message(f"Discovery skipped for {state.task_type.display_name()} tasks", "info")
+        state.qa_complete = True
+        save_state(state)
+        return True
+
+    app.show_message("Starting brief discovery Q&A...", "info")
+    app.set_status("discovery", "refining brief")
+
+    qa_rounds: list[dict] = state.qa_rounds or []
+    builder = PromptBuilder()
+
+    while True:
+        # Generate questions
+        app.add_activity("Analyzing brief for clarifying questions...", "🔍")
+        questions = await _generate_discovery_questions(app, state, builder, qa_rounds)
+
+        if questions is None:
+            # AI invocation failed
+            app.show_message("Failed to generate questions", "error")
+            return False
+
+        if not questions:
+            # AI found no gaps - ask user if they have questions
+            continue_qa = await app.ask_yes_no_async(
+                "AI found no gaps in the brief. Do you have your own questions to ask?"
+            )
+            if not continue_qa:
+                break
+
+            # Let user enter their own questions
+            user_questions = await app.get_user_questions_async()
+            if not user_questions:
+                break
+            questions = user_questions
+
+        # Present questions and collect answers
+        app.add_activity(f"Asking {len(questions)} clarifying questions...", "❓")
+        answers = await app.question_answer_session_async(questions)
+
+        if answers is None:
+            # User cancelled
+            app.show_message("Discovery cancelled", "warning")
+            return False
+
+        # Store round
+        qa_rounds.append({"questions": questions, "answers": answers})
+        state.qa_rounds = qa_rounds
+        save_state(state)
+
+        # Update discovery log
+        _write_discovery_log(state.task_name, qa_rounds)
+
+        app.show_message(f"Round {len(qa_rounds)} complete - {len(questions)} Q&As recorded", "success")
+
+        # Ask if user wants more questions
+        more_questions = await app.ask_yes_no_async("Got more questions?")
+        if not more_questions:
+            break
+
+    # Mark discovery complete
+    state.qa_complete = True
+    state.pm_subphase = "specifying"
+    save_state(state)
+
+    if qa_rounds:
+        app.show_message(f"Discovery complete - {len(qa_rounds)} rounds of Q&A", "success")
+    else:
+        app.show_message("Discovery complete - no questions needed", "info")
+
+    return True
+
+
+async def _generate_discovery_questions(
+    app: WorkflowTUIApp,
+    state: WorkflowState,
+    builder: PromptBuilder,
+    qa_history: list[dict],
+) -> list[str] | None:
+    """
+    Generate discovery questions by invoking the AI.
+
+    Returns:
+        List of questions, empty list if AI found no gaps, or None if failed.
+    """
+    from galangal.ai.claude import ClaudeBackend
+    from galangal.ui.tui import TUIAdapter
+
+    prompt = builder.build_discovery_prompt(state, qa_history)
+
+    # Log the prompt
+    logs_dir = get_task_dir(state.task_name) / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    round_num = len(qa_history) + 1
+    log_file = logs_dir / f"discovery_{round_num}.log"
+    with open(log_file, "w") as f:
+        f.write(f"=== Discovery Prompt (Round {round_num}) ===\n{prompt}\n\n")
+
+    # Run AI
+    backend = ClaudeBackend()
+    ui = TUIAdapter(app)
+    result = await asyncio.to_thread(
+        backend.invoke,
+        prompt=prompt,
+        timeout=300,  # 5 minutes for question generation
+        max_turns=10,
+        ui=ui,
+        pause_check=lambda: app._paused,
+    )
+
+    # Log output
+    with open(log_file, "a") as f:
+        f.write(f"=== Output ===\n{result.output or result.message}\n")
+
+    if not result.success:
+        return None
+
+    # Parse questions from output
+    return _parse_discovery_questions(result.output or "")
+
+
+def _parse_discovery_questions(output: str) -> list[str]:
+    """Parse questions from AI output."""
+    # Check for NO_QUESTIONS marker
+    if "# NO_QUESTIONS" in output or "#NO_QUESTIONS" in output:
+        return []
+
+    questions = []
+    lines = output.split("\n")
+    in_questions = False
+
+    for line in lines:
+        line = line.strip()
+
+        # Start capturing after DISCOVERY_QUESTIONS header
+        if "DISCOVERY_QUESTIONS" in line:
+            in_questions = True
+            continue
+
+        if in_questions and line:
+            # Match numbered questions (1. Question text)
+            import re
+            match = re.match(r"^\d+[\.\)]\s*(.+)$", line)
+            if match:
+                questions.append(match.group(1))
+            elif line.startswith("-"):
+                # Also accept bullet points
+                questions.append(line[1:].strip())
+
+    return questions
+
+
+def _write_discovery_log(task_name: str, qa_rounds: list[dict]) -> None:
+    """Write or update DISCOVERY_LOG.md artifact."""
+    content_parts = ["# Discovery Log\n"]
+    content_parts.append("This log captures the Q&A from brief refinement.\n")
+
+    for i, round_data in enumerate(qa_rounds, 1):
+        content_parts.append(f"\n## Round {i}\n")
+        content_parts.append("\n### Questions\n")
+        for j, q in enumerate(round_data.get("questions", []), 1):
+            content_parts.append(f"{j}. {q}\n")
+        content_parts.append("\n### Answers\n")
+        for j, a in enumerate(round_data.get("answers", []), 1):
+            content_parts.append(f"{j}. {a}\n")
+
+    write_artifact("DISCOVERY_LOG.md", "".join(content_parts), task_name)
 
 
 # -----------------------------------------------------------------------------

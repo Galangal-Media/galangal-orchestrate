@@ -180,6 +180,15 @@ class PRConfig(BaseModel):
     base_branch: str = Field(default="main", description="Base branch for PRs")
 
 
+class TaskTypeSettings(BaseModel):
+    """Settings specific to a task type."""
+
+    skip_discovery: bool = Field(
+        default=False,
+        description="Skip the discovery Q&A phase for this task type",
+    )
+
+
 class GalangalConfig(BaseModel):
     """Root configuration model."""
 
@@ -199,4 +208,8 @@ class GalangalConfig(BaseModel):
     )
     stage_context: dict[str, str] = Field(
         default_factory=dict, description="Per-stage prompt context"
+    )
+    task_type_settings: dict[str, TaskTypeSettings] = Field(
+        default_factory=dict,
+        description="Per-task-type settings (e.g., skip_discovery for bugfix tasks)",
     )
