@@ -244,8 +244,13 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     runner = ValidationRunner()
     result = runner.validate_stage(stage.value, task_name)
 
+    # Log validation details including rollback_to for debugging
     with open(log_file, "a") as f:
-        f.write(f"\n=== Validation ===\n{result.message}\n")
+        f.write("\n=== Validation ===\n")
+        f.write(f"success: {result.success}\n")
+        f.write(f"message: {result.message}\n")
+        f.write(f"rollback_to: {result.rollback_to}\n")
+        f.write(f"skipped: {result.skipped}\n")
 
     duration = time.time() - start_time
 
@@ -277,11 +282,14 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         )
         # Check if rollback is required
         if result.rollback_to:
+            tui_app.add_activity(f"Triggering rollback to {result.rollback_to}", "🔄")
             return StageResult.rollback_required(
                 message=result.message,
                 rollback_to=Stage.from_str(result.rollback_to),
                 output=invoke_result.output,
             )
+        # Log when rollback_to is not set (helps debug missing rollback)
+        tui_app.add_activity("Validation failed without rollback target", "⚠")
         return StageResult.validation_failed(result.message)
 
 

@@ -131,11 +131,72 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
 
                     # Handle rollback required
                     if result.type == StageResultType.ROLLBACK_REQUIRED:
+                        target = result.rollback_to.value if result.rollback_to else 'None'
+                        app.add_activity(
+                            f"Validation requested rollback to {target}",
+                            "⚠"
+                        )
                         if handle_rollback(state, result):
                             app.show_message(
-                                f"Rolling back: {result.message[:80]}", "warning"
+                                f"Rolling back to {state.stage.value}: {result.message[:60]}", "warning"
                             )
+                            app.update_stage(state.stage.value, state.attempt)
                             continue
+                        else:
+                            # Rollback was blocked - prompt user for action
+                            # This happens when: rollback loop detected, or rollback_to was None
+                            rollback_count = state.get_rollback_count(result.rollback_to) if result.rollback_to else 0
+                            if rollback_count >= 3:
+                                block_reason = f"Too many rollbacks to {target} ({rollback_count} in last hour)"
+                            elif result.rollback_to is None:
+                                block_reason = "Rollback target not specified in validation"
+                            else:
+                                block_reason = "Rollback blocked (unknown reason)"
+
+                            app.add_activity(f"Rollback blocked: {block_reason}", "⚠")
+                            app.show_error(
+                                f"Rollback blocked: {block_reason}",
+                                result.message[:500],
+                            )
+
+                            # Prompt user for what to do
+                            choice = await app.prompt_async(
+                                PromptType.STAGE_FAILURE,
+                                f"Rollback to {target} was blocked.\n\n"
+                                f"Reason: {block_reason}\n\n"
+                                f"Error: {result.message[:300]}\n\n"
+                                "What would you like to do?"
+                            )
+                            app.clear_error()
+
+                            if choice == "retry":
+                                state.reset_attempts()
+                                app.show_message("Retrying stage...", "info")
+                                save_state(state)
+                                continue
+                            elif choice == "fix_in_dev":
+                                # Force rollback to DEV by clearing rollback history for DEV
+                                state.rollback_history = [
+                                    r for r in state.rollback_history
+                                    if r.to_stage != Stage.DEV.value
+                                ]
+                                state.stage = Stage.DEV
+                                state.last_failure = f"Manual rollback from {state.stage.value}: {result.message[:500]}"
+                                state.reset_attempts(clear_failure=False)
+                                save_state(state)
+                                app.show_message("Rolling back to DEV (manual override)", "warning")
+                                app.update_stage(state.stage.value, state.attempt)
+                                continue
+                            else:
+                                save_state(state)
+                                app._workflow_result = "paused"
+                                break
+                    else:
+                        # Log what result type we got (for debugging)
+                        app.add_activity(
+                            f"Validation result type: {result.type.name}",
+                            "⚙"
+                        )
 
                     # Handle stage failure with retries
                     error_message = result.output or result.message
