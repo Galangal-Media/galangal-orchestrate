@@ -87,7 +87,7 @@ class WorkflowTUIApp(App):
     #workflow-root {
         layout: grid;
         grid-size: 1;
-        grid-rows: 2 2 auto 1fr 1 auto;
+        grid-rows: 2 2 1fr 1 auto;
         height: 100%;
         width: 100%;
     }
@@ -105,19 +105,26 @@ class WorkflowTUIApp(App):
         content-align: center middle;
     }
 
+    #main-content {
+        layout: vertical;
+        height: 100%;
+    }
+
     #error-panel {
         background: #282828;
-        padding: 0 2;
-        max-height: 10;
+        padding: 0 1;
+        max-height: 8;
     }
 
     #error-panel.hidden {
+        height: 0;
+        padding: 0;
         display: none;
     }
 
-    #main-content {
+    #content-area {
         layout: horizontal;
-        height: 100%;
+        height: 1fr;
     }
 
     #activity-container {
@@ -199,11 +206,12 @@ class WorkflowTUIApp(App):
         with Container(id="workflow-root"):
             yield HeaderWidget(id="header")
             yield StageProgressWidget(id="progress")
-            yield ErrorPanelWidget(id="error-panel", classes="hidden")
-            with Horizontal(id="main-content"):
-                with VerticalScroll(id="activity-container"):
-                    yield RichLog(id="activity-log", highlight=True, markup=True)
-                yield FilesPanelWidget(id="files-container")
+            with Container(id="main-content"):
+                yield ErrorPanelWidget(id="error-panel", classes="hidden")
+                with Horizontal(id="content-area"):
+                    with VerticalScroll(id="activity-container"):
+                        yield RichLog(id="activity-log", highlight=True, markup=True)
+                    yield FilesPanelWidget(id="files-container")
             yield CurrentActionWidget(id="current-action")
             yield Footer()
 
