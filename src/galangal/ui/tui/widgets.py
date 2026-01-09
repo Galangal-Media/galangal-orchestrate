@@ -2,6 +2,7 @@
 Custom Textual widgets for TUI display.
 """
 
+from rich.panel import Panel
 from rich.text import Text
 from textual.reactive import reactive
 from textual.widgets import Static
@@ -209,3 +210,36 @@ class FilesPanelWidget(Static):
                 text.append(f"{display_path}\n", style="#ebdbb2")
 
         return text
+
+
+class ErrorPanelWidget(Static):
+    """Dedicated panel for showing current error prominently."""
+
+    error: reactive[str | None] = reactive(None)
+    details: reactive[str | None] = reactive(None)
+
+    def render(self) -> Panel | Text:
+        if not self.error:
+            return Text("")
+
+        # Build error content
+        content = Text()
+        content.append(self.error, style="bold #fb4934")
+
+        if self.details:
+            # Truncate details if too long
+            details = self.details
+            max_lines = 5
+            lines = details.split("\n")
+            if len(lines) > max_lines:
+                details = "\n".join(lines[:max_lines]) + "\n..."
+
+            content.append("\n\n", style="")
+            content.append(details, style="#ebdbb2")
+
+        return Panel(
+            content,
+            title="[bold #fb4934]Error[/]",
+            border_style="#cc241d",
+            padding=(0, 1),
+        )

@@ -156,6 +156,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     continue
 
                 # Stage succeeded
+                app.clear_error()  # Clear any previous error display
                 app.show_stage_complete(state.stage.value, True)
 
                 # Plan approval gate
@@ -190,7 +191,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                 await _handle_workflow_complete(app, state)
 
         except Exception as e:
-            app.show_message(f"Error: {e}", "error")
+            app.show_error("Workflow error", str(e))
             app._workflow_result = "error"
         finally:
             app.set_timer(0.5, app.exit)
@@ -255,6 +256,12 @@ async def _handle_max_retries_exceeded(
     if len(error_message) > 800:
         error_preview += "..."
 
+    # Show error prominently in error panel
+    app.show_error(
+        f"Stage {state.stage.value} failed after {max_retries} attempts",
+        error_preview,
+    )
+
     modal_message = (
         f"Stage {state.stage.value} failed after {max_retries} attempts.\n\n"
         f"Error:\n{error_preview}\n\n"
@@ -262,6 +269,9 @@ async def _handle_max_retries_exceeded(
     )
 
     choice = await app.prompt_async(PromptType.STAGE_FAILURE, modal_message)
+
+    # Clear error panel when user makes a choice
+    app.clear_error()
 
     if choice == "fix_in_dev":
         feedback = await app.multiline_input_async(
@@ -508,11 +518,11 @@ def _start_new_task_tui() -> str:
                 app.show_message(message, "success")
                 app._workflow_result = "task_created"
             else:
-                app.show_message(f"Failed: {message}", "error")
+                app.show_error("Task creation failed", message)
                 app._workflow_result = "error"
 
         except Exception as e:
-            app.show_message(f"Error: {e}", "error")
+            app.show_error("Task creation error", str(e))
             app._workflow_result = "error"
         finally:
             app.set_timer(0.5, app.exit)

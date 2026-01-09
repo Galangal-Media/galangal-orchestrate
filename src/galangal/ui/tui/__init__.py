@@ -21,6 +21,7 @@ from galangal.ui.tui.types import (
 )
 from galangal.ui.tui.widgets import (
     CurrentActionWidget,
+    ErrorPanelWidget,
     FilesPanelWidget,
     HeaderWidget,
     StageProgressWidget,
@@ -45,6 +46,7 @@ __all__ = [
     "HeaderWidget",
     "StageProgressWidget",
     "CurrentActionWidget",
+    "ErrorPanelWidget",
     "FilesPanelWidget",
     # Modals
     "PromptOption",

@@ -40,6 +40,7 @@ from galangal.ui.tui.types import (
 )
 from galangal.ui.tui.widgets import (
     CurrentActionWidget,
+    ErrorPanelWidget,
     FilesPanelWidget,
     HeaderWidget,
     StageProgressWidget,
@@ -86,7 +87,7 @@ class WorkflowTUIApp(App):
     #workflow-root {
         layout: grid;
         grid-size: 1;
-        grid-rows: 2 2 1fr 1 auto;
+        grid-rows: 2 2 auto 1fr 1 auto;
         height: 100%;
         width: 100%;
     }
@@ -102,6 +103,16 @@ class WorkflowTUIApp(App):
         background: #282828;
         padding: 0 2;
         content-align: center middle;
+    }
+
+    #error-panel {
+        background: #282828;
+        padding: 0 2;
+        max-height: 10;
+    }
+
+    #error-panel.hidden {
+        display: none;
     }
 
     #main-content {
@@ -188,6 +199,7 @@ class WorkflowTUIApp(App):
         with Container(id="workflow-root"):
             yield HeaderWidget(id="header")
             yield StageProgressWidget(id="progress")
+            yield ErrorPanelWidget(id="error-panel", classes="hidden")
             with Horizontal(id="main-content"):
                 with VerticalScroll(id="activity-container"):
                     yield RichLog(id="activity-log", highlight=True, markup=True)
@@ -379,6 +391,58 @@ class WorkflowTUIApp(App):
         self.add_activity("[bold #b8bb26]           WORKFLOW COMPLETE            [/]", "")
         self.add_activity("[bold #b8bb26]════════════════════════════════════════[/]", "")
         self.add_activity("")
+
+    def show_error(self, message: str, details: str | None = None) -> None:
+        """
+        Show error prominently in dedicated error panel.
+
+        The error panel appears below the progress bar and above the activity log,
+        making errors highly visible. Also logs the error to the activity log.
+
+        Args:
+            message: Short error message (displayed in bold red).
+            details: Optional detailed error information (truncated if too long).
+        """
+
+        def _update():
+            try:
+                panel = self.query_one("#error-panel", ErrorPanelWidget)
+                panel.error = message
+                panel.details = details
+                panel.remove_class("hidden")
+            except Exception:
+                pass  # Widget may not exist during shutdown
+
+        try:
+            self.call_from_thread(_update)
+        except Exception:
+            _update()
+
+        # Also add to activity log
+        self.add_activity(
+            message,
+            "✗",
+            level=ActivityLevel.ERROR,
+            category=ActivityCategory.SYSTEM,
+            details=details,
+        )
+
+    def clear_error(self) -> None:
+        """Clear the error panel display."""
+
+        def _update():
+            try:
+                panel = self.query_one("#error-panel", ErrorPanelWidget)
+                panel.error = None
+                panel.details = None
+                panel.add_class("hidden")
+            except Exception:
+                pass  # Widget may not exist during shutdown
+
+        try:
+            self.call_from_thread(_update)
+        except Exception:
+            _update()
 
     def show_prompt(self, prompt_type: PromptType, message: str, callback: Callable) -> None:
         """
