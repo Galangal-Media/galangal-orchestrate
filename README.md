@@ -133,6 +133,18 @@ prompt_context: |
   - API responses use api_success() / api_error()
 ```
 
+### Approver Name
+
+Configure your name to auto-fill approval signoffs:
+
+```yaml
+project:
+  name: "My Project"
+  approver_name: "Jane Smith"  # Auto-fills in plan/design approvals
+```
+
+When set, this name is used as the default when approving plans and designs, saving you from typing it each time.
+
 ### New in v0.2.22: Structured Logging
 
 If you're upgrading from an earlier version, you can add the optional `logging` section to your existing `config.yaml`:
