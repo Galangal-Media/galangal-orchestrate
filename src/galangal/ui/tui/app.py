@@ -103,12 +103,14 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         initial_stage: str,
         max_retries: int = 5,
         hidden_stages: frozenset = None,
+        stage_durations: dict[str, int] | None = None,
     ):
         super().__init__()
         self.task_name = task_name
         self.current_stage = initial_stage
         self._max_retries = max_retries
         self._hidden_stages = hidden_stages or frozenset()
+        self._stage_durations = stage_durations or {}
         self.verbose = False
         self._start_time = time.time()
         self._attempt = 1
@@ -158,6 +160,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         progress = self.query_one("#progress", StageProgressWidget)
         progress.current_stage = self.current_stage
         progress.hidden_stages = self._hidden_stages
+        progress.stage_durations = self._stage_durations
 
         # Start timers
         self.set_interval(1.0, self._update_elapsed)
@@ -313,12 +316,41 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         level = levels.get(style, ActivityLevel.INFO)
         self.add_activity(message, icon, level=level, category=category)
 
-    def show_stage_complete(self, stage: str, success: bool) -> None:
-        """Show stage completion."""
+    def show_stage_complete(
+        self, stage: str, success: bool, duration: int | None = None
+    ) -> None:
+        """Show stage completion with optional duration."""
         if success:
-            self.show_message(f"Stage {stage} completed", "success", ActivityCategory.STAGE)
+            if duration is not None:
+                # Format duration
+                if duration >= 3600:
+                    hours, remainder = divmod(duration, 3600)
+                    mins, secs = divmod(remainder, 60)
+                    duration_str = f"{hours}:{mins:02d}:{secs:02d}"
+                else:
+                    mins, secs = divmod(duration, 60)
+                    duration_str = f"{mins}:{secs:02d}"
+                self.show_message(
+                    f"Stage {stage} completed ({duration_str})",
+                    "success",
+                    ActivityCategory.STAGE,
+                )
+            else:
+                self.show_message(
+                    f"Stage {stage} completed", "success", ActivityCategory.STAGE
+                )
         else:
             self.show_message(f"Stage {stage} failed", "error", ActivityCategory.STAGE)
+
+    def update_stage_durations(self, durations: dict[str, int]) -> None:
+        """Update stage durations display in progress widget."""
+
+        def _update():
+            progress = self._safe_query("#progress", StageProgressWidget)
+            if progress:
+                progress.stage_durations = durations
+
+        self._safe_update(_update)
 
     def show_workflow_complete(self) -> None:
         """Show workflow completion banner."""

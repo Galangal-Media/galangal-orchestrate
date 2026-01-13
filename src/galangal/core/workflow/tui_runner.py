@@ -73,6 +73,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
         state.task_name,
         state.stage.value,
         hidden_stages=hidden_stages,
+        stage_durations=state.stage_durations,
     )
 
     async def workflow_loop():
@@ -83,6 +84,11 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
             while state.stage != Stage.COMPLETE and not app._paused:
                 app.update_stage(state.stage.value, state.attempt)
                 app.set_status("running", f"executing {state.stage.value}")
+
+                # Start stage timer if not already running
+                if not state.stage_start_time:
+                    state.start_stage_timer()
+                    save_state(state)
 
                 # Run PM discovery Q&A before PM stage execution
                 if state.stage == Stage.PM and not state.qa_complete:
@@ -494,7 +500,14 @@ Please address the issues described above before proceeding.
 
                 # Stage succeeded
                 app.clear_error()  # Clear any previous error display
-                app.show_stage_complete(state.stage.value, True)
+
+                # Record stage duration before advancing
+                duration = state.record_stage_duration()
+                app.show_stage_complete(state.stage.value, True, duration)
+
+                # Update progress widget with stage durations
+                if state.stage_durations:
+                    app.update_stage_durations(state.stage_durations)
 
                 # Record success metrics
                 record_stage_result(

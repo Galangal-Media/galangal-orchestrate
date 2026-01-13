@@ -40,12 +40,24 @@ class HeaderWidget(Static):
         return text
 
 
+def _format_duration(seconds: int) -> str:
+    """Format duration in seconds to human-readable string."""
+    if seconds >= 3600:
+        hours, remainder = divmod(seconds, 3600)
+        mins, secs = divmod(remainder, 60)
+        return f"{hours}:{mins:02d}:{secs:02d}"
+    else:
+        mins, secs = divmod(seconds, 60)
+        return f"{mins}:{secs:02d}"
+
+
 class StageProgressWidget(Static):
-    """Centered stage progress bar with full names."""
+    """Centered stage progress bar with full names and durations."""
 
     current_stage: reactive[str] = reactive("PM")
     skipped_stages: reactive[frozenset] = reactive(frozenset())
     hidden_stages: reactive[frozenset] = reactive(frozenset())
+    stage_durations: reactive[dict] = reactive({}, always_update=True)
 
     # Full stage display names
     STAGE_DISPLAY = {
@@ -125,7 +137,14 @@ class StageProgressWidget(Static):
             if stage.value in self.skipped_stages:
                 text.append(f"⊘ {name}", style="#504945 strike")
             elif stage_idx < current_idx:
-                text.append(f"● {name}", style="#b8bb26")
+                # Completed stage - show with duration if available
+                duration = self.stage_durations.get(stage.value)
+                if duration is not None:
+                    duration_str = _format_duration(duration)
+                    text.append(f"● {name} ", style="#b8bb26")
+                    text.append(f"({duration_str})", style="#928374")
+                else:
+                    text.append(f"● {name}", style="#b8bb26")
             elif stage_idx == current_idx:
                 text.append(f"◉ {name}", style="bold #fabd2f")
             else:

@@ -392,6 +392,10 @@ class WorkflowState:
     # Maps stage name to {"action": "skip"|"run", "reason": "..."}
     stage_plan: dict[str, dict] | None = None
 
+    # Stage timing tracking
+    stage_start_time: str | None = None  # ISO timestamp when current stage started
+    stage_durations: dict[str, int] | None = None  # Completed stage durations in seconds
+
     # -------------------------------------------------------------------------
     # Retry management methods
     # -------------------------------------------------------------------------
@@ -442,6 +446,59 @@ class WorkflowState:
         self.attempt = 1
         if clear_failure:
             self.last_failure = None
+
+    # -------------------------------------------------------------------------
+    # Stage timing methods
+    # -------------------------------------------------------------------------
+
+    def start_stage_timer(self) -> None:
+        """
+        Start timing for the current stage.
+
+        Records the current timestamp in ISO format. Called when a stage
+        begins execution.
+        """
+        self.stage_start_time = datetime.now(timezone.utc).isoformat()
+
+    def record_stage_duration(self) -> int | None:
+        """
+        Record the duration of the current stage.
+
+        Calculates elapsed time from stage_start_time and stores it in
+        stage_durations dict. Returns the duration in seconds.
+
+        Returns:
+            Duration in seconds, or None if no start time was recorded.
+        """
+        if not self.stage_start_time:
+            return None
+
+        try:
+            start = datetime.fromisoformat(self.stage_start_time)
+            elapsed = int((datetime.now(timezone.utc) - start).total_seconds())
+
+            if self.stage_durations is None:
+                self.stage_durations = {}
+
+            self.stage_durations[self.stage.value] = elapsed
+            self.stage_start_time = None  # Clear for next stage
+            return elapsed
+        except (ValueError, TypeError):
+            return None
+
+    def get_stage_duration(self, stage: "Stage") -> int | None:
+        """
+        Get the recorded duration for a stage.
+
+        Args:
+            stage: The stage to get duration for.
+
+        Returns:
+            Duration in seconds, or None if not recorded.
+        """
+        if self.stage_durations is None:
+            return None
+        return self.stage_durations.get(stage.value)
 
     # -------------------------------------------------------------------------
     # Rollback management methods
@@ -532,6 +589,8 @@ class WorkflowState:
             qa_rounds=d.get("qa_rounds"),
             qa_complete=d.get("qa_complete", False),
             stage_plan=d.get("stage_plan"),
+            stage_start_time=d.get("stage_start_time"),
+            stage_durations=d.get("stage_durations"),
         )
 
     @classmethod
