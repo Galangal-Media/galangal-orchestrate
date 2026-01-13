@@ -7,12 +7,15 @@ AI-driven development workflow orchestrator. A deterministic workflow system tha
 ## Features
 
 - **Structured Workflow**: PM → DESIGN → DEV → TEST → QA → SECURITY → REVIEW → DOCS
+- **Smart Stage Planning**: PM analyzes tasks and recommends which stages to run/skip
+- **Interactive Controls**: Skip stages (^N), go back (^B), pause for edits (^E), interrupt with feedback (^I)
+- **Task Type Templates**: Optimized workflows for features, bugfixes, hotfixes, docs, etc.
 - **Multi-Framework Support**: Python, TypeScript, PHP, Go, Rust - configure multiple stacks per project
 - **Config-Driven**: All validation, prompts, and behavior customizable via YAML
 - **AI Backend Abstraction**: Built for Claude CLI, ready for Gemini and others
 - **Approval Gates**: Human-in-the-loop for plans and designs
 - **Automatic Rollback**: Failed stages roll back to appropriate fix points
-- **TUI Progress Display**: Real-time progress visualization
+- **TUI Progress Display**: Real-time progress visualization with dynamic stage updates
 
 ## Installation
 
@@ -74,16 +77,82 @@ galangal status
 
 ## Task Types
 
-Different task types skip certain stages:
+Different task types have optimized stage flows:
 
-| Type | Skips |
-|------|-------|
-| Feature | (full workflow) |
-| Bug Fix | DESIGN, BENCHMARK |
-| Refactor | DESIGN, MIGRATION, CONTRACT, BENCHMARK, SECURITY |
-| Chore | DESIGN, MIGRATION, CONTRACT, BENCHMARK |
-| Docs | Most stages |
-| Hotfix | DESIGN, BENCHMARK |
+| Type | Stage Flow | Use Case |
+|------|------------|----------|
+| Feature | Full workflow | New functionality |
+| Bug Fix | PM → DEV → TEST → QA | Fix with regression check |
+| Refactor | PM → DESIGN → DEV → TEST | Code restructuring |
+| Chore | PM → DEV → TEST | Dependencies, config, tooling |
+| Docs | PM → DOCS | Documentation only |
+| Hotfix | PM → DEV → TEST | Critical expedited fix |
+
+The PM stage can further refine which stages run based on task analysis (see [PM-driven Stage Planning](#pm-driven-stage-planning)).
+
+## Interactive Controls
+
+During workflow execution, use these keybindings:
+
+| Key | Action | Description |
+|-----|--------|-------------|
+| `^Q` | Quit | Pause and exit workflow |
+| `^I` | Interrupt | Stop current stage, provide feedback, rollback to DEV |
+| `^N` | Skip | Skip current stage, advance to next |
+| `^B` | Back | Go back to previous stage |
+| `^E` | Edit | Pause for manual editing, press Enter to resume |
+
+### Interrupt with Feedback (^I)
+
+When you see something going wrong mid-stage:
+1. Press `^I` to interrupt
+2. Enter feedback describing what needs to be fixed
+3. Workflow rolls back to DEV with your feedback in context
+4. A `ROLLBACK.md` artifact is created for the AI to reference
+
+### Manual Edit Pause (^E)
+
+Need to make a quick manual fix?
+1. Press `^E` to pause
+2. Make your edits in your editor
+3. Press Enter to resume the current stage
+
+## PM-driven Stage Planning
+
+After the PM stage analyzes your task, it outputs a `STAGE_PLAN.md` artifact recommending which optional stages to run or skip:
+
+```markdown
+# Stage Plan
+
+## Recommendations
+| Stage | Action | Reason |
+|-------|--------|--------|
+| MIGRATION | skip | No database changes detected |
+| CONTRACT | skip | Internal refactor, no API changes |
+| SECURITY | run | Handling user authentication input |
+| BENCHMARK | skip | UI-only changes, no performance impact |
+```
+
+This allows the AI to make intelligent decisions about which stages are relevant based on the actual task content, rather than relying solely on task type defaults.
+
+### Stage Preview
+
+After plan approval, you'll see a preview of the workflow:
+
+```
+Workflow Preview
+
+Stages to run:
+  PM → DESIGN → DEV → TEST → QA → DOCS
+
+Skipping:
+  MIGRATION, CONTRACT, BENCHMARK, SECURITY
+
+Controls during execution:
+  ^N Skip stage  ^B Back  ^E Pause for edit  ^I Interrupt
+```
+
+The progress bar dynamically updates to show only relevant stages.
 
 ## Configuration
 
