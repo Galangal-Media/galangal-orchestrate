@@ -11,7 +11,7 @@ import asyncio
 from rich.console import Console
 
 from galangal.config.loader import get_config
-from galangal.core.artifacts import artifact_exists, write_artifact
+from galangal.core.artifacts import artifact_exists, parse_stage_plan, write_artifact
 from galangal.core.state import (
     STAGE_ORDER,
     Stage,
@@ -642,6 +642,22 @@ async def _handle_plan_approval(
 """
             write_artifact("APPROVAL.md", approval_content, state.task_name)
             app.show_message(f"Plan approved by {name}", "success")
+
+            # Parse and store stage plan from PM output
+            stage_plan = parse_stage_plan(state.task_name)
+            if stage_plan:
+                state.stage_plan = stage_plan
+                save_state(state)
+                # Show which stages will be skipped based on PM analysis
+                skipped = [s for s, v in stage_plan.items() if v["action"] == "skip"]
+                if skipped:
+                    app.show_message(
+                        f"Stage plan: skipping {', '.join(skipped)}", "info"
+                    )
+                    # Update progress bar to hide PM-skipped stages
+                    new_hidden = set(app._hidden_stages) | set(skipped)
+                    app.update_hidden_stages(frozenset(new_hidden))
+
             return True
         else:
             # Cancelled - ask again

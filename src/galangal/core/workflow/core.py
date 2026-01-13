@@ -107,8 +107,21 @@ def get_next_stage(
     if should_skip_for_task_type(next_stage, task_type):
         return get_next_stage(next_stage, state)
 
+    # Check PM-driven stage plan (STAGE_PLAN.md recommendations)
+    if state.stage_plan and next_stage.value in state.stage_plan:
+        plan_entry = state.stage_plan[next_stage.value]
+        if plan_entry.get("action") == "skip":
+            return get_next_stage(next_stage, state)
+
     # Check conditional stages (MIGRATION, CONTRACT, BENCHMARK)
+    # Only check glob patterns if PM didn't explicitly say "run"
     if next_stage in CONDITIONAL_STAGES:
+        # If PM explicitly said "run", don't apply glob-based skipping
+        if state.stage_plan and next_stage.value in state.stage_plan:
+            plan_entry = state.stage_plan[next_stage.value]
+            if plan_entry.get("action") == "run":
+                return next_stage  # PM says run, skip the glob check
+
         runner = ValidationRunner()
         if _should_skip_conditional_stage(next_stage, task_name, runner):
             return get_next_stage(next_stage, state)

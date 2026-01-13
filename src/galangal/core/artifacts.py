@@ -47,6 +47,46 @@ def write_artifact(name: str, content: str, task_name: str | None = None) -> Non
     path.write_text(content)
 
 
+def parse_stage_plan(task_name: str | None = None) -> dict[str, dict] | None:
+    """
+    Parse STAGE_PLAN.md artifact to extract stage recommendations.
+
+    The STAGE_PLAN.md file contains a markdown table with stage recommendations:
+    | Stage | Action | Reason |
+    |-------|--------|--------|
+    | MIGRATION | skip | No database changes |
+
+    Returns:
+        Dictionary mapping stage name to {"action": "skip"|"run", "reason": "..."},
+        or None if the artifact doesn't exist or can't be parsed.
+    """
+    import re
+
+    content = read_artifact("STAGE_PLAN.md", task_name)
+    if not content:
+        return None
+
+    stage_plan = {}
+
+    # Parse markdown table rows
+    # Match lines like: | MIGRATION | skip | No database changes |
+    table_row_pattern = re.compile(
+        r"^\|\s*(\w+)\s*\|\s*(skip|run)\s*\|\s*(.+?)\s*\|",
+        re.IGNORECASE | re.MULTILINE,
+    )
+
+    for match in table_row_pattern.finditer(content):
+        stage_name = match.group(1).upper()
+        action = match.group(2).lower()
+        reason = match.group(3).strip()
+
+        # Only track plannable stages
+        if stage_name in {"MIGRATION", "CONTRACT", "BENCHMARK", "SECURITY"}:
+            stage_plan[stage_name] = {"action": action, "reason": reason}
+
+    return stage_plan if stage_plan else None
+
+
 def run_command(
     cmd: list[str], cwd: Path | None = None, timeout: int = 300
 ) -> tuple[int, str, str]:

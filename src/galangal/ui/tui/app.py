@@ -286,6 +286,19 @@ class WorkflowTUIApp(App):
         except Exception:
             _update()
 
+    def update_hidden_stages(self, hidden_stages: frozenset) -> None:
+        """Update which stages are hidden in the progress bar."""
+        self._hidden_stages = hidden_stages
+
+        def _update():
+            progress = self.query_one("#progress", StageProgressWidget)
+            progress.hidden_stages = hidden_stages
+
+        try:
+            self.call_from_thread(_update)
+        except Exception:
+            _update()
+
     def set_status(self, status: str, detail: str = "") -> None:
         """Update current action display."""
 

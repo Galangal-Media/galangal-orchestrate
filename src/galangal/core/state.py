@@ -351,6 +351,10 @@ class WorkflowState:
     qa_rounds: list[dict] | None = None  # [{"questions": [...], "answers": [...]}]
     qa_complete: bool = False
 
+    # PM-driven stage planning
+    # Maps stage name to {"action": "skip"|"run", "reason": "..."}
+    stage_plan: dict[str, dict] | None = None
+
     # -------------------------------------------------------------------------
     # Retry management methods
     # -------------------------------------------------------------------------
@@ -490,6 +494,7 @@ class WorkflowState:
             pm_subphase=d.get("pm_subphase"),
             qa_rounds=d.get("qa_rounds"),
             qa_complete=d.get("qa_complete", False),
+            stage_plan=d.get("stage_plan"),
         )
 
     @classmethod

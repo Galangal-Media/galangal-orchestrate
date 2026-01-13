@@ -73,6 +73,32 @@ Create two files in the task's artifacts directory (see "Artifacts Directory" in
    - Scope of changes needed
 3. Write SPEC.md to the task's artifacts directory
 4. Write PLAN.md to the task's artifacts directory
+5. Write STAGE_PLAN.md with recommendations for optional stages
+
+### 3. STAGE_PLAN.md
+
+Based on your analysis, recommend which optional stages should run or be skipped:
+
+```markdown
+# Stage Plan
+
+## Recommendations
+| Stage | Action | Reason |
+|-------|--------|--------|
+| MIGRATION | skip/run | [Why this stage is or isn't needed] |
+| CONTRACT | skip/run | [Why this stage is or isn't needed] |
+| BENCHMARK | skip/run | [Why this stage is or isn't needed] |
+| SECURITY | skip/run | [Why this stage is or isn't needed] |
+
+## Notes
+[Any additional context about the workflow for this task]
+```
+
+Stage guidance:
+- **MIGRATION**: Run if database schema changes, new tables, or data migrations are needed
+- **CONTRACT**: Run if public APIs, interfaces, or contracts with external systems change
+- **BENCHMARK**: Run if performance-critical code paths are modified
+- **SECURITY**: Run if authentication, authorization, user input handling, or sensitive data is involved
 
 ## Important Rules
 
