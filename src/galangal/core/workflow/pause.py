@@ -4,13 +4,24 @@ Pause handling for workflow execution.
 
 from rich.console import Console
 
-from galangal.core.state import WorkflowState, save_state
+from galangal.core.state import Stage, WorkflowState, save_state
 
 console = Console()
+
+# Stages that modify code and benefit from resume context
+CODE_MODIFYING_STAGES = {Stage.DEV, Stage.TEST, Stage.DOCS, Stage.REVIEW}
 
 
 def _handle_pause(state: WorkflowState) -> None:
     """Handle a pause request. Called after TUI exits."""
+    # Add resume context for stages that modify code
+    if state.stage in CODE_MODIFYING_STAGES and not state.last_failure:
+        state.last_failure = (
+            "Stage was interrupted mid-execution. "
+            "Run `git status` and `git diff` to see any work already done. "
+            "Continue from where you left off - do not redo completed work."
+        )
+
     save_state(state)
 
     console.print("\n" + "=" * 60)
