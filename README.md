@@ -1,42 +1,38 @@
 # Galangal Orchestrate
 
-AI-driven development workflow orchestrator. A deterministic workflow system that guides AI assistants through structured development stages.
+**Turn AI coding assistants into structured development workflows.**
 
-**Note:** Currently designed for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with a Claude Pro or Max subscription. Support for other AI backends (Gemini, etc.) is planned for future releases.
+Galangal Orchestrate wraps [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI to execute a deterministic, multi-stage development pipeline. Instead of open-ended AI coding sessions, you get a structured workflow with approval gates, validation, and automatic rollback.
 
-## Features
+## Why Use This?
 
-- **Structured Workflow**: PM → DESIGN → DEV → TEST → QA → SECURITY → REVIEW → DOCS
-- **Smart Stage Planning**: PM analyzes tasks and recommends which stages to run/skip
-- **Interactive Controls**: Skip stages (^N), go back (^B), pause for edits (^E), interrupt with feedback (^I)
-- **Task Type Templates**: Optimized workflows for features, bugfixes, hotfixes, docs, etc.
-- **Multi-Framework Support**: Python, TypeScript, PHP, Go, Rust - configure multiple stacks per project
-- **Config-Driven**: All validation, prompts, and behavior customizable via YAML
-- **AI Backend Abstraction**: Built for Claude CLI, ready for Gemini and others
-- **Approval Gates**: Human-in-the-loop for plans and designs
-- **Automatic Rollback**: Failed stages roll back to appropriate fix points
-- **TUI Progress Display**: Real-time progress visualization with dynamic stage updates
+When you ask an AI to "add user authentication", you get whatever the AI decides to build. With Galangal:
+
+1. **PM Stage** - AI writes requirements, you approve before any code is written
+2. **Design Stage** - AI proposes architecture, you approve the approach
+3. **Dev Stage** - AI implements according to approved specs
+4. **Test Stage** - AI writes tests, validation ensures they pass
+5. **QA Stage** - AI verifies requirements are met
+6. **Review Stage** - AI reviews its own code for issues
+7. **Docs Stage** - AI updates documentation
+
+If anything fails, the workflow automatically rolls back to the appropriate fix point with context about what went wrong.
+
+## Requirements
+
+- Python 3.10+
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed (`claude` command available)
+- Claude Pro or Max subscription
+- Git
 
 ## Installation
 
 ```bash
+# With pip
 pip install galangal-orchestrate
-```
 
-Or with pipx for isolated global install (recommended):
-
-```bash
+# With pipx (recommended for CLI tools)
 pipx install galangal-orchestrate
-```
-
-### Updating
-
-```bash
-# If installed with pip
-pip install --upgrade galangal-orchestrate
-
-# If installed with pipx
-pipx upgrade galangal-orchestrate
 ```
 
 ## Quick Start
@@ -46,80 +42,80 @@ pipx upgrade galangal-orchestrate
 cd your-project
 galangal init
 
-# Start a new task
-galangal start "Add user authentication feature"
+# Start a task
+galangal start "Add user authentication with JWT tokens"
 
 # Resume after a break
 galangal resume
 
-# Check status
+# Check current status
 galangal status
 ```
 
 ## Workflow Stages
 
-| Stage | Purpose | Artifacts |
-|-------|---------|-----------|
-| PM | Requirements & planning | SPEC.md, PLAN.md |
-| DESIGN | Architecture design | DESIGN.md |
-| PREFLIGHT | Environment checks | PREFLIGHT_REPORT.md |
-| DEV | Implementation | (code changes) |
-| MIGRATION* | DB migration validation | MIGRATION_REPORT.md |
-| TEST | Test implementation | TEST_PLAN.md |
-| CONTRACT* | API contract validation | CONTRACT_REPORT.md |
-| QA | Quality assurance | QA_REPORT.md |
-| BENCHMARK* | Performance validation | BENCHMARK_REPORT.md |
-| SECURITY | Security review | SECURITY_CHECKLIST.md |
-| REVIEW | Code review | REVIEW_NOTES.md |
-| DOCS | Documentation updates | DOCS_REPORT.md |
+| Stage | Purpose | Output |
+|-------|---------|--------|
+| **PM** | Requirements & planning | SPEC.md, PLAN.md, STAGE_PLAN.md |
+| **DESIGN** | Architecture design | DESIGN.md |
+| **PREFLIGHT** | Environment validation | PREFLIGHT_REPORT.md |
+| **DEV** | Implementation | Code changes |
+| **MIGRATION*** | Database migration checks | MIGRATION_REPORT.md |
+| **TEST** | Test implementation | TEST_PLAN.md |
+| **CONTRACT*** | API contract validation | CONTRACT_REPORT.md |
+| **QA** | Quality assurance | QA_REPORT.md |
+| **BENCHMARK*** | Performance validation | BENCHMARK_REPORT.md |
+| **SECURITY** | Security review | SECURITY_CHECKLIST.md |
+| **REVIEW** | Code review | REVIEW_NOTES.md |
+| **DOCS** | Documentation | DOCS_REPORT.md |
 
-*Conditional stages - auto-skipped if conditions not met
+*Conditional stages - skipped automatically if not relevant
 
 ## Task Types
 
-Different task types have optimized stage flows:
+Choose the right workflow for your task:
 
-| Type | Stage Flow | Use Case |
-|------|------------|----------|
-| Feature | Full workflow | New functionality |
-| Bug Fix | PM → DEV → TEST → QA | Fix with regression check |
-| Refactor | PM → DESIGN → DEV → TEST | Code restructuring |
-| Chore | PM → DEV → TEST | Dependencies, config, tooling |
-| Docs | PM → DOCS | Documentation only |
-| Hotfix | PM → DEV → TEST | Critical expedited fix |
+| Type | Stages | When to Use |
+|------|--------|-------------|
+| **Feature** | All stages | New functionality |
+| **Bug Fix** | PM → DEV → TEST → QA | Fixing bugs |
+| **Refactor** | PM → DESIGN → DEV → TEST | Code restructuring |
+| **Chore** | PM → DEV → TEST | Config, dependencies |
+| **Docs** | PM → DOCS | Documentation only |
+| **Hotfix** | PM → DEV → TEST | Critical fixes |
 
-The PM stage can further refine which stages run based on task analysis (see [PM-driven Stage Planning](#pm-driven-stage-planning)).
+The PM stage can further customize which stages run based on task analysis.
 
 ## Interactive Controls
 
-During workflow execution, use these keybindings:
+During workflow execution:
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `^Q` | Quit | Pause and exit workflow |
-| `^I` | Interrupt | Stop current stage, provide feedback, rollback to DEV |
+| `^Q` | Quit | Pause and exit (resume later with `galangal resume`) |
+| `^I` | Interrupt | Stop current stage, give feedback, rollback to DEV |
 | `^N` | Skip | Skip current stage, advance to next |
 | `^B` | Back | Go back to previous stage |
 | `^E` | Edit | Pause for manual editing, press Enter to resume |
 
 ### Interrupt with Feedback (^I)
 
-When you see something going wrong mid-stage:
-1. Press `^I` to interrupt
+When you see the AI doing something wrong mid-stage:
+1. Press `^I` to interrupt immediately
 2. Enter feedback describing what needs to be fixed
-3. Workflow rolls back to DEV with your feedback in context
+3. Workflow rolls back to DEV with your feedback as context
 4. A `ROLLBACK.md` artifact is created for the AI to reference
 
 ### Manual Edit Pause (^E)
 
-Need to make a quick manual fix?
+Need to make a quick fix yourself?
 1. Press `^E` to pause
-2. Make your edits in your editor
+2. Make edits in your editor
 3. Press Enter to resume the current stage
 
 ## PM-driven Stage Planning
 
-After the PM stage analyzes your task, it outputs a `STAGE_PLAN.md` artifact recommending which optional stages to run or skip:
+After analyzing your task, the PM stage outputs a `STAGE_PLAN.md` recommending which optional stages to run or skip:
 
 ```markdown
 # Stage Plan
@@ -133,189 +129,7 @@ After the PM stage analyzes your task, it outputs a `STAGE_PLAN.md` artifact rec
 | BENCHMARK | skip | UI-only changes, no performance impact |
 ```
 
-This allows the AI to make intelligent decisions about which stages are relevant based on the actual task content, rather than relying solely on task type defaults.
-
-### Stage Preview
-
-After plan approval, you'll see a preview of the workflow:
-
-```
-Workflow Preview
-
-Stages to run:
-  PM → DESIGN → DEV → TEST → QA → DOCS
-
-Skipping:
-  MIGRATION, CONTRACT, BENCHMARK, SECURITY
-
-Controls during execution:
-  ^N Skip stage  ^B Back  ^E Pause for edit  ^I Interrupt
-```
-
-The progress bar dynamically updates to show only relevant stages.
-
-## Configuration
-
-After `galangal init`, customize `.galangal/config.yaml`:
-
-```yaml
-project:
-  name: "My Project"
-  stacks:
-    - language: python
-      framework: fastapi
-      root: backend/
-    - language: typescript
-      framework: vite
-      root: frontend/
-
-stages:
-  skip:
-    - BENCHMARK
-  timeout: 14400
-  max_retries: 5
-
-validation:
-  qa:
-    timeout: 3600
-    commands:
-      - name: "Lint"
-        command: "./scripts/lint.sh"
-        timeout: 600
-      - name: "Tests"
-        command: "pytest"
-
-pr:
-  codex_review: true
-  base_branch: main
-
-logging:
-  enabled: true
-  level: info
-  file: logs/galangal.jsonl
-  json_format: true
-  console: false
-
-prompt_context: |
-  ## Project Patterns
-  - Use repository pattern for data access
-  - API responses use api_success() / api_error()
-```
-
-### Approver Name
-
-Configure your name to auto-fill approval signoffs:
-
-```yaml
-project:
-  name: "My Project"
-  approver_name: "Jane Smith"  # Auto-fills in plan/design approvals
-```
-
-When set, this name is used as the default when approving plans and designs, saving you from typing it each time.
-
-### New in v0.2.22: Structured Logging
-
-If you're upgrading from an earlier version, you can add the optional `logging` section to your existing `config.yaml`:
-
-```yaml
-# Add to .galangal/config.yaml
-logging:
-  enabled: true           # Enable structured logging
-  level: info             # debug, info, warning, error
-  file: logs/galangal.jsonl  # Log file path (JSON Lines format)
-  json_format: true       # JSON output (false for pretty console)
-  console: false          # Also output to stderr
-```
-
-When enabled, logs workflow events like `stage_started`, `stage_completed`, `rollback`, etc. in JSON format for easy parsing and aggregation.
-
-## Customizing Prompts
-
-Galangal uses a layered prompt system:
-
-1. **Base prompts** - Generic, language-agnostic prompts built into the package
-2. **Project prompts** - Your customizations in `.galangal/prompts/`
-
-### Prompt Modes
-
-Project prompts support two modes:
-
-#### Supplement Mode (Recommended)
-
-Add project-specific content that gets prepended to the base prompt. Include the `# BASE` marker where you want the base prompt inserted:
-
-```markdown
-<!-- .galangal/prompts/dev.md -->
-
-## My Project CLI Scripts
-
-Use these commands for testing:
-- `./scripts/test.sh` - Run tests
-- `./scripts/lint.sh` - Run linter
-
-## My Project Patterns
-
-- Always use `api_success()` for responses
-- Never use raw SQL queries
-
-# BASE
-```
-
-The `# BASE` marker tells galangal to insert the generic base prompt at that location. Your project-specific content appears first, followed by the standard instructions.
-
-#### Override Mode
-
-To completely replace a base prompt, simply omit the `# BASE` marker:
-
-```markdown
-<!-- .galangal/prompts/preflight.md -->
-
-# Custom Preflight
-
-This completely replaces the default preflight prompt.
-
-[Your custom instructions here...]
-```
-
-### Available Prompts
-
-Create any of these files in `.galangal/prompts/` to customize:
-
-| File | Stage |
-|------|-------|
-| `pm.md` | Requirements & planning |
-| `design.md` | Architecture design |
-| `preflight.md` | Environment checks |
-| `dev.md` | Implementation |
-| `test.md` | Test writing |
-| `qa.md` | Quality assurance |
-| `security.md` | Security review |
-| `review.md` | Code review |
-| `docs.md` | Documentation |
-
-### Config-Based Context
-
-You can also inject context via `config.yaml` without creating prompt files:
-
-```yaml
-# .galangal/config.yaml
-
-# Injected into ALL stage prompts
-prompt_context: |
-  ## Project Rules
-  - Use TypeScript strict mode
-  - All APIs must be documented
-
-# Injected into specific stages only
-stage_context:
-  dev: |
-    ## Dev Environment
-    - Run `npm run dev` for hot reload
-  test: |
-    ## Test Setup
-    - Use vitest for unit tests
-```
+The progress bar updates dynamically to show only relevant stages.
 
 ## Commands
 
@@ -335,12 +149,323 @@ stage_context:
 | `galangal complete` | Finalize & create PR |
 | `galangal reset` | Delete active task |
 
-## Requirements
+## Configuration
 
-- Python 3.10+
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI installed (`claude` command available)
-- Claude Pro or Max subscription
-- Git
+After `galangal init`, customize `.galangal/config.yaml`. Here's a complete reference:
+
+```yaml
+# =============================================================================
+# PROJECT CONFIGURATION
+# =============================================================================
+project:
+  # Project name (displayed in logs and prompts)
+  name: "My Project"
+
+  # Default approver name for plan/design approvals (auto-fills signoff prompts)
+  approver_name: "Jane Smith"
+
+  # Technology stacks in your project
+  # Helps AI understand your codebase structure
+  stacks:
+    - language: python
+      framework: fastapi       # Optional: framework name
+      root: backend/           # Optional: subdirectory for this stack
+    - language: typescript
+      framework: vite
+      root: frontend/
+
+# =============================================================================
+# TASK STORAGE
+# =============================================================================
+# Directory where task state and artifacts are stored
+tasks_dir: galangal-tasks
+
+# Git branch naming pattern ({task_name} is replaced with sanitized task name)
+branch_pattern: "task/{task_name}"
+
+# =============================================================================
+# STAGE CONFIGURATION
+# =============================================================================
+stages:
+  # Stages to always skip (regardless of task type or PM recommendations)
+  skip:
+    - BENCHMARK
+    - CONTRACT
+
+  # Default timeout for each stage in seconds (4 hours default)
+  timeout: 14400
+
+  # Maximum retries per stage before rollback (default: 5)
+  max_retries: 5
+
+# =============================================================================
+# VALIDATION CONFIGURATION
+# Each stage can have validation commands, checks, and skip conditions
+# =============================================================================
+validation:
+  # Preflight checks run before DEV stage
+  preflight:
+    timeout: 300  # Timeout for each check in seconds
+    checks:
+      - name: "Git status clean"
+        command: "git status --porcelain"
+        expect_empty: true      # Pass if output is empty
+        warn_only: false        # If true, warn but don't fail
+      - name: "Node modules exist"
+        path_exists: "node_modules"  # Check if path exists
+      - name: "Dependencies installed"
+        command: "npm ls --depth=0"
+        warn_only: true
+
+  # Migration stage validation
+  migration:
+    # Skip if no migration files changed
+    skip_if:
+      no_files_match:
+        - "migrations/**"
+        - "**/migrations/**"
+        - "alembic/**"
+    timeout: 600
+    commands:
+      - name: "Run migrations"
+        command: "python manage.py migrate --check"
+        timeout: 300           # Override timeout for this command
+        optional: false        # If true, don't fail if command fails
+        allow_failure: false   # If true, report but don't block
+
+  # Test stage validation
+  test:
+    timeout: 600
+    commands:
+      - name: "Unit tests"
+        command: "pytest tests/unit"
+      - name: "Integration tests"
+        command: "pytest tests/integration"
+        optional: true         # Don't fail if integration tests missing
+
+  # Contract stage (API compatibility)
+  contract:
+    skip_if:
+      no_files_match: "openapi.yaml"
+    timeout: 300
+    commands:
+      - name: "Validate OpenAPI spec"
+        command: "openapi-spec-validator openapi.yaml"
+
+  # QA stage validation
+  qa:
+    timeout: 3600
+    commands:
+      - name: "Lint"
+        command: "./scripts/lint.sh"
+        timeout: 600
+      - name: "Type check"
+        command: "mypy src/"
+        timeout: 600
+    # Marker-based validation (for AI output verification)
+    artifact: "QA_REPORT.md"
+    pass_marker: "## PASS"
+    fail_marker: "## FAIL"
+
+  # Security stage validation
+  security:
+    timeout: 1800
+    commands:
+      - name: "Security scan"
+        command: "bandit -r src/"
+        allow_failure: true    # Report issues but don't block
+    artifacts_required:
+      - "SECURITY_CHECKLIST.md"
+
+  # Review stage validation
+  review:
+    timeout: 1800
+    artifact: "REVIEW_NOTES.md"
+    pass_marker: "APPROVED"
+    fail_marker: "REJECTED"
+
+  # Docs stage validation
+  docs:
+    timeout: 900
+    artifacts_required:
+      - "DOCS_REPORT.md"
+
+# =============================================================================
+# AI BACKEND CONFIGURATION
+# =============================================================================
+ai:
+  # Default backend to use
+  default: claude
+
+  # Available backends
+  backends:
+    claude:
+      command: claude
+      args:
+        - "-p"
+        - "{prompt}"
+        - "--output-format"
+        - "stream-json"
+        - "--verbose"
+      max_turns: 200           # Maximum conversation turns per stage
+
+  # Use different backends for specific stages
+  stage_backends:
+    # qa: gemini              # Use Gemini for QA stage (when supported)
+
+# =============================================================================
+# DOCUMENTATION CONFIGURATION
+# =============================================================================
+docs:
+  # Directory for changelog entries
+  changelog_dir: docs/changelog
+
+  # Directory for security audit reports
+  security_audit: docs/security
+
+  # Directory for general documentation
+  general: docs
+
+  # Toggle documentation updates
+  update_changelog: true       # Update changelog in DOCS stage
+  update_security_audit: true  # Create security reports in SECURITY stage
+  update_general_docs: true    # Update general docs in DOCS stage
+
+# =============================================================================
+# PULL REQUEST CONFIGURATION
+# =============================================================================
+pr:
+  # Base branch for PRs (e.g., main, develop)
+  base_branch: main
+
+  # Add @codex review to PR body for automated review
+  codex_review: false
+
+# =============================================================================
+# STRUCTURED LOGGING
+# =============================================================================
+logging:
+  # Enable structured logging to file
+  enabled: true
+
+  # Log level: debug, info, warning, error
+  level: info
+
+  # Log file path (JSON Lines format for easy parsing)
+  file: logs/galangal.jsonl
+
+  # Output format: true for JSON, false for pretty console format
+  json_format: true
+
+  # Also output to console (stderr)
+  console: false
+
+# =============================================================================
+# TASK TYPE SETTINGS
+# Per-task-type overrides
+# =============================================================================
+task_type_settings:
+  bugfix:
+    skip_discovery: true       # Skip the PM discovery Q&A for bugfixes
+  hotfix:
+    skip_discovery: true
+
+# =============================================================================
+# PROMPT CONTEXT
+# Additional context injected into AI prompts
+# =============================================================================
+
+# Global context added to ALL stage prompts
+prompt_context: |
+  ## Project Conventions
+  - Use repository pattern for data access
+  - API responses use api_success() / api_error() helpers
+  - All errors should be logged with context
+
+  ## Testing Standards
+  - Unit tests go in tests/unit/
+  - Integration tests go in tests/integration/
+  - Use pytest fixtures for test data
+
+# Per-stage context (merged with global context)
+stage_context:
+  dev: |
+    ## Development Environment
+    - Run `npm run dev` for hot reload
+    - Database: PostgreSQL on localhost:5432
+    - Redis: localhost:6379
+
+  test: |
+    ## Test Setup
+    - Use vitest for frontend unit tests
+    - Use pytest for backend tests
+    - Mock external APIs in tests
+
+  security: |
+    ## Security Requirements
+    - All user input must be validated
+    - Use parameterized queries (no raw SQL)
+    - Secrets must use environment variables
+```
+
+## Customizing Prompts
+
+Galangal uses a layered prompt system:
+
+1. **Base prompts** - Built-in, language-agnostic prompts
+2. **Project prompts** - Your customizations in `.galangal/prompts/`
+
+### Supplement Mode (Recommended)
+
+Add project-specific content that gets prepended to the base prompt:
+
+```markdown
+<!-- .galangal/prompts/dev.md -->
+
+## Project CLI Scripts
+
+- `./scripts/test.sh` - Run all tests
+- `./scripts/lint.sh` - Run linter
+
+## Patterns to Follow
+
+- Always use `api_success()` for responses
+- Never use raw SQL queries
+
+# BASE
+```
+
+The `# BASE` marker inserts the default prompt at that location.
+
+### Override Mode
+
+To completely replace a base prompt, omit the `# BASE` marker:
+
+```markdown
+<!-- .galangal/prompts/preflight.md -->
+
+# Custom Preflight
+
+This completely replaces the default preflight prompt.
+
+[Your custom instructions...]
+```
+
+### Available Prompt Files
+
+Create any of these in `.galangal/prompts/`:
+
+| File | Stage |
+|------|-------|
+| `pm.md` | Requirements & planning |
+| `design.md` | Architecture design |
+| `preflight.md` | Environment checks |
+| `dev.md` | Implementation |
+| `test.md` | Test writing |
+| `qa.md` | Quality assurance |
+| `security.md` | Security review |
+| `review.md` | Code review |
+| `docs.md` | Documentation |
 
 ## License
 
