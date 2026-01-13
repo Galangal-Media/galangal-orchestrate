@@ -30,6 +30,42 @@ class ActivityCategory(str, Enum):
     SYSTEM = "system"  # System messages
 
 
+def _get_display_width(char: str) -> int:
+    """
+    Get the display width of a character in terminal cells.
+
+    Most emojis are 2 cells wide, while ASCII and Unicode symbols are 1 cell.
+    This is a simplified heuristic that works for common icons.
+
+    Args:
+        char: Single character or short string.
+
+    Returns:
+        Display width in terminal cells (1 or 2).
+    """
+    if not char:
+        return 0
+
+    # Get the first character's code point
+    cp = ord(char[0])
+
+    # Emojis in common ranges are typically 2 cells wide
+    # - Miscellaneous Symbols and Pictographs: U+1F300-U+1F5FF
+    # - Emoticons: U+1F600-U+1F64F
+    # - Transport and Map Symbols: U+1F680-U+1F6FF
+    # - Supplemental Symbols: U+1F900-U+1F9FF
+    # - Symbols and Pictographs Extended-A: U+1FA00-U+1FAFF
+    if cp >= 0x1F300:
+        return 2
+
+    # Variation selector sequences (emoji with ️) - check for VS16
+    if len(char) > 1 and ord(char[-1]) == 0xFE0F:
+        return 2
+
+    # Everything else (ASCII, Unicode symbols like ✓✗⚠ℹ) is 1 cell
+    return 1
+
+
 @dataclass
 class ActivityEntry:
     """
@@ -72,10 +108,17 @@ class ActivityEntry:
         }
         color = colors.get(self.level, "#ebdbb2")
 
+        # Normalize icon to consistent 2-cell width for alignment
+        # Emojis are 2 cells, Unicode symbols and ASCII are 1 cell
+        icon = self.icon if self.icon else " "
+        icon_width = _get_display_width(icon)
+        # Pad to 2 cells + 1 separator space
+        icon_display = icon + " " * (3 - icon_width)
+
         if show_timestamp:
             time_str = self.timestamp.strftime("%H:%M:%S")
-            return f"[#928374]{time_str}[/] {self.icon} [{color}]{self.message}[/]"
-        return f"{self.icon} [{color}]{self.message}[/]"
+            return f"[#928374]{time_str}[/] {icon_display}[{color}]{self.message}[/]"
+        return f"{icon_display}[{color}]{self.message}[/]"
 
     def format_export(self) -> str:
         """
