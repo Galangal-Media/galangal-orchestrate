@@ -144,6 +144,73 @@ Please address the issues described above before proceeding.
                     app.update_stage(state.stage.value, state.attempt)
                     continue
 
+                # Handle skip stage (Ctrl+N)
+                if app._skip_stage_requested:
+                    app.add_activity(f"Skipping {state.stage.value} stage", "⏭️")
+                    skipped_stage = state.stage
+
+                    # Advance to next stage
+                    next_stage = get_next_stage(state.stage, state)
+                    if next_stage:
+                        state.stage = next_stage
+                        state.reset_attempts()
+                        save_state(state)
+                        app.show_message(
+                            f"Skipped {skipped_stage.value} → {next_stage.value}",
+                            "info"
+                        )
+                        app.update_stage(state.stage.value, state.attempt)
+                    else:
+                        state.stage = Stage.COMPLETE
+                        save_state(state)
+                        app.show_message("Skipped to COMPLETE", "info")
+
+                    app._skip_stage_requested = False
+                    app._paused = False
+                    continue
+
+                # Handle back stage (Ctrl+B)
+                if app._back_stage_requested:
+                    current_idx = STAGE_ORDER.index(state.stage)
+                    if current_idx > 0:
+                        prev_stage = STAGE_ORDER[current_idx - 1]
+                        app.add_activity(f"Going back to {prev_stage.value}", "⏮️")
+                        state.stage = prev_stage
+                        state.reset_attempts()
+                        save_state(state)
+                        app.show_message(
+                            f"Back to {prev_stage.value}",
+                            "info"
+                        )
+                        app.update_stage(state.stage.value, state.attempt)
+                    else:
+                        app.show_message("Already at first stage", "warning")
+
+                    app._back_stage_requested = False
+                    app._paused = False
+                    continue
+
+                # Handle manual edit pause (Ctrl+E)
+                if app._manual_edit_requested:
+                    app.add_activity("Paused for manual editing", "✏️")
+                    app.show_message(
+                        "Workflow paused - make your edits, then press Enter to continue",
+                        "info"
+                    )
+
+                    # Wait for user to press Enter
+                    await app.text_input_async(
+                        "Press Enter when ready to continue...", ""
+                    )
+
+                    app.add_activity("Resuming workflow", "▶️")
+                    app.show_message("Resuming...", "info")
+
+                    app._manual_edit_requested = False
+                    app._paused = False
+                    # Re-run the current stage
+                    continue
+
                 if app._paused:
                     app._workflow_result = "paused"
                     break
@@ -568,6 +635,43 @@ def _build_preflight_error_message(result) -> str:
     return modal_message
 
 
+async def _show_stage_preview(
+    app: WorkflowTUIApp,
+    state: WorkflowState,
+    config,
+) -> str:
+    """
+    Show a preview of stages to run before continuing.
+
+    Returns "continue" or "quit".
+    """
+    # Calculate stages to run vs skip
+    all_stages = [s for s in STAGE_ORDER if s != Stage.COMPLETE]
+    hidden = set(app._hidden_stages)
+
+    # Get stages that will run (not hidden)
+    stages_to_run = [s for s in all_stages if s.value not in hidden]
+    stages_skipped = [s for s in all_stages if s.value in hidden]
+
+    # Build preview message
+    run_str = " → ".join(s.value for s in stages_to_run)
+    skip_str = ", ".join(s.value for s in stages_skipped) if stages_skipped else "None"
+
+    # Build a nice preview
+    preview = f"""Workflow Preview
+
+Stages to run:
+  {run_str}
+
+Skipping:
+  {skip_str}
+
+Controls during execution:
+  ^N Skip stage  ^B Back  ^E Pause for edit  ^I Interrupt"""
+
+    return await app.prompt_async(PromptType.STAGE_PREVIEW, preview)
+
+
 async def _handle_max_retries_exceeded(
     app: WorkflowTUIApp,
     state: WorkflowState,
@@ -648,15 +752,17 @@ async def _handle_plan_approval(
             if stage_plan:
                 state.stage_plan = stage_plan
                 save_state(state)
-                # Show which stages will be skipped based on PM analysis
+                # Update progress bar to hide PM-skipped stages
                 skipped = [s for s, v in stage_plan.items() if v["action"] == "skip"]
                 if skipped:
-                    app.show_message(
-                        f"Stage plan: skipping {', '.join(skipped)}", "info"
-                    )
-                    # Update progress bar to hide PM-skipped stages
                     new_hidden = set(app._hidden_stages) | set(skipped)
                     app.update_hidden_stages(frozenset(new_hidden))
+
+            # Show stage preview
+            preview_result = await _show_stage_preview(app, state, config)
+            if preview_result == "quit":
+                app._workflow_result = "paused"
+                return False
 
             return True
         else:

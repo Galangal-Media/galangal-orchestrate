@@ -172,8 +172,11 @@ class WorkflowTUIApp(App):
     BINDINGS = [
         Binding("ctrl+q", "quit_workflow", "^Q Quit", show=True),
         Binding("ctrl+i", "interrupt_feedback", "^I Interrupt", show=True),
-        Binding("ctrl+d", "toggle_verbose", "^D Verbose", show=True),
-        Binding("ctrl+f", "toggle_files", "^F Files", show=True),
+        Binding("ctrl+n", "skip_stage", "^N Skip", show=True),
+        Binding("ctrl+b", "back_stage", "^B Back", show=True),
+        Binding("ctrl+e", "manual_edit", "^E Edit", show=True),
+        Binding("ctrl+d", "toggle_verbose", "^D Verbose", show=False),
+        Binding("ctrl+f", "toggle_files", "^F Files", show=False),
     ]
 
     def __init__(
@@ -200,6 +203,9 @@ class WorkflowTUIApp(App):
         # Workflow control
         self._paused = False
         self._interrupt_requested = False
+        self._skip_stage_requested = False
+        self._back_stage_requested = False
+        self._manual_edit_requested = False
         self._prompt_type = PromptType.NONE
         self._prompt_callback: Callable | None = None
         self._active_prompt_screen: PromptModal | None = None
@@ -786,6 +792,15 @@ class WorkflowTUIApp(App):
     def check_action_interrupt_feedback(self) -> bool:
         return not self._text_input_active()
 
+    def check_action_skip_stage(self) -> bool:
+        return not self._text_input_active()
+
+    def check_action_back_stage(self) -> bool:
+        return not self._text_input_active()
+
+    def check_action_manual_edit(self) -> bool:
+        return not self._text_input_active()
+
     def check_action_toggle_verbose(self) -> bool:
         return not self._text_input_active()
 
@@ -809,6 +824,27 @@ class WorkflowTUIApp(App):
             return
         self._interrupt_requested = True
         self._paused = True  # Stop Claude execution
+
+    def action_skip_stage(self) -> None:
+        """Skip the current stage and advance to the next one."""
+        if self._active_prompt_screen or self._prompt_callback:
+            return
+        self._skip_stage_requested = True
+        self._paused = True
+
+    def action_back_stage(self) -> None:
+        """Go back to the previous stage."""
+        if self._active_prompt_screen or self._prompt_callback:
+            return
+        self._back_stage_requested = True
+        self._paused = True
+
+    def action_manual_edit(self) -> None:
+        """Pause workflow for manual editing, then resume."""
+        if self._active_prompt_screen or self._prompt_callback:
+            return
+        self._manual_edit_requested = True
+        self._paused = True
 
     def add_raw_line(self, line: str) -> None:
         """Store raw line and display if in verbose mode."""

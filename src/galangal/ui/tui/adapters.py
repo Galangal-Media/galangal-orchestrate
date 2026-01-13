@@ -25,6 +25,7 @@ class PromptType(Enum):
     NONE = "none"
     PLAN_APPROVAL = "plan_approval"
     DESIGN_APPROVAL = "design_approval"
+    STAGE_PREVIEW = "stage_preview"
     COMPLETION = "completion"
     TEXT_INPUT = "text_input"
     PREFLIGHT_RETRY = "preflight_retry"
@@ -83,6 +84,10 @@ PROMPT_OPTIONS: dict[PromptType, list[PromptOption]] = {
     PromptType.YES_NO: [
         PromptOption("1", "Yes", "yes", "#b8bb26"),
         PromptOption("2", "No", "no", "#fb4934"),
+    ],
+    PromptType.STAGE_PREVIEW: [
+        PromptOption("1", "Continue", "continue", "#b8bb26"),
+        PromptOption("2", "Quit", "quit", "#fb4934"),
     ],
 }
 
