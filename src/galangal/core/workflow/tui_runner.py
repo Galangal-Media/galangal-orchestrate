@@ -104,19 +104,60 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                 # Handle interrupt with feedback (Ctrl+I)
                 if app._interrupt_requested:
                     app.add_activity("Interrupted by user", "⏸️")
+
+                    interrupted_stage = state.stage
+                    interrupted_stage_name = interrupted_stage.value
+
+                    # Determine valid rollback targets (earlier stages only)
+                    current_idx = STAGE_ORDER.index(interrupted_stage)
+                    valid_targets = [s for s in STAGE_ORDER[:current_idx] if s != Stage.PREFLIGHT]
+
+                    # Default target based on interrupted stage
+                    if interrupted_stage in [Stage.PM]:
+                        # Can only restart PM
+                        default_target = Stage.PM
+                        valid_targets = [Stage.PM]
+                    elif interrupted_stage == Stage.DESIGN:
+                        default_target = Stage.PM  # Design issues often stem from PM
+                    else:
+                        default_target = Stage.DEV  # Most issues fixed in DEV
+
+                    # Get feedback first
                     feedback = await app.multiline_input_async(
                         "What needs to be fixed? (Ctrl+S to submit):", ""
                     )
-
-                    interrupted_stage = state.stage.value
                     feedback_text = feedback or "No details provided"
+
+                    # Ask which stage to roll back to (if there are choices)
+                    if len(valid_targets) > 1:
+                        # Build options string
+                        options_text = "\n".join(
+                            f"  [{i+1}] {s.value}" + (" (recommended)" if s == default_target else "")
+                            for i, s in enumerate(valid_targets)
+                        )
+                        target_prompt = f"Roll back to which stage?\n\n{options_text}\n\nEnter number:"
+
+                        target_input = await app.text_input_async(target_prompt, "1")
+                        try:
+                            target_idx = int(target_input) - 1
+                            if 0 <= target_idx < len(valid_targets):
+                                target_stage = valid_targets[target_idx]
+                            else:
+                                target_stage = default_target
+                        except (ValueError, TypeError):
+                            target_stage = default_target
+                    else:
+                        target_stage = valid_targets[0] if valid_targets else interrupted_stage
 
                     # Create ROLLBACK.md artifact for persistent context
                     from datetime import datetime, timezone
                     rollback_content = f"""# User Interrupt Rollback
 
 ## Source
-User interrupt (Ctrl+I) during {interrupted_stage} stage
+User interrupt (Ctrl+I) during {interrupted_stage_name} stage
+
+## Rollback Target
+{target_stage.value}
 
 ## Date
 {datetime.now(timezone.utc).isoformat()}
@@ -129,9 +170,9 @@ Please address the issues described above before proceeding.
 """
                     write_artifact("ROLLBACK.md", rollback_content, state.task_name)
 
-                    state.stage = Stage.DEV
+                    state.stage = target_stage
                     state.last_failure = (
-                        f"Interrupt feedback from {interrupted_stage}: {feedback_text}"
+                        f"Interrupt feedback from {interrupted_stage_name}: {feedback_text}"
                     )
                     state.reset_attempts(clear_failure=False)
                     save_state(state)
@@ -139,7 +180,7 @@ Please address the issues described above before proceeding.
                     app._interrupt_requested = False
                     app._paused = False
                     app.show_message(
-                        f"Interrupted {interrupted_stage} - rolling back to DEV",
+                        f"Interrupted {interrupted_stage_name} - rolling back to {target_stage.value}",
                         "warning"
                     )
                     app.update_stage(state.stage.value, state.attempt)
