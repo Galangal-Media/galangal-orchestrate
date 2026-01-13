@@ -29,6 +29,7 @@ from galangal.core.workflow.core import (
     handle_rollback,
 )
 from galangal.core.workflow.pause import _handle_pause
+from galangal.logging import workflow_logger
 from galangal.prompts.builder import PromptBuilder
 from galangal.results import StageResultType
 from galangal.ui.tui import PromptType, WorkflowTUIApp
@@ -281,6 +282,107 @@ Please address the issues described above before proceeding.
                         save_state(state)
                         app._workflow_result = "paused"
                         break
+
+                    # Handle user decision needed (decision file missing)
+                    if result.type == StageResultType.USER_DECISION_NEEDED:
+                        # Build prompt with artifact summary
+                        artifact_preview = (result.output or "")[:500]
+                        if len(result.output or "") > 500:
+                            artifact_preview += "\n..."
+
+                        while True:
+                            choice = await app.prompt_async(
+                                PromptType.USER_DECISION,
+                                f"Decision file missing for {state.stage.value} stage.\n\n"
+                                f"Report preview:\n{artifact_preview}\n\n"
+                                "Please review and decide:"
+                            )
+
+                            if choice == "view":
+                                # Show full report in activity log
+                                app.add_activity("--- Full Report ---", "📄")
+                                for line in (result.output or "No content").split("\n")[:50]:
+                                    app.add_activity(line, "")
+                                app.add_activity("--- End Report ---", "📄")
+                                continue  # Prompt again
+
+                            if choice == "approve":
+                                # Write decision file and continue as success
+                                decision_file = f"{state.stage.value.upper()}_DECISION"
+                                decision_word = "APPROVED" if state.stage == Stage.SECURITY else "PASS" if state.stage == Stage.QA else "APPROVE"
+                                write_artifact(decision_file, decision_word, state.task_name)
+                                app.add_activity(f"User approved - wrote {decision_file}", "✓")
+
+                                # Audit log
+                                workflow_logger.user_decision(
+                                    stage=state.stage.value,
+                                    task_name=state.task_name,
+                                    decision="approve",
+                                    reason="decision file missing",
+                                )
+
+                                # Record success metrics
+                                record_stage_result(
+                                    stage=state.stage,
+                                    success=True,
+                                    attempts=state.attempt,
+                                    task_type=state.task_type.value,
+                                )
+                                app.show_stage_complete(state.stage.value, True)
+
+                                # Advance to next stage
+                                next_stage = get_next_stage(state)
+                                if next_stage is None:
+                                    app.show_workflow_complete()
+                                    app._workflow_result = "complete"
+                                    save_state(state)
+                                    break
+                                state.stage = next_stage
+                                state.reset_attempts()
+                                save_state(state)
+                                app.update_stage(state.stage.value, state.attempt)
+                                break  # Exit user decision loop, continue workflow
+
+                            if choice == "reject":
+                                # Write decision file and rollback to DEV
+                                decision_file = f"{state.stage.value.upper()}_DECISION"
+                                decision_word = "REJECTED" if state.stage == Stage.SECURITY else "FAIL" if state.stage == Stage.QA else "REQUEST_CHANGES"
+                                write_artifact(decision_file, decision_word, state.task_name)
+                                app.add_activity(f"User rejected - wrote {decision_file}", "✗")
+
+                                # Audit log
+                                workflow_logger.user_decision(
+                                    stage=state.stage.value,
+                                    task_name=state.task_name,
+                                    decision="reject",
+                                    reason="decision file missing",
+                                )
+
+                                # Rollback to DEV
+                                state.stage = Stage.DEV
+                                state.last_failure = f"User rejected {state.stage.value} stage"
+                                state.reset_attempts(clear_failure=False)
+                                save_state(state)
+                                app.show_message("Rolling back to DEV per user decision", "warning")
+                                app.update_stage(state.stage.value, state.attempt)
+                                break  # Exit user decision loop, continue workflow
+
+                            # quit
+                            # Audit log
+                            workflow_logger.user_decision(
+                                stage=state.stage.value,
+                                task_name=state.task_name,
+                                decision="quit",
+                                reason="decision file missing",
+                            )
+                            save_state(state)
+                            app._workflow_result = "paused"
+                            break
+
+                        # Check if we should exit the main loop
+                        if app._workflow_result in ("complete", "paused"):
+                            break
+                        continue  # Continue workflow loop
 
                     # Handle rollback required
                     if result.type == StageResultType.ROLLBACK_REQUIRED:

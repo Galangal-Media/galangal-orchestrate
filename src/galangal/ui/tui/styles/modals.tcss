@@ -1,0 +1,197 @@
+/*
+ * Modal Styles
+ * Shared styles for all modal screens
+ */
+
+/* Base modal centering */
+PromptModal,
+TextInputModal,
+QuestionAnswerModal,
+UserQuestionsModal,
+MultilineInputModal {
+    align: center middle;
+    layout: vertical;
+}
+
+/* ============================================
+ * Prompt Modal (multi-choice selections)
+ * ============================================ */
+
+#prompt-dialog {
+    width: 90%;
+    max-width: 120;
+    min-width: 50;
+    max-height: 80%;
+    background: #3c3836;
+    border: round #504945;
+    padding: 1 2;
+    layout: vertical;
+    overflow-y: auto;
+}
+
+#prompt-message {
+    color: #ebdbb2;
+    text-style: bold;
+    margin-bottom: 1;
+    text-wrap: wrap;
+}
+
+#prompt-options {
+    color: #ebdbb2;
+}
+
+#prompt-hint {
+    color: #7c6f64;
+    margin-top: 1;
+}
+
+/* ============================================
+ * Text Input Modal (single-line)
+ * ============================================ */
+
+#text-input-dialog {
+    width: 70%;
+    max-width: 80;
+    min-width: 40;
+    background: #3c3836;
+    border: round #504945;
+    padding: 1 2;
+    layout: vertical;
+}
+
+#text-input-label {
+    color: #ebdbb2;
+    text-style: bold;
+    margin-bottom: 1;
+    text-wrap: wrap;
+}
+
+#text-input-field {
+    width: 100%;
+}
+
+#text-input-hint {
+    color: #7c6f64;
+    margin-top: 1;
+}
+
+/* ============================================
+ * Question Answer Modal (discovery Q&A)
+ * ============================================ */
+
+#qa-dialog {
+    width: 90%;
+    max-width: 100;
+    min-width: 60;
+    max-height: 85%;
+    background: #3c3836;
+    border: round #504945;
+    padding: 1 2;
+    layout: vertical;
+    overflow-y: auto;
+}
+
+#qa-title {
+    color: #fe8019;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#qa-questions {
+    color: #a89984;
+    margin-bottom: 1;
+    padding: 0 1;
+}
+
+#qa-current-question {
+    color: #ebdbb2;
+    text-style: bold;
+    margin-bottom: 1;
+    padding: 0 1;
+}
+
+#qa-input-field {
+    width: 100%;
+    margin-bottom: 1;
+}
+
+#qa-progress {
+    color: #7c6f64;
+}
+
+#qa-hint {
+    color: #7c6f64;
+    margin-top: 1;
+}
+
+/* ============================================
+ * User Questions Modal (enter own questions)
+ * ============================================ */
+
+#user-questions-dialog {
+    width: 90%;
+    max-width: 100;
+    min-width: 50;
+    height: auto;
+    max-height: 80%;
+    background: #3c3836;
+    border: round #504945;
+    padding: 1 2;
+    layout: vertical;
+}
+
+#user-questions-label {
+    color: #ebdbb2;
+    text-style: bold;
+    margin-bottom: 1;
+    text-wrap: wrap;
+}
+
+#user-questions-field {
+    width: 100%;
+    height: 10;
+    min-height: 6;
+    background: #282828;
+    border: solid #504945;
+}
+
+#user-questions-hint {
+    color: #7c6f64;
+    margin-top: 1;
+}
+
+/* ============================================
+ * Multiline Input Modal (task descriptions)
+ * ============================================ */
+
+#multiline-input-dialog {
+    width: 90%;
+    max-width: 100;
+    min-width: 50;
+    height: auto;
+    max-height: 80%;
+    background: #3c3836;
+    border: round #504945;
+    padding: 1 2;
+    layout: vertical;
+}
+
+#multiline-input-label {
+    color: #ebdbb2;
+    text-style: bold;
+    margin-bottom: 1;
+    text-wrap: wrap;
+}
+
+#multiline-input-field {
+    width: 100%;
+    height: 12;
+    min-height: 6;
+    background: #282828;
+    border: solid #504945;
+}
+
+#multiline-input-hint {
+    color: #7c6f64;
+    margin-top: 1;
+}

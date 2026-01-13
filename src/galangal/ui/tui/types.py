@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Literal
 
 
 class ActivityLevel(str, Enum):
@@ -101,7 +100,7 @@ def export_activity_log(entries: list[ActivityEntry], path: Path) -> None:
         path: File path to write to.
     """
     with open(path, "w") as f:
-        f.write(f"# Activity Log Export\n")
+        f.write("# Activity Log Export\n")
         f.write(f"# Generated: {datetime.now(timezone.utc).isoformat()}\n")
         f.write(f"# Entries: {len(entries)}\n\n")
         for entry in entries:

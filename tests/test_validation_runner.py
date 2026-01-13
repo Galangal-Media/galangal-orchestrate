@@ -95,50 +95,93 @@ class TestValidationRunnerDefaults:
                 assert result.success is True
 
     def test_qa_stage_checks_report_content(self):
-        """Test QA stage checks QA_REPORT.md content."""
+        """Test QA stage checks QA_DECISION file first, then QA_REPORT.md."""
         with patch("galangal.validation.runner.get_config", return_value=self.config):
             with patch("galangal.validation.runner.get_project_root", return_value=Path("/tmp")):
                 runner = ValidationRunner()
 
-                # Missing report
+                # Missing report and decision file
                 with patch("galangal.validation.runner.artifact_exists", return_value=False):
                     result = runner._validate_with_defaults("QA", "test-task")
                     assert result.success is False
+                    assert result.rollback_to == "DEV"
 
-                # Report with PASS
-                with patch("galangal.validation.runner.artifact_exists", return_value=True):
-                    with patch("galangal.validation.runner.read_artifact", return_value="Status: PASS"):
+                # Decision file with PASS
+                def exists_decision(name, task):
+                    return name == "QA_DECISION"
+
+                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                    with patch("galangal.validation.runner.read_artifact", return_value="PASS"):
                         result = runner._validate_with_defaults("QA", "test-task")
                         assert result.success is True
 
-                # Report with FAIL
-                with patch("galangal.validation.runner.artifact_exists", return_value=True):
-                    with patch("galangal.validation.runner.read_artifact", return_value="Status: FAIL"):
+                # Decision file with FAIL
+                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                    with patch("galangal.validation.runner.read_artifact", return_value="FAIL"):
                         result = runner._validate_with_defaults("QA", "test-task")
                         assert result.success is False
                         assert result.rollback_to == "DEV"
 
+                # Report exists but no decision file - needs user decision
+                def exists_report_only(name, task):
+                    return name == "QA_REPORT.md"
+
+                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_report_only):
+                    with patch("galangal.validation.runner.read_artifact", return_value="Status: PASS"):
+                        result = runner._validate_with_defaults("QA", "test-task")
+                        assert result.needs_user_decision is True
+
     def test_security_stage_checks_approval(self):
-        """Test SECURITY stage checks for APPROVED marker."""
+        """Test SECURITY stage checks SECURITY_DECISION file first."""
         with patch("galangal.validation.runner.get_config", return_value=self.config):
             with patch("galangal.validation.runner.get_project_root", return_value=Path("/tmp")):
                 runner = ValidationRunner()
 
-                def exists_checklist_only(name, task):
-                    return name == "SECURITY_CHECKLIST.md"
+                # Decision file with APPROVED
+                def exists_decision(name, task):
+                    return name == "SECURITY_DECISION"
 
-                # Checklist with APPROVED
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_checklist_only):
-                    with patch("galangal.validation.runner.read_artifact", return_value="## Status: APPROVED"):
+                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                    with patch("galangal.validation.runner.read_artifact", return_value="APPROVED"):
                         result = runner._validate_with_defaults("SECURITY", "test-task")
                         assert result.success is True
 
-                # Checklist with REJECTED
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_checklist_only):
-                    with patch("galangal.validation.runner.read_artifact", return_value="## Status: REJECTED"):
+                # Decision file with REJECTED
+                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                    with patch("galangal.validation.runner.read_artifact", return_value="REJECTED"):
                         result = runner._validate_with_defaults("SECURITY", "test-task")
                         assert result.success is False
                         assert result.rollback_to == "DEV"
+
+                # Decision file with BLOCKED
+                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                    with patch("galangal.validation.runner.read_artifact", return_value="BLOCKED"):
+                        result = runner._validate_with_defaults("SECURITY", "test-task")
+                        assert result.success is False
+                        assert result.rollback_to == "DEV"
+
+                # Checklist exists but no decision file - needs user decision
+                def exists_checklist_only(name, task):
+                    return name == "SECURITY_CHECKLIST.md"
+
+                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_checklist_only):
+                    with patch("galangal.validation.runner.read_artifact", return_value="## Security Review\nReview done."):
+                        result = runner._validate_with_defaults("SECURITY", "test-task")
+                        assert result.needs_user_decision is True
+
+                # Neither checklist nor decision file - should fail
+                with patch("galangal.validation.runner.artifact_exists", return_value=False):
+                    result = runner._validate_with_defaults("SECURITY", "test-task")
+                    assert result.success is False
+                    assert result.rollback_to == "DEV"
+
+                # Security skip marker exists - should pass
+                def exists_skip(name, task):
+                    return name == "SECURITY_SKIP.md"
+
+                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_skip):
+                    result = runner._validate_with_defaults("SECURITY", "test-task")
+                    assert result.success is True
 
 
 class TestValidationRunnerQAReport:
@@ -148,31 +191,51 @@ class TestValidationRunnerQAReport:
         """Set up test fixtures."""
         self.config = GalangalConfig()
 
-    def test_qa_report_with_status_pass(self):
-        """Test QA report with **Status:** PASS pattern."""
+    def test_qa_decision_pass(self):
+        """Test QA_DECISION file with PASS."""
         with patch("galangal.validation.runner.get_config", return_value=self.config):
             with patch("galangal.validation.runner.get_project_root", return_value=Path("/tmp")):
                 runner = ValidationRunner()
 
-                with patch("galangal.validation.runner.artifact_exists", return_value=True):
-                    with patch("galangal.validation.runner.read_artifact", return_value="**Status:** PASS"):
+                def exists_decision(name, task):
+                    return name == "QA_DECISION"
+
+                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                    with patch("galangal.validation.runner.read_artifact", return_value="PASS"):
                         result = runner._check_qa_report("test-task")
                         assert result.success is True
 
-    def test_qa_report_with_status_fail(self):
-        """Test QA report with **Status:** FAIL pattern."""
+    def test_qa_decision_fail(self):
+        """Test QA_DECISION file with FAIL."""
         with patch("galangal.validation.runner.get_config", return_value=self.config):
             with patch("galangal.validation.runner.get_project_root", return_value=Path("/tmp")):
                 runner = ValidationRunner()
 
-                with patch("galangal.validation.runner.artifact_exists", return_value=True):
-                    with patch("galangal.validation.runner.read_artifact", return_value="**Status:** FAIL"):
+                def exists_decision(name, task):
+                    return name == "QA_DECISION"
+
+                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                    with patch("galangal.validation.runner.read_artifact", return_value="FAIL"):
                         result = runner._check_qa_report("test-task")
                         assert result.success is False
                         assert result.rollback_to == "DEV"
 
-    def test_qa_report_missing(self):
-        """Test missing QA report."""
+    def test_qa_report_exists_no_decision(self):
+        """Test QA_REPORT.md exists but no QA_DECISION - needs user decision."""
+        with patch("galangal.validation.runner.get_config", return_value=self.config):
+            with patch("galangal.validation.runner.get_project_root", return_value=Path("/tmp")):
+                runner = ValidationRunner()
+
+                def exists_report_only(name, task):
+                    return name == "QA_REPORT.md"
+
+                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_report_only):
+                    with patch("galangal.validation.runner.read_artifact", return_value="QA Report content"):
+                        result = runner._check_qa_report("test-task")
+                        assert result.needs_user_decision is True
+
+    def test_qa_report_and_decision_missing(self):
+        """Test both QA_REPORT.md and QA_DECISION missing."""
         with patch("galangal.validation.runner.get_config", return_value=self.config):
             with patch("galangal.validation.runner.get_project_root", return_value=Path("/tmp")):
                 runner = ValidationRunner()
@@ -181,18 +244,6 @@ class TestValidationRunnerQAReport:
                     result = runner._check_qa_report("test-task")
                     assert result.success is False
                     assert result.rollback_to == "DEV"
-
-    def test_qa_report_unclear_status(self):
-        """Test QA report with no clear status."""
-        with patch("galangal.validation.runner.get_config", return_value=self.config):
-            with patch("galangal.validation.runner.get_project_root", return_value=Path("/tmp")):
-                runner = ValidationRunner()
-
-                with patch("galangal.validation.runner.artifact_exists", return_value=True):
-                    with patch("galangal.validation.runner.read_artifact", return_value="Some content without status"):
-                        result = runner._check_qa_report("test-task")
-                        assert result.success is False
-                        assert "No clear status" in result.message
 
 
 class TestValidationRunnerArtifactMarkers:

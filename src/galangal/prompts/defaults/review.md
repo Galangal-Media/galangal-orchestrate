@@ -56,6 +56,26 @@ Create REVIEW_NOTES.md in the task's artifacts directory:
 4. Verify the changes match SPEC.md requirements
 5. Document your findings
 
+## CRITICAL: Decision File
+
+After creating REVIEW_NOTES.md, you MUST also create a separate decision file:
+
+**File:** `REVIEW_DECISION` (no extension)
+**Contents:** Exactly one word - either `APPROVE` or `REQUEST_CHANGES`
+
+Example:
+```
+APPROVE
+```
+or
+```
+REQUEST_CHANGES
+```
+
+This file must contain ONLY the decision word, nothing else. No explanation, no markdown, no extra text.
+
+The validation system reads this file to determine if the stage passes. If the file is missing or unclear, the user will be prompted to make the decision manually.
+
 ## Important Rules
 
 - Be constructive in feedback

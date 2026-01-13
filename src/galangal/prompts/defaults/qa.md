@@ -41,9 +41,29 @@ Create QA_REPORT.md in the task's artifacts directory:
 3. Verify each acceptance criterion from SPEC.md
 4. Document all results in QA_REPORT.md
 
+## CRITICAL: Decision File
+
+After creating QA_REPORT.md, you MUST also create a separate decision file:
+
+**File:** `QA_DECISION` (no extension)
+**Contents:** Exactly one word - either `PASS` or `FAIL`
+
+Example:
+```
+PASS
+```
+or
+```
+FAIL
+```
+
+This file must contain ONLY the decision word, nothing else. No explanation, no markdown, no extra text.
+
+The validation system reads this file to determine if the stage passes. If the file is missing or unclear, the user will be prompted to make the decision manually.
+
 ## Important Rules
 
 - Run ALL tests, not just new ones
 - Be thorough in checking acceptance criteria
 - Document any issues clearly for the DEV stage to fix
-- If tests fail, status should be FAIL
+- If tests fail, status should be FAIL and QA_DECISION should contain FAIL

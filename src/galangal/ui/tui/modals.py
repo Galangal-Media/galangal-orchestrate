@@ -25,40 +25,7 @@ class PromptOption:
 class PromptModal(ModalScreen):
     """Modal prompt for multi-choice selections."""
 
-    CSS = """
-    PromptModal {
-        align: center middle;
-        layout: vertical;
-    }
-
-    #prompt-dialog {
-        width: 90%;
-        max-width: 120;
-        min-width: 50;
-        max-height: 80%;
-        background: #3c3836;
-        border: round #504945;
-        padding: 1 2;
-        layout: vertical;
-        overflow-y: auto;
-    }
-
-    #prompt-message {
-        color: #ebdbb2;
-        text-style: bold;
-        margin-bottom: 1;
-        text-wrap: wrap;
-    }
-
-    #prompt-options {
-        color: #ebdbb2;
-    }
-
-    #prompt-hint {
-        color: #7c6f64;
-        margin-top: 1;
-    }
-    """
+    CSS_PATH = "styles/modals.tcss"
 
     BINDINGS = [
         Binding("1", "choose_1", show=False),
@@ -127,38 +94,7 @@ class PromptModal(ModalScreen):
 class TextInputModal(ModalScreen):
     """Modal for collecting short text input."""
 
-    CSS = """
-    TextInputModal {
-        align: center middle;
-        layout: vertical;
-    }
-
-    #text-input-dialog {
-        width: 70%;
-        max-width: 80;
-        min-width: 40;
-        background: #3c3836;
-        border: round #504945;
-        padding: 1 2;
-        layout: vertical;
-    }
-
-    #text-input-label {
-        color: #ebdbb2;
-        text-style: bold;
-        margin-bottom: 1;
-        text-wrap: wrap;
-    }
-
-    #text-input-field {
-        width: 100%;
-    }
-
-    #text-input-hint {
-        color: #7c6f64;
-        margin-top: 1;
-    }
-    """
+    CSS_PATH = "styles/modals.tcss"
 
     BINDINGS = [
         Binding("escape", "cancel", show=False),
@@ -192,57 +128,7 @@ class TextInputModal(ModalScreen):
 class QuestionAnswerModal(ModalScreen):
     """Modal for Q&A sessions - displays questions and collects answers sequentially."""
 
-    CSS = """
-    QuestionAnswerModal {
-        align: center middle;
-        layout: vertical;
-    }
-
-    #qa-dialog {
-        width: 90%;
-        max-width: 100;
-        min-width: 60;
-        max-height: 85%;
-        background: #3c3836;
-        border: round #504945;
-        padding: 1 2;
-        layout: vertical;
-        overflow-y: auto;
-    }
-
-    #qa-title {
-        color: #fe8019;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-
-    #qa-questions {
-        color: #a89984;
-        margin-bottom: 1;
-        padding: 0 1;
-    }
-
-    #qa-current-question {
-        color: #ebdbb2;
-        text-style: bold;
-        margin-bottom: 1;
-        padding: 0 1;
-    }
-
-    #qa-input-field {
-        width: 100%;
-        margin-bottom: 1;
-    }
-
-    #qa-progress {
-        color: #7c6f64;
-    }
-
-    #qa-hint {
-        color: #7c6f64;
-        margin-top: 1;
-    }
-    """
+    CSS_PATH = "styles/modals.tcss"
 
     BINDINGS = [
         Binding("escape", "cancel", show=False),
@@ -311,44 +197,7 @@ class QuestionAnswerModal(ModalScreen):
 class UserQuestionsModal(ModalScreen):
     """Modal for user to enter their own questions."""
 
-    CSS = """
-    UserQuestionsModal {
-        align: center middle;
-        layout: vertical;
-    }
-
-    #user-questions-dialog {
-        width: 90%;
-        max-width: 100;
-        min-width: 50;
-        height: auto;
-        max-height: 80%;
-        background: #3c3836;
-        border: round #504945;
-        padding: 1 2;
-        layout: vertical;
-    }
-
-    #user-questions-label {
-        color: #ebdbb2;
-        text-style: bold;
-        margin-bottom: 1;
-        text-wrap: wrap;
-    }
-
-    #user-questions-field {
-        width: 100%;
-        height: 10;
-        min-height: 6;
-        background: #282828;
-        border: solid #504945;
-    }
-
-    #user-questions-hint {
-        color: #7c6f64;
-        margin-top: 1;
-    }
-    """
+    CSS_PATH = "styles/modals.tcss"
 
     BINDINGS = [
         Binding("escape", "cancel", show=False),
@@ -392,44 +241,7 @@ class UserQuestionsModal(ModalScreen):
 class MultilineInputModal(ModalScreen):
     """Modal for collecting multi-line text input (task descriptions, briefs)."""
 
-    CSS = """
-    MultilineInputModal {
-        align: center middle;
-        layout: vertical;
-    }
-
-    #multiline-input-dialog {
-        width: 90%;
-        max-width: 100;
-        min-width: 50;
-        height: auto;
-        max-height: 80%;
-        background: #3c3836;
-        border: round #504945;
-        padding: 1 2;
-        layout: vertical;
-    }
-
-    #multiline-input-label {
-        color: #ebdbb2;
-        text-style: bold;
-        margin-bottom: 1;
-        text-wrap: wrap;
-    }
-
-    #multiline-input-field {
-        width: 100%;
-        height: 12;
-        min-height: 6;
-        background: #282828;
-        border: solid #504945;
-    }
-
-    #multiline-input-hint {
-        color: #7c6f64;
-        margin-top: 1;
-    }
-    """
+    CSS_PATH = "styles/modals.tcss"
 
     BINDINGS = [
         Binding("escape", "cancel", show=False),

@@ -26,7 +26,7 @@ import structlog
 from structlog.types import Processor
 
 if TYPE_CHECKING:
-    from galangal.core.state import Stage, TaskType, WorkflowState
+    pass
 
 
 LogLevel = Literal["debug", "info", "warning", "error"]
@@ -329,6 +329,32 @@ class WorkflowLogger:
             task=task_name,
             approved=approved,
             feedback=feedback,
+        )
+
+    def user_decision(
+        self,
+        stage: str,
+        task_name: str,
+        decision: str,
+        reason: str,
+    ) -> None:
+        """Log user decision for stage validation.
+
+        Called when the decision file is missing and the user
+        must manually approve or reject the stage outcome.
+
+        Args:
+            stage: Stage name (e.g., "SECURITY", "QA", "REVIEW").
+            task_name: Name of the task.
+            decision: The user's decision (approve, reject, quit).
+            reason: Reason for requiring user decision (e.g., "decision file missing").
+        """
+        self._logger.info(
+            "user_decision",
+            stage=stage,
+            task=task_name,
+            decision=decision,
+            reason=reason,
         )
 
 

@@ -61,7 +61,6 @@ def run_workflow(state: WorkflowState) -> None:
         _run_workflow_with_tui(state)
     finally:
         # Log workflow end
-        success = state.stage == state.__class__.__dict__.get("stage", state.stage)
         workflow_logger.workflow_completed(
             task_name=state.task_name,
             task_type=state.task_type.value,

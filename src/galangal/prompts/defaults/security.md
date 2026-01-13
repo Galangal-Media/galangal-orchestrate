@@ -75,13 +75,25 @@ OR
 **REJECTED** - Must fix: [list blocking issues]
 ```
 
-## CRITICAL: Final Recommendation
+## CRITICAL: Decision File
 
-Your checklist MUST end with one of:
-- `**APPROVED**` - if safe to deploy (with or without waivers)
-- `**REJECTED**` - if blocking security issues exist
+After creating SECURITY_CHECKLIST.md, you MUST also create a separate decision file:
 
-The validation system looks for these markers to determine if the stage passes.
+**File:** `SECURITY_DECISION` (no extension)
+**Contents:** Exactly one word - either `APPROVED` or `REJECTED`
+
+Example:
+```
+APPROVED
+```
+or
+```
+REJECTED
+```
+
+This file must contain ONLY the decision word, nothing else. No explanation, no markdown, no extra text.
+
+The validation system reads this file to determine if the stage passes. If the file is missing or unclear, the user will be prompted to make the decision manually.
 
 ## Process
 

@@ -286,6 +286,14 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         )
         return StageResult.success(result.message, output=invoke_result.output)
     else:
+        # Check if user decision is needed (decision file missing)
+        if result.needs_user_decision:
+            tui_app.add_activity("Decision file missing - user confirmation required", "❓")
+            return StageResult.user_decision_needed(
+                message=result.message,
+                artifact_content=result.output,
+            )
+
         tui_app.show_message(result.message, "error")
         workflow_logger.stage_failed(
             stage=stage.value,

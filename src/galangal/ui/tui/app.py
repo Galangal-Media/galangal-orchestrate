@@ -31,6 +31,7 @@ from textual.containers import Container, Horizontal, VerticalScroll
 from textual.widgets import Footer, RichLog
 
 from galangal.ui.tui.adapters import PromptType, TUIAdapter, get_prompt_options
+from galangal.ui.tui.mixins import WidgetAccessMixin
 from galangal.ui.tui.modals import (
     MultilineInputModal,
     PromptModal,
@@ -53,7 +54,7 @@ from galangal.ui.tui.widgets import (
 )
 
 
-class WorkflowTUIApp(App):
+class WorkflowTUIApp(WidgetAccessMixin, App):
     """
     Textual TUI application for workflow execution.
 
@@ -84,90 +85,7 @@ class WorkflowTUIApp(App):
     """
 
     TITLE = "Galangal"
-
-    CSS = """
-    Screen {
-        background: #282828;
-    }
-
-    #workflow-root {
-        layout: grid;
-        grid-size: 1;
-        grid-rows: 2 2 1fr 1 auto;
-        height: 100%;
-        width: 100%;
-    }
-
-    #header {
-        background: #3c3836;
-        padding: 0 2;
-        border-bottom: solid #504945;
-        content-align: left middle;
-    }
-
-    #progress {
-        background: #282828;
-        padding: 0 2;
-        content-align: center middle;
-    }
-
-    #main-content {
-        layout: vertical;
-        height: 100%;
-    }
-
-    #error-panel {
-        background: #282828;
-        padding: 0 1;
-        max-height: 8;
-    }
-
-    #error-panel.hidden {
-        height: 0;
-        padding: 0;
-        display: none;
-    }
-
-    #content-area {
-        layout: horizontal;
-        height: 1fr;
-    }
-
-    #activity-container {
-        width: 75%;
-        border-right: solid #504945;
-        height: 100%;
-    }
-
-    #files-container {
-        width: 25%;
-        padding: 0 1;
-        background: #1d2021;
-        height: 100%;
-    }
-
-    #activity-log {
-        background: #282828;
-        scrollbar-color: #fe8019;
-        scrollbar-background: #3c3836;
-        height: 100%;
-    }
-
-    #current-action {
-        background: #3c3836;
-        padding: 0 2;
-        border-top: solid #504945;
-    }
-
-    Footer {
-        background: #1d2021;
-    }
-
-    Footer > .footer--key {
-        background: #d3869b;
-        color: #1d2021;
-    }
-    """
+    CSS_PATH = "styles/app.tcss"
 
     BINDINGS = [
         Binding("ctrl+q", "quit_workflow", "^Q Quit", show=True),
@@ -280,56 +198,49 @@ class WorkflowTUIApp(App):
         self._attempt = attempt
 
         def _update():
-            header = self.query_one("#header", HeaderWidget)
-            header.stage = stage
-            header.attempt = attempt
+            header = self._safe_query("#header", HeaderWidget)
+            if header:
+                header.stage = stage
+                header.attempt = attempt
 
-            progress = self.query_one("#progress", StageProgressWidget)
-            progress.current_stage = stage
+            progress = self._safe_query("#progress", StageProgressWidget)
+            if progress:
+                progress.current_stage = stage
 
-        try:
-            self.call_from_thread(_update)
-        except Exception:
-            _update()
+        self._safe_update(_update)
 
     def update_hidden_stages(self, hidden_stages: frozenset) -> None:
         """Update which stages are hidden in the progress bar."""
         self._hidden_stages = hidden_stages
 
         def _update():
-            progress = self.query_one("#progress", StageProgressWidget)
-            progress.hidden_stages = hidden_stages
+            progress = self._safe_query("#progress", StageProgressWidget)
+            if progress:
+                progress.hidden_stages = hidden_stages
 
-        try:
-            self.call_from_thread(_update)
-        except Exception:
-            _update()
+        self._safe_update(_update)
 
     def set_status(self, status: str, detail: str = "") -> None:
         """Update current action display."""
 
         def _update():
-            action = self.query_one("#current-action", CurrentActionWidget)
-            action.action = status
-            action.detail = detail
+            action = self._safe_query("#current-action", CurrentActionWidget)
+            if action:
+                action.action = status
+                action.detail = detail
 
-        try:
-            self.call_from_thread(_update)
-        except Exception:
-            _update()
+        self._safe_update(_update)
 
     def set_turns(self, turns: int) -> None:
         """Update turn count."""
         self._turns = turns
 
         def _update():
-            header = self.query_one("#header", HeaderWidget)
-            header.turns = turns
+            header = self._safe_query("#header", HeaderWidget)
+            if header:
+                header.turns = turns
 
-        try:
-            self.call_from_thread(_update)
-        except Exception:
-            _update()
+        self._safe_update(_update)
 
     def add_activity(
         self,
@@ -361,31 +272,21 @@ class WorkflowTUIApp(App):
         def _add():
             # Only show activity in compact (non-verbose) mode
             if not self.verbose:
-                try:
-                    log = self.query_one("#activity-log", RichLog)
+                log = self._safe_query("#activity-log", RichLog)
+                if log:
                     log.write(entry.format_display())
-                except Exception:
-                    pass  # Widget may not exist during screen transitions
 
-        try:
-            self.call_from_thread(_add)
-        except Exception:
-            _add()
+        self._safe_update(_add)
 
     def add_file(self, action: str, path: str) -> None:
         """Add file to files panel."""
 
         def _add():
-            try:
-                files = self.query_one("#files-container", FilesPanelWidget)
+            files = self._safe_query("#files-container", FilesPanelWidget)
+            if files:
                 files.add_file(action, path)
-            except Exception:
-                pass  # Widget may not exist during screen transitions
 
-        try:
-            self.call_from_thread(_add)
-        except Exception:
-            _add()
+        self._safe_update(_add)
 
     def show_message(
         self,
@@ -440,18 +341,13 @@ class WorkflowTUIApp(App):
         """
 
         def _update():
-            try:
-                panel = self.query_one("#error-panel", ErrorPanelWidget)
+            panel = self._safe_query("#error-panel", ErrorPanelWidget)
+            if panel:
                 panel.error = message
                 panel.details = details
                 panel.remove_class("hidden")
-            except Exception:
-                pass  # Widget may not exist during shutdown
 
-        try:
-            self.call_from_thread(_update)
-        except Exception:
-            _update()
+        self._safe_update(_update)
 
         # Also add to activity log
         self.add_activity(
@@ -466,18 +362,13 @@ class WorkflowTUIApp(App):
         """Clear the error panel display."""
 
         def _update():
-            try:
-                panel = self.query_one("#error-panel", ErrorPanelWidget)
+            panel = self._safe_query("#error-panel", ErrorPanelWidget)
+            if panel:
                 panel.error = None
                 panel.details = None
                 panel.add_class("hidden")
-            except Exception:
-                pass  # Widget may not exist during shutdown
 
-        try:
-            self.call_from_thread(_update)
-        except Exception:
-            _update()
+        self._safe_update(_update)
 
     def show_prompt(self, prompt_type: PromptType, message: str, callback: Callable) -> None:
         """
@@ -500,26 +391,18 @@ class WorkflowTUIApp(App):
         options = get_prompt_options(prompt_type)
 
         def _show():
-            try:
+            def _handle(result: str | None) -> None:
+                self._active_prompt_screen = None
+                self._prompt_callback = None
+                self._prompt_type = PromptType.NONE
+                if result:
+                    callback(result)
 
-                def _handle(result: str | None) -> None:
-                    self._active_prompt_screen = None
-                    self._prompt_callback = None
-                    self._prompt_type = PromptType.NONE
-                    if result:
-                        callback(result)
+            screen = PromptModal(message, options)
+            self._active_prompt_screen = screen
+            self.push_screen(screen, _handle)
 
-                screen = PromptModal(message, options)
-                self._active_prompt_screen = screen
-                self.push_screen(screen, _handle)
-            except Exception:
-                pass  # Silently ignore prompt errors during screen transitions
-
-        try:
-            self.call_from_thread(_show)
-        except Exception:
-            # Direct call as fallback
-            _show()
+        self._safe_update(_show)
 
     def hide_prompt(self) -> None:
         """Hide prompt."""
@@ -531,10 +414,7 @@ class WorkflowTUIApp(App):
                 self._active_prompt_screen.dismiss(None)
                 self._active_prompt_screen = None
 
-        try:
-            self.call_from_thread(_hide)
-        except Exception:
-            _hide()
+        self._safe_update(_hide)
 
     def show_text_input(self, label: str, default: str, callback: Callable) -> None:
         """
@@ -553,23 +433,16 @@ class WorkflowTUIApp(App):
         self._input_callback = callback
 
         def _show():
-            try:
+            def _handle(result: str | None) -> None:
+                self._active_input_screen = None
+                self._input_callback = None
+                callback(result if result else None)
 
-                def _handle(result: str | None) -> None:
-                    self._active_input_screen = None
-                    self._input_callback = None
-                    callback(result if result else None)
+            screen = TextInputModal(label, default)
+            self._active_input_screen = screen
+            self.push_screen(screen, _handle)
 
-                screen = TextInputModal(label, default)
-                self._active_input_screen = screen
-                self.push_screen(screen, _handle)
-            except Exception:
-                pass  # Silently ignore input errors during screen transitions
-
-        try:
-            self.call_from_thread(_show)
-        except Exception:
-            _show()
+        self._safe_update(_show)
 
     def hide_text_input(self) -> None:
         """Reset text input prompt."""
@@ -580,10 +453,7 @@ class WorkflowTUIApp(App):
                 self._active_input_screen.dismiss(None)
                 self._active_input_screen = None
 
-        try:
-            self.call_from_thread(_hide)
-        except Exception:
-            _hide()
+        self._safe_update(_hide)
 
     # -------------------------------------------------------------------------
     # Async prompt methods (simplified threading model)
@@ -682,22 +552,14 @@ class WorkflowTUIApp(App):
         future: asyncio.Future[list[str] | None] = asyncio.Future()
 
         def _show():
-            try:
-                def _handle(result: list[str] | None) -> None:
-                    if not future.done():
-                        future.set_result(result)
-
-                screen = QuestionAnswerModal(questions)
-                self.push_screen(screen, _handle)
-            except Exception:
+            def _handle(result: list[str] | None) -> None:
                 if not future.done():
-                    future.set_result(None)
+                    future.set_result(result)
 
-        try:
-            self.call_from_thread(_show)
-        except Exception:
-            _show()
+            screen = QuestionAnswerModal(questions)
+            self.push_screen(screen, _handle)
 
+        self._safe_update(_show)
         return await future
 
     async def ask_yes_no_async(self, prompt: str) -> bool:
@@ -723,22 +585,14 @@ class WorkflowTUIApp(App):
         future: asyncio.Future[list[str] | None] = asyncio.Future()
 
         def _show():
-            try:
-                def _handle(result: list[str] | None) -> None:
-                    if not future.done():
-                        future.set_result(result)
-
-                screen = UserQuestionsModal()
-                self.push_screen(screen, _handle)
-            except Exception:
+            def _handle(result: list[str] | None) -> None:
                 if not future.done():
-                    future.set_result(None)
+                    future.set_result(result)
 
-        try:
-            self.call_from_thread(_show)
-        except Exception:
-            _show()
+            screen = UserQuestionsModal()
+            self.push_screen(screen, _handle)
 
+        self._safe_update(_show)
         return await future
 
     def show_multiline_input(self, label: str, default: str, callback: Callable) -> None:
@@ -759,24 +613,16 @@ class WorkflowTUIApp(App):
         self._input_callback = callback
 
         def _show():
-            try:
+            def _handle(result: str | None) -> None:
+                self._active_input_screen = None
+                self._input_callback = None
+                callback(result if result else None)
 
-                def _handle(result: str | None) -> None:
-                    self._active_input_screen = None
-                    self._input_callback = None
-                    callback(result if result else None)
+            screen = MultilineInputModal(label, default)
+            self._active_input_screen = screen
+            self.push_screen(screen, _handle)
 
-                screen = MultilineInputModal(label, default)
-                self._active_input_screen = screen
-                self.push_screen(screen, _handle)
-            except Exception as e:
-                log = self.query_one("#activity-log", RichLog)
-                log.write(f"[#fb4934]⚠ Input error: {e}[/]")
-
-        try:
-            self.call_from_thread(_show)
-        except Exception:
-            _show()
+        self._safe_update(_show)
 
     # -------------------------------------------------------------------------
     # Actions
@@ -855,14 +701,12 @@ class WorkflowTUIApp(App):
 
         def _add():
             if self.verbose:
-                log = self.query_one("#activity-log", RichLog)
-                display = line.strip()[:150]  # Truncate to 150 chars
-                log.write(f"[#7c6f64]{display}[/]")
+                log = self._safe_query("#activity-log", RichLog)
+                if log:
+                    display = line.strip()[:150]  # Truncate to 150 chars
+                    log.write(f"[#7c6f64]{display}[/]")
 
-        try:
-            self.call_from_thread(_add)
-        except Exception:
-            pass
+        self._safe_update(_add)
 
     def action_toggle_verbose(self) -> None:
         self.verbose = not self.verbose

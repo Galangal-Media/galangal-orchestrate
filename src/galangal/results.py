@@ -23,6 +23,7 @@ class StageResultType(Enum):
     VALIDATION_FAILED = auto()
     ROLLBACK_REQUIRED = auto()
     CLARIFICATION_NEEDED = auto()
+    USER_DECISION_NEEDED = auto()  # Decision file missing, user must confirm
     PAUSED = auto()
     TIMEOUT = auto()
     MAX_TURNS = auto()
@@ -144,4 +145,20 @@ class StageResult(Result):
             message=message,
             type=StageResultType.ERROR,
             output=output,
+        )
+
+    @classmethod
+    def user_decision_needed(
+        cls, message: str, artifact_content: str | None = None
+    ) -> StageResult:
+        """Create a result indicating user must confirm the stage decision.
+
+        Used when the AI-generated decision file is missing or unclear.
+        The user will be prompted to review the artifact and approve/reject.
+        """
+        return cls(
+            success=False,
+            message=message,
+            type=StageResultType.USER_DECISION_NEEDED,
+            output=artifact_content,
         )

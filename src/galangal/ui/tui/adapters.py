@@ -33,6 +33,7 @@ class PromptType(Enum):
     POST_COMPLETION = "post_completion"
     TASK_TYPE = "task_type"
     YES_NO = "yes_no"  # Simple yes/no prompt for discovery Q&A
+    USER_DECISION = "user_decision"  # User must approve/reject when decision file missing
 
 
 # Default options for prompts without specific configuration
@@ -88,6 +89,12 @@ PROMPT_OPTIONS: dict[PromptType, list[PromptOption]] = {
     PromptType.STAGE_PREVIEW: [
         PromptOption("1", "Continue", "continue", "#b8bb26"),
         PromptOption("2", "Quit", "quit", "#fb4934"),
+    ],
+    PromptType.USER_DECISION: [
+        PromptOption("1", "Approve", "approve", "#b8bb26"),
+        PromptOption("2", "Reject (rollback to DEV)", "reject", "#fb4934"),
+        PromptOption("3", "View full report", "view", "#83a598"),
+        PromptOption("4", "Quit", "quit", "#fabd2f"),
     ],
 }
 
