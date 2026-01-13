@@ -42,11 +42,11 @@ class TaskType(str, Enum):
         """Short description of this task type."""
         return {
             TaskType.FEATURE: "New functionality (full workflow)",
-            TaskType.BUG_FIX: "Fix broken behavior (skip design)",
-            TaskType.REFACTOR: "Restructure code (skip design, security)",
-            TaskType.CHORE: "Dependencies, config, tooling",
-            TaskType.DOCS: "Documentation only (minimal stages)",
-            TaskType.HOTFIX: "Critical fix (expedited)",
+            TaskType.BUG_FIX: "Fix broken behavior (PM → DEV → TEST → QA)",
+            TaskType.REFACTOR: "Restructure code (PM → DESIGN → DEV → TEST)",
+            TaskType.CHORE: "Dependencies, config (PM → DEV → TEST)",
+            TaskType.DOCS: "Documentation only (PM → DOCS)",
+            TaskType.HOTFIX: "Critical fix (PM → DEV → TEST)",
         }[self]
 
 
@@ -213,27 +213,64 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
 
 # Stages that are always skipped for each task type
 TASK_TYPE_SKIP_STAGES: dict[TaskType, set[Stage]] = {
-    TaskType.FEATURE: set(),  # Full workflow
-    TaskType.BUG_FIX: {Stage.DESIGN, Stage.BENCHMARK},
-    TaskType.REFACTOR: {
+    # FEATURE: Full workflow - PM → DESIGN → PREFLIGHT → DEV → all validation stages
+    TaskType.FEATURE: set(),
+    # BUG_FIX: PM → DEV → TEST → QA (skip design, run QA for regression check)
+    TaskType.BUG_FIX: {
         Stage.DESIGN,
         Stage.MIGRATION,
         Stage.CONTRACT,
         Stage.BENCHMARK,
         Stage.SECURITY,
+        Stage.REVIEW,
+        Stage.DOCS,
     },
-    TaskType.CHORE: {Stage.DESIGN, Stage.MIGRATION, Stage.CONTRACT, Stage.BENCHMARK},
+    # REFACTOR: PM → DESIGN → DEV → TEST (code restructuring, needs design but not full validation)
+    TaskType.REFACTOR: {
+        Stage.MIGRATION,
+        Stage.CONTRACT,
+        Stage.QA,
+        Stage.BENCHMARK,
+        Stage.SECURITY,
+        Stage.REVIEW,
+        Stage.DOCS,
+    },
+    # CHORE: PM → DEV → TEST (dependencies, config, tooling - minimal workflow)
+    TaskType.CHORE: {
+        Stage.DESIGN,
+        Stage.MIGRATION,
+        Stage.CONTRACT,
+        Stage.QA,
+        Stage.BENCHMARK,
+        Stage.SECURITY,
+        Stage.REVIEW,
+        Stage.DOCS,
+    },
+    # DOCS: PM → DOCS (documentation only - skip everything else)
     TaskType.DOCS: {
         Stage.DESIGN,
         Stage.PREFLIGHT,
+        Stage.DEV,
         Stage.MIGRATION,
         Stage.TEST,
         Stage.CONTRACT,
         Stage.QA,
         Stage.BENCHMARK,
         Stage.SECURITY,
+        Stage.REVIEW,
     },
-    TaskType.HOTFIX: {Stage.DESIGN, Stage.BENCHMARK},
+    # HOTFIX: PM → DEV → TEST (critical fix - expedited, minimal stages)
+    TaskType.HOTFIX: {
+        Stage.DESIGN,
+        Stage.PREFLIGHT,
+        Stage.MIGRATION,
+        Stage.CONTRACT,
+        Stage.QA,
+        Stage.BENCHMARK,
+        Stage.SECURITY,
+        Stage.REVIEW,
+        Stage.DOCS,
+    },
 }
 
 

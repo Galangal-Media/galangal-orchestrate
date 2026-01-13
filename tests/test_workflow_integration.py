@@ -176,7 +176,7 @@ class TestWorkflowStageProgression:
         assert Stage.COMPLETE in visited_stages
 
     def test_docs_task_type_skips_stages(self):
-        """Test that DOCS task type skips most stages."""
+        """Test that DOCS task type skips most stages (PM → DOCS only)."""
         state = make_state(task_type=TaskType.DOCS)
         config = GalangalConfig()
 
@@ -200,17 +200,19 @@ class TestWorkflowStageProgression:
                         visited_stages.append(next_stage)
                         current = next_stage
 
-        # DOCS should skip: DESIGN, PREFLIGHT, MIGRATION, TEST, CONTRACT, QA, BENCHMARK, SECURITY
+        # DOCS task type goes directly PM → DOCS → COMPLETE
+        # Should skip everything except PM and DOCS
         assert Stage.DESIGN not in visited_stages
         assert Stage.PREFLIGHT not in visited_stages
+        assert Stage.DEV not in visited_stages
         assert Stage.TEST not in visited_stages
         assert Stage.QA not in visited_stages
         assert Stage.SECURITY not in visited_stages
-        # Should still have: PM, DEV, REVIEW, DOCS, COMPLETE
+        assert Stage.REVIEW not in visited_stages
+        # Should only have: PM, DOCS, COMPLETE
         assert Stage.PM in visited_stages
-        assert Stage.DEV in visited_stages
-        assert Stage.REVIEW in visited_stages
         assert Stage.DOCS in visited_stages
+        assert visited_stages == [Stage.PM, Stage.DOCS, Stage.COMPLETE]
 
     def test_config_skip_stages(self):
         """Test that config-level skip removes stages from workflow."""

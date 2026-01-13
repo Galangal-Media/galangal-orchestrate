@@ -239,7 +239,7 @@ class TestGetNextStage:
     def test_task_type_skipping(self):
         """Test stage skipping based on task type."""
         state = make_state(stage=Stage.PM)
-        # DOCS task type skips DESIGN, PREFLIGHT and goes to DEV
+        # DOCS task type skips everything except PM and DOCS
         state.task_type = TaskType.DOCS
 
         with patch("galangal.core.workflow.core.get_config", return_value=self.config):
@@ -248,8 +248,8 @@ class TestGetNextStage:
                 mock_runner.validate_stage.return_value = ValidationResult(True, "passed")
                 with patch("galangal.core.workflow.core.ValidationRunner", return_value=mock_runner):
                     next_stage = get_next_stage(Stage.PM, state)
-                    # DOCS skips DESIGN and PREFLIGHT, goes to DEV
-                    assert next_stage == Stage.DEV
+                    # DOCS goes directly to DOCS stage
+                    assert next_stage == Stage.DOCS
 
     def test_conditional_stage_with_skip_artifact(self):
         """Test conditional stage is skipped when skip artifact exists."""
