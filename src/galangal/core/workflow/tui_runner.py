@@ -12,6 +12,7 @@ from rich.console import Console
 
 from galangal.config.loader import get_config
 from galangal.core.artifacts import artifact_exists, parse_stage_plan, write_artifact
+from galangal.core.metrics import record_stage_result
 from galangal.core.state import (
     STAGE_ORDER,
     Stage,
@@ -314,6 +315,15 @@ Please address the issues described above before proceeding.
                     state.record_failure(error_message)
 
                     if not state.can_retry(max_retries):
+                        # Record failure metrics (max retries exhausted)
+                        record_stage_result(
+                            stage=state.stage,
+                            success=False,
+                            attempts=max_retries,
+                            failure_reason=error_message[:200] if error_message else None,
+                            task_type=state.task_type.value,
+                        )
+
                         # Max retries exceeded - prompt user
                         choice = await _handle_max_retries_exceeded(
                             app, state, error_message, max_retries
@@ -342,6 +352,15 @@ Please address the issues described above before proceeding.
                 # Stage succeeded
                 app.clear_error()  # Clear any previous error display
                 app.show_stage_complete(state.stage.value, True)
+
+                # Record success metrics
+                record_stage_result(
+                    stage=state.stage,
+                    success=True,
+                    attempts=state.attempt,
+                    turns_used=getattr(result, 'turns_used', None),
+                    task_type=state.task_type.value,
+                )
 
                 # Plan approval gate
                 if state.stage == Stage.PM and not artifact_exists(

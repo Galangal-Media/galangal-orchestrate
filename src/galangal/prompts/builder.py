@@ -6,6 +6,7 @@ from pathlib import Path
 
 from galangal.config.loader import get_config, get_project_root, get_prompts_dir
 from galangal.core.artifacts import artifact_exists, read_artifact
+from galangal.core.metrics import get_common_failures_for_prompt
 from galangal.core.state import Stage, WorkflowState
 
 
@@ -225,6 +226,11 @@ class PromptBuilder:
         stage_context = self.config.stage_context.get(stage.value, "")
         if stage_context:
             context_parts.append(f"\n# Stage Context\n{stage_context}")
+
+        # Add common failures from metrics (learning from past issues)
+        common_failures = get_common_failures_for_prompt(stage)
+        if common_failures:
+            context_parts.append(f"\n{common_failures}")
 
         # Add documentation config for DOCS and SECURITY stages
         if stage in [Stage.DOCS, Stage.SECURITY]:
