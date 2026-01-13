@@ -272,3 +272,77 @@ class MultilineInputModal(ModalScreen):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+@dataclass
+class GitHubIssueOption:
+    """A GitHub issue option for selection."""
+
+    number: int
+    title: str
+
+
+class GitHubIssueSelectModal(ModalScreen):
+    """Modal for selecting a GitHub issue from a list."""
+
+    CSS_PATH = "styles/modals.tcss"
+
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+        Binding("up", "move_up", show=False),
+        Binding("down", "move_down", show=False),
+        Binding("enter", "select", show=False),
+        Binding("k", "move_up", show=False),
+        Binding("j", "move_down", show=False),
+    ]
+
+    def __init__(self, issues: list[GitHubIssueOption]):
+        super().__init__()
+        self._issues = issues
+        self._selected_index = 0
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="issue-select-dialog"):
+            yield Static("Select GitHub Issue", id="issue-select-title")
+            yield Static(self._render_issue_list(), id="issue-select-list")
+            yield Static(
+                "↑/↓ or j/k to navigate, Enter to select, Esc to cancel",
+                id="issue-select-hint"
+            )
+
+    def _render_issue_list(self) -> str:
+        if not self._issues:
+            return "[dim]No issues found[/]"
+
+        lines = []
+        for i, issue in enumerate(self._issues):
+            prefix = "→ " if i == self._selected_index else "  "
+            color = "#b8bb26" if i == self._selected_index else "#ebdbb2"
+            # Truncate title if too long
+            title = issue.title[:50] + "..." if len(issue.title) > 50 else issue.title
+            lines.append(f"[{color}]{prefix}#{issue.number} {title}[/]")
+
+        return "\n".join(lines)
+
+    def _update_display(self) -> None:
+        list_widget = self.query_one("#issue-select-list", Static)
+        list_widget.update(Text.from_markup(self._render_issue_list()))
+
+    def action_move_up(self) -> None:
+        if self._selected_index > 0:
+            self._selected_index -= 1
+            self._update_display()
+
+    def action_move_down(self) -> None:
+        if self._selected_index < len(self._issues) - 1:
+            self._selected_index += 1
+            self._update_display()
+
+    def action_select(self) -> None:
+        if self._issues:
+            self.dismiss(self._issues[self._selected_index].number)
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)

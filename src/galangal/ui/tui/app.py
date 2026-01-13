@@ -33,6 +33,8 @@ from textual.widgets import Footer, RichLog
 from galangal.ui.tui.adapters import PromptType, TUIAdapter, get_prompt_options
 from galangal.ui.tui.mixins import WidgetAccessMixin
 from galangal.ui.tui.modals import (
+    GitHubIssueOption,
+    GitHubIssueSelectModal,
     MultilineInputModal,
     PromptModal,
     QuestionAnswerModal,
@@ -627,6 +629,32 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         self._safe_update(_show)
         return await future
 
+    async def select_github_issue_async(
+        self, issues: list[tuple[int, str]]
+    ) -> int | None:
+        """
+        Show a modal for selecting a GitHub issue.
+
+        Args:
+            issues: List of (issue_number, title) tuples.
+
+        Returns:
+            Selected issue number, or None if cancelled.
+        """
+        future: asyncio.Future[int | None] = asyncio.Future()
+
+        def _show():
+            def _handle(result: int | None) -> None:
+                if not future.done():
+                    future.set_result(result)
+
+            options = [GitHubIssueOption(num, title) for num, title in issues]
+            screen = GitHubIssueSelectModal(options)
+            self.push_screen(screen, _handle)
+
+        self._safe_update(_show)
+        return await future
+
     def show_multiline_input(self, label: str, default: str, callback: Callable) -> None:
         """
         Show a multi-line text input modal.
@@ -652,6 +680,29 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
 
             screen = MultilineInputModal(label, default)
             self._active_input_screen = screen
+            self.push_screen(screen, _handle)
+
+        self._safe_update(_show)
+
+    def show_github_issue_select(
+        self, issues: list[tuple[int, str]], callback: Callable
+    ) -> None:
+        """
+        Show a modal for selecting a GitHub issue.
+
+        This method is thread-safe and can be called from background threads.
+
+        Args:
+            issues: List of (issue_number, title) tuples.
+            callback: Function called with selected issue number or None if cancelled.
+        """
+
+        def _show():
+            def _handle(result: int | None) -> None:
+                callback(result)
+
+            options = [GitHubIssueOption(num, title) for num, title in issues]
+            screen = GitHubIssueSelectModal(options)
             self.push_screen(screen, _handle)
 
         self._safe_update(_show)

@@ -34,6 +34,7 @@ class PromptType(Enum):
     TASK_TYPE = "task_type"
     YES_NO = "yes_no"  # Simple yes/no prompt for discovery Q&A
     USER_DECISION = "user_decision"  # User must approve/reject when decision file missing
+    TASK_SOURCE = "task_source"  # Choose between manual task or GitHub issue
 
 
 # Default options for prompts without specific configuration
@@ -95,6 +96,10 @@ PROMPT_OPTIONS: dict[PromptType, list[PromptOption]] = {
         PromptOption("2", "Reject (rollback to DEV)", "reject", "#fb4934"),
         PromptOption("3", "View full report", "view", "#83a598"),
         PromptOption("4", "Quit", "quit", "#fabd2f"),
+    ],
+    PromptType.TASK_SOURCE: [
+        PromptOption("1", "Create manually", "manual", "#b8bb26"),
+        PromptOption("2", "From GitHub issue", "github", "#83a598"),
     ],
 }
 

@@ -90,6 +90,10 @@ Tip: Press Ctrl+C during execution to pause gracefully.
         "--skip-discovery", action="store_true",
         help="Skip the discovery Q&A phase and go straight to spec generation"
     )
+    start_parser.add_argument(
+        "--issue", "-i", type=int,
+        help="Create task from GitHub issue number"
+    )
     start_parser.set_defaults(func=_cmd_start)
 
     # list
@@ -211,6 +215,38 @@ Tip: Press Ctrl+C during execution to pause gracefully.
     prompts_show.add_argument("stage", help="Stage name (e.g., pm, dev, test)")
     prompts_show.set_defaults(func=_cmd_prompts_show)
 
+    # github
+    github_parser = subparsers.add_parser("github", help="GitHub integration")
+    github_subparsers = github_parser.add_subparsers(dest="github_command")
+    github_check = github_subparsers.add_parser(
+        "check", help="Check GitHub CLI installation and authentication"
+    )
+    github_check.set_defaults(func=_cmd_github_check)
+    github_issues = github_subparsers.add_parser(
+        "issues", help="List issues with galangal label"
+    )
+    github_issues.add_argument(
+        "--label", "-l", default="galangal",
+        help="Label to filter by (default: galangal)"
+    )
+    github_issues.add_argument(
+        "--limit", "-n", type=int, default=50,
+        help="Maximum number of issues to list"
+    )
+    github_issues.set_defaults(func=_cmd_github_issues)
+    github_run = github_subparsers.add_parser(
+        "run", help="Process all galangal-labeled issues (headless mode)"
+    )
+    github_run.add_argument(
+        "--label", "-l", default="galangal",
+        help="Label to filter by (default: galangal)"
+    )
+    github_run.add_argument(
+        "--dry-run", action="store_true",
+        help="List issues without processing them"
+    )
+    github_run.set_defaults(func=_cmd_github_run)
+
     args = parser.parse_args()
     return args.func(args)
 
@@ -314,6 +350,21 @@ def _cmd_prompts_export(args):
 def _cmd_prompts_show(args):
     from galangal.commands.prompts import cmd_prompts_show
     return cmd_prompts_show(args)
+
+
+def _cmd_github_check(args):
+    from galangal.commands.github import cmd_github_check
+    return cmd_github_check(args)
+
+
+def _cmd_github_issues(args):
+    from galangal.commands.github import cmd_github_issues
+    return cmd_github_issues(args)
+
+
+def _cmd_github_run(args):
+    from galangal.commands.github import cmd_github_run
+    return cmd_github_run(args)
 
 
 if __name__ == "__main__":

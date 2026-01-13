@@ -82,6 +82,27 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
 
         try:
             while state.stage != Stage.COMPLETE and not app._paused:
+                # Check if linked GitHub issue is still open
+                if state.github_issue:
+                    try:
+                        from galangal.github.issues import is_issue_open
+                        issue_open = await asyncio.to_thread(
+                            is_issue_open, state.github_issue
+                        )
+                        if issue_open is False:
+                            app.show_message(
+                                f"GitHub issue #{state.github_issue} has been closed",
+                                "warning"
+                            )
+                            app.add_activity(
+                                f"Issue #{state.github_issue} closed externally - pausing",
+                                "⚠"
+                            )
+                            app._workflow_result = "paused"
+                            break
+                    except Exception:
+                        pass  # Non-critical - continue if check fails
+
                 app.update_stage(state.stage.value, state.attempt)
                 app.set_status("running", f"executing {state.stage.value}")
 

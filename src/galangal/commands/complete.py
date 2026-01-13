@@ -92,8 +92,23 @@ Output ONLY the commit message, nothing else."""
     return f"{description[:72]}"
 
 
-def create_pull_request(task_name: str, description: str, task_type: str) -> tuple[bool, str]:
-    """Create a pull request for the task branch."""
+def create_pull_request(
+    task_name: str,
+    description: str,
+    task_type: str,
+    github_issue: int | None = None,
+) -> tuple[bool, str]:
+    """Create a pull request for the task branch.
+
+    Args:
+        task_name: Name of the task
+        description: Task description
+        task_type: Type of task (Feature, Bug Fix, etc.)
+        github_issue: Optional GitHub issue number to link
+
+    Returns:
+        Tuple of (success, pr_url_or_error)
+    """
     config = get_config()
     branch_name = config.branch_pattern.format(task_name=task_name)
     base_branch = config.pr.base_branch
@@ -116,12 +131,21 @@ def create_pull_request(task_name: str, description: str, task_type: str) -> tup
     console.print("[dim]Generating PR title...[/dim]")
     pr_title = generate_pr_title(task_name, description, task_type)
 
+    # Prefix PR title with issue reference if linked
+    if github_issue:
+        pr_title = f"Issue #{github_issue}: {pr_title}"
+
     # Build PR body
     pr_body = f"""## Summary
 {spec_content[:1500] if len(spec_content) > 1500 else spec_content}
 
----
 """
+    # Add issue closing reference if linked
+    if github_issue:
+        pr_body += f"Closes #{github_issue}\n\n"
+
+    pr_body += "---\n"
+
     # Add codex review if configured
     if config.pr.codex_review:
         pr_body += "@codex review\n"
@@ -159,7 +183,17 @@ def create_pull_request(task_name: str, description: str, task_type: str) -> tup
                 return True, pr_url.strip()
         return False, f"Failed to create PR: {err or out}"
 
-    return True, out.strip()
+    pr_url = out.strip()
+
+    # Comment on issue with PR link if linked
+    if github_issue and pr_url:
+        try:
+            from galangal.github.issues import mark_issue_pr_created
+            mark_issue_pr_created(github_issue, pr_url)
+        except Exception:
+            pass  # Non-critical
+
+    return True, pr_url
 
 
 def commit_changes(task_name: str, description: str) -> tuple[bool, str]:
@@ -256,7 +290,12 @@ def finalize_task(task_name: str, state, force: bool = False, progress_callback=
 
     # 3. Create PR
     report("Creating pull request...")
-    success, msg = create_pull_request(task_name, state.task_description, state.task_type.display_name())
+    success, msg = create_pull_request(
+        task_name,
+        state.task_description,
+        state.task_type.display_name(),
+        github_issue=state.github_issue,
+    )
     pr_url = ""
     if success:
         pr_url = msg

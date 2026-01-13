@@ -396,6 +396,10 @@ class WorkflowState:
     stage_start_time: str | None = None  # ISO timestamp when current stage started
     stage_durations: dict[str, int] | None = None  # Completed stage durations in seconds
 
+    # GitHub integration
+    github_issue: int | None = None  # Issue number if created from GitHub
+    github_repo: str | None = None  # owner/repo for PR creation
+
     # -------------------------------------------------------------------------
     # Retry management methods
     # -------------------------------------------------------------------------
@@ -591,11 +595,18 @@ class WorkflowState:
             stage_plan=d.get("stage_plan"),
             stage_start_time=d.get("stage_start_time"),
             stage_durations=d.get("stage_durations"),
+            github_issue=d.get("github_issue"),
+            github_repo=d.get("github_repo"),
         )
 
     @classmethod
     def new(
-        cls, description: str, task_name: str, task_type: TaskType = TaskType.FEATURE
+        cls,
+        description: str,
+        task_name: str,
+        task_type: TaskType = TaskType.FEATURE,
+        github_issue: int | None = None,
+        github_repo: str | None = None,
     ) -> "WorkflowState":
         return cls(
             stage=Stage.PM,
@@ -607,6 +618,8 @@ class WorkflowState:
             task_description=description,
             task_name=task_name,
             task_type=task_type,
+            github_issue=github_issue,
+            github_repo=github_repo,
         )
 
 
