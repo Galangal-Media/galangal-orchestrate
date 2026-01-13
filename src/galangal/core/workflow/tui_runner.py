@@ -100,6 +100,50 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     pause_check=lambda: app._paused,
                 )
 
+                # Handle interrupt with feedback (Ctrl+I)
+                if app._interrupt_requested:
+                    app.add_activity("Interrupted by user", "⏸️")
+                    feedback = await app.multiline_input_async(
+                        "What needs to be fixed? (Ctrl+S to submit):", ""
+                    )
+
+                    interrupted_stage = state.stage.value
+                    feedback_text = feedback or "No details provided"
+
+                    # Create ROLLBACK.md artifact for persistent context
+                    from datetime import datetime, timezone
+                    rollback_content = f"""# User Interrupt Rollback
+
+## Source
+User interrupt (Ctrl+I) during {interrupted_stage} stage
+
+## Date
+{datetime.now(timezone.utc).isoformat()}
+
+## Issues to Fix
+{feedback_text}
+
+## Instructions
+Please address the issues described above before proceeding.
+"""
+                    write_artifact("ROLLBACK.md", rollback_content, state.task_name)
+
+                    state.stage = Stage.DEV
+                    state.last_failure = (
+                        f"Interrupt feedback from {interrupted_stage}: {feedback_text}"
+                    )
+                    state.reset_attempts(clear_failure=False)
+                    save_state(state)
+
+                    app._interrupt_requested = False
+                    app._paused = False
+                    app.show_message(
+                        f"Interrupted {interrupted_stage} - rolling back to DEV",
+                        "warning"
+                    )
+                    app.update_stage(state.stage.value, state.attempt)
+                    continue
+
                 if app._paused:
                     app._workflow_result = "paused"
                     break

@@ -57,8 +57,30 @@ The prompt includes:
 - Base stage prompt (from `prompts/defaults/`)
 - Project overrides (from `.galangal/prompts/`)
 - Task context (name, type, description)
-- Previous artifacts (SPEC.md, PLAN.md, etc.)
+- Relevant artifacts (stage-specific, see below)
 - Failure context (if retry)
+
+#### Artifact Context by Stage
+
+Artifacts are included based on what each stage actually needs:
+
+| Stage | Artifacts Included |
+|-------|-------------------|
+| **PM** | `DISCOVERY_LOG.md` (user Q&A) |
+| **DESIGN** | `SPEC.md` |
+| **PREFLIGHT+** | `SPEC.md`, `DESIGN.md` or `PLAN.md`* |
+| **DEV** | + `DEVELOPMENT.md` (resume), `ROLLBACK.md` (issues) |
+| **TEST** | + `TEST_PLAN.md`, `ROLLBACK.md` |
+| **CONTRACT** | + `TEST_PLAN.md` |
+| **REVIEW** | + `QA_REPORT.md`, `SECURITY_CHECKLIST.md` |
+
+*If DESIGN stage ran, `DESIGN.md` is used. If skipped, `PLAN.md` is included instead.
+
+Key design decisions:
+- **DESIGN.md supersedes PLAN.md** — when DESIGN runs, its output replaces PLAN as the implementation guide
+- **PLAN.md used when DESIGN skipped** — task types like bug_fix, refactor, chore skip DESIGN, so PLAN.md remains the implementation guide
+- **DISCOVERY_LOG.md is only for PM** — its content is captured in `SPEC.md`
+- **Previous reports not included in DEV/TEST** — `ROLLBACK.md` summarizes what needs fixing
 
 ### 3. AI Invocation
 

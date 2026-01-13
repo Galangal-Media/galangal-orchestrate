@@ -250,13 +250,19 @@ Only update documentation types marked as YES above.""")
         """
         Get relevant artifact content for inclusion in the stage prompt.
 
-        Different stages need different context:
-        - PM: DISCOVERY_LOG.md (Q&A from brief refinement)
-        - All stages after PM: SPEC.md, PLAN.md
-        - After DESIGN: DESIGN.md or DESIGN_SKIP.md
-        - DEV: DEVELOPMENT.md (for resume), ROLLBACK.md (issues to fix)
-        - TEST: ROLLBACK.md, previous reports
-        - Later stages: Various reports (QA, Security, etc.)
+        Artifacts are included based on what each stage actually needs:
+        - PM: DISCOVERY_LOG.md (Q&A to incorporate into SPEC)
+        - DESIGN: SPEC.md only (creates the authoritative implementation plan)
+        - DEV+: SPEC.md + DESIGN.md (or PLAN.md if design was skipped)
+        - DEV: + DEVELOPMENT.md (resume), ROLLBACK.md (issues to fix)
+        - TEST: + TEST_PLAN.md, ROLLBACK.md
+        - REVIEW: + QA_REPORT.md, SECURITY_CHECKLIST.md (verify addressed)
+
+        Key design decisions:
+        - DESIGN.md supersedes PLAN.md when present
+        - If DESIGN was skipped (bug_fix, refactor, etc.), PLAN.md is included instead
+        - DISCOVERY_LOG only for PM (captured in SPEC.md afterward)
+        - Previous reports not in DEV/TEST (ROLLBACK.md summarizes issues)
 
         Args:
             stage: Current stage to get context for.
@@ -267,21 +273,20 @@ Only update documentation types marked as YES above.""")
         """
         parts = []
 
-        # DISCOVERY_LOG for PM stage (from brief refinement Q&A)
+        # PM stage: only needs discovery Q&A to incorporate into SPEC
         if stage == Stage.PM:
             if artifact_exists("DISCOVERY_LOG.md", task_name):
                 parts.append(
                     f"\n# DISCOVERY_LOG.md (User Q&A - use these answers!)\n{read_artifact('DISCOVERY_LOG.md', task_name)}"
                 )
+            return parts
 
-        # SPEC and PLAN for all stages after PM
-        if stage != Stage.PM:
-            if artifact_exists("SPEC.md", task_name):
-                parts.append(f"\n# SPEC.md\n{read_artifact('SPEC.md', task_name)}")
-            if artifact_exists("PLAN.md", task_name):
-                parts.append(f"\n# PLAN.md\n{read_artifact('PLAN.md', task_name)}")
+        # All stages after PM need SPEC (core requirements)
+        if artifact_exists("SPEC.md", task_name):
+            parts.append(f"\n# SPEC.md\n{read_artifact('SPEC.md', task_name)}")
 
-        # DESIGN for stages after DESIGN
+        # Stages after DESIGN: include DESIGN.md if it exists, otherwise fall back to PLAN.md
+        # (DESIGN.md supersedes PLAN.md, but some task types skip DESIGN)
         if stage not in [Stage.PM, Stage.DESIGN]:
             if artifact_exists("DESIGN.md", task_name):
                 parts.append(f"\n# DESIGN.md\n{read_artifact('DESIGN.md', task_name)}")
@@ -289,57 +294,39 @@ Only update documentation types marked as YES above.""")
                 parts.append(
                     f"\n# Note: Design stage was skipped\n{read_artifact('DESIGN_SKIP.md', task_name)}"
                 )
+                # Include PLAN.md as the implementation guide when design was skipped
+                if artifact_exists("PLAN.md", task_name):
+                    parts.append(f"\n# PLAN.md\n{read_artifact('PLAN.md', task_name)}")
 
-        # DEVELOPMENT.md for DEV stage (progress tracking for resume)
+        # DEV stage: progress tracking and rollback issues
         if stage == Stage.DEV:
             if artifact_exists("DEVELOPMENT.md", task_name):
                 parts.append(
                     f"\n# DEVELOPMENT.md (Previous progress - continue from here)\n{read_artifact('DEVELOPMENT.md', task_name)}"
                 )
-
-        # ROLLBACK for DEV and TEST (issues to fix)
-        if stage in [Stage.DEV, Stage.TEST]:
             if artifact_exists("ROLLBACK.md", task_name):
                 parts.append(
                     f"\n# ROLLBACK.md (PRIORITY - Fix these issues first!)\n{read_artifact('ROLLBACK.md', task_name)}"
                 )
-            if artifact_exists("QA_REPORT.md", task_name):
-                parts.append(
-                    f"\n# QA_REPORT.md (Previous run)\n{read_artifact('QA_REPORT.md', task_name)}"
-                )
-            if artifact_exists("SECURITY_CHECKLIST.md", task_name):
-                parts.append(
-                    f"\n# SECURITY_CHECKLIST.md (Previous run)\n{read_artifact('SECURITY_CHECKLIST.md', task_name)}"
-                )
-            if artifact_exists("REVIEW_NOTES.md", task_name):
-                parts.append(
-                    f"\n# REVIEW_NOTES.md (Previous run)\n{read_artifact('REVIEW_NOTES.md', task_name)}"
-                )
 
-        # TEST_PLAN for TEST and CONTRACT stages
-        if stage in [Stage.TEST, Stage.CONTRACT]:
+        # TEST stage: test plan and rollback issues
+        if stage == Stage.TEST:
             if artifact_exists("TEST_PLAN.md", task_name):
+                parts.append(f"\n# TEST_PLAN.md\n{read_artifact('TEST_PLAN.md', task_name)}")
+            if artifact_exists("ROLLBACK.md", task_name):
                 parts.append(
-                    f"\n# TEST_PLAN.md\n{read_artifact('TEST_PLAN.md', task_name)}"
+                    f"\n# ROLLBACK.md (Issues to address in tests)\n{read_artifact('ROLLBACK.md', task_name)}"
                 )
 
-        # Reports for later stages
-        if stage in [Stage.QA, Stage.BENCHMARK, Stage.SECURITY, Stage.REVIEW]:
-            if artifact_exists("MIGRATION_REPORT.md", task_name):
-                parts.append(
-                    f"\n# MIGRATION_REPORT.md\n{read_artifact('MIGRATION_REPORT.md', task_name)}"
-                )
-            if artifact_exists("CONTRACT_REPORT.md", task_name):
-                parts.append(
-                    f"\n# CONTRACT_REPORT.md\n{read_artifact('CONTRACT_REPORT.md', task_name)}"
-                )
+        # CONTRACT stage: needs test plan for context
+        if stage == Stage.CONTRACT:
+            if artifact_exists("TEST_PLAN.md", task_name):
+                parts.append(f"\n# TEST_PLAN.md\n{read_artifact('TEST_PLAN.md', task_name)}")
 
-        # For REVIEW, include QA and Security reports
+        # REVIEW stage: needs QA and Security reports to verify they were addressed
         if stage == Stage.REVIEW:
             if artifact_exists("QA_REPORT.md", task_name):
-                parts.append(
-                    f"\n# QA_REPORT.md\n{read_artifact('QA_REPORT.md', task_name)}"
-                )
+                parts.append(f"\n# QA_REPORT.md\n{read_artifact('QA_REPORT.md', task_name)}")
             if artifact_exists("SECURITY_CHECKLIST.md", task_name):
                 parts.append(
                     f"\n# SECURITY_CHECKLIST.md\n{read_artifact('SECURITY_CHECKLIST.md', task_name)}"

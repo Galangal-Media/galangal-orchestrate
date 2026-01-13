@@ -171,6 +171,7 @@ class WorkflowTUIApp(App):
 
     BINDINGS = [
         Binding("ctrl+q", "quit_workflow", "^Q Quit", show=True),
+        Binding("ctrl+i", "interrupt_feedback", "^I Interrupt", show=True),
         Binding("ctrl+d", "toggle_verbose", "^D Verbose", show=True),
         Binding("ctrl+f", "toggle_files", "^F Files", show=True),
     ]
@@ -197,11 +198,12 @@ class WorkflowTUIApp(App):
         self._activity_entries: list[ActivityEntry] = []
 
         # Workflow control
+        self._paused = False
+        self._interrupt_requested = False
         self._prompt_type = PromptType.NONE
         self._prompt_callback: Callable | None = None
         self._active_prompt_screen: PromptModal | None = None
         self._workflow_result: str | None = None
-        self._paused = False
 
         # Text input state
         self._input_callback: Callable | None = None
@@ -768,6 +770,9 @@ class WorkflowTUIApp(App):
     def check_action_quit_workflow(self) -> bool:
         return not self._text_input_active()
 
+    def check_action_interrupt_feedback(self) -> bool:
+        return not self._text_input_active()
+
     def check_action_toggle_verbose(self) -> bool:
         return not self._text_input_active()
 
@@ -783,6 +788,14 @@ class WorkflowTUIApp(App):
         self._paused = True
         self._workflow_result = "paused"
         self.exit()
+
+    def action_interrupt_feedback(self) -> None:
+        """Interrupt current stage and request rollback to DEV with feedback."""
+        if self._active_prompt_screen or self._prompt_callback:
+            # Don't interrupt during prompts
+            return
+        self._interrupt_requested = True
+        self._paused = True  # Stop Claude execution
 
     def add_raw_line(self, line: str) -> None:
         """Store raw line and display if in verbose mode."""
