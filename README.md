@@ -594,28 +594,41 @@ Create any of these in `.galangal/prompts/`:
 
 ## Troubleshooting
 
-### Playwright Tests Hang at TEST Stage
+### Tests Hang at TEST Stage
 
-Playwright's HTML reporter blocks waiting for user input by default. Configure non-blocking output:
+Test frameworks must run non-interactively. Common issues:
 
-**Option 1: Command line flag**
+**Playwright** - HTML reporter blocks by default:
 ```bash
+# Use non-blocking reporter
 npx playwright test --reporter=list
-```
 
-**Option 2: Environment variable**
-```bash
+# Or set environment variable
 PLAYWRIGHT_HTML_OPEN=never npx playwright test
+
+# Or in playwright.config.ts:
+# reporter: [['html', { open: 'never' }]]
 ```
 
-**Option 3: playwright.config.ts**
-```typescript
-export default defineConfig({
-  reporter: [['html', { open: 'never' }]],
-  // or use non-interactive reporters:
-  // reporter: 'list',
-});
+**Jest/Vitest** - Watch mode blocks:
+```bash
+# Wrong (blocks):
+npm test -- --watch
+
+# Correct:
+npm test
 ```
+
+**Cypress** - Interactive mode blocks:
+```bash
+# Wrong (blocks):
+cypress open
+
+# Correct:
+cypress run
+```
+
+**General rule**: Use CI-friendly commands that exit automatically. Avoid watch mode, interactive mode, or any GUI that waits for user input.
 
 ### TEST Stage Loops Indefinitely
 

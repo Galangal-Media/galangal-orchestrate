@@ -79,11 +79,13 @@ Create TEST_PLAN.md in the task's artifacts directory:
 - If tests fail due to implementation bugs, report FAIL status clearly
 - After 2-3 failed attempts to fix a test, assume implementation is wrong and report FAIL
 
-## Playwright/E2E Test Note
+## Non-Blocking Test Execution
 
-If running Playwright tests, ensure the reporter doesn't block waiting for user input:
-- Use `--reporter=list` or `--reporter=line` on the command line
-- Or set environment variable: `PLAYWRIGHT_HTML_OPEN=never`
-- Or configure in playwright.config.ts: `reporter: [['html', { open: 'never' }]]`
+**CRITICAL**: Tests must run non-interactively. Never use modes that wait for user input:
 
-Never use reporters that open a browser or wait for user interaction.
+- **Playwright**: Use `--reporter=list` or set `PLAYWRIGHT_HTML_OPEN=never`
+- **Jest/Vitest**: Never use `--watch` mode
+- **Cypress**: Use `cypress run` (not `cypress open`)
+- **Any framework**: Avoid watch mode, interactive mode, or GUI mode
+
+If a test command hangs waiting for input, the workflow will stall. Always use CI-friendly, non-interactive test commands.
