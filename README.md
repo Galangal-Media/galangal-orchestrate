@@ -592,6 +592,42 @@ Create any of these in `.galangal/prompts/`:
 | `review.md` | Code review |
 | `docs.md` | Documentation |
 
+## Troubleshooting
+
+### Playwright Tests Hang at TEST Stage
+
+Playwright's HTML reporter blocks waiting for user input by default. Configure non-blocking output:
+
+**Option 1: Command line flag**
+```bash
+npx playwright test --reporter=list
+```
+
+**Option 2: Environment variable**
+```bash
+PLAYWRIGHT_HTML_OPEN=never npx playwright test
+```
+
+**Option 3: playwright.config.ts**
+```typescript
+export default defineConfig({
+  reporter: [['html', { open: 'never' }]],
+  // or use non-interactive reporters:
+  // reporter: 'list',
+});
+```
+
+### TEST Stage Loops Indefinitely
+
+If the TEST stage keeps retrying instead of rolling back to DEV:
+1. Ensure your TEST_PLAN.md has a clear `**Status:** PASS` or `**Status:** FAIL` line
+2. If tests fail due to implementation bugs, the AI should report FAIL (not try to fix the code)
+3. Check that test commands exit with proper exit codes (0 for success, non-zero for failure)
+
+### "Galangal has not been initialized" Error
+
+Run `galangal init` in your project root before using other commands.
+
 ## License
 
 MIT License - see LICENSE file.

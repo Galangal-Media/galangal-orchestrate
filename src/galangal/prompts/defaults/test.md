@@ -78,3 +78,12 @@ Create TEST_PLAN.md in the task's artifacts directory:
 - **DO NOT modify implementation code** - only write/fix test code
 - If tests fail due to implementation bugs, report FAIL status clearly
 - After 2-3 failed attempts to fix a test, assume implementation is wrong and report FAIL
+
+## Playwright/E2E Test Note
+
+If running Playwright tests, ensure the reporter doesn't block waiting for user input:
+- Use `--reporter=list` or `--reporter=line` on the command line
+- Or set environment variable: `PLAYWRIGHT_HTML_OPEN=never`
+- Or configure in playwright.config.ts: `reporter: [['html', { open: 'never' }]]`
+
+Never use reporters that open a browser or wait for user interaction.
