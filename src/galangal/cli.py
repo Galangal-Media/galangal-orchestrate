@@ -218,6 +218,14 @@ Tip: Press Ctrl+C during execution to pause gracefully.
     # github
     github_parser = subparsers.add_parser("github", help="GitHub integration")
     github_subparsers = github_parser.add_subparsers(dest="github_command")
+    github_setup = github_subparsers.add_parser(
+        "setup", help="Set up GitHub integration (create labels, verify gh CLI)"
+    )
+    github_setup.add_argument(
+        "--help-install", action="store_true",
+        help="Show detailed gh CLI installation instructions"
+    )
+    github_setup.set_defaults(func=_cmd_github_setup)
     github_check = github_subparsers.add_parser(
         "check", help="Check GitHub CLI installation and authentication"
     )
@@ -350,6 +358,11 @@ def _cmd_prompts_export(args):
 def _cmd_prompts_show(args):
     from galangal.commands.prompts import cmd_prompts_show
     return cmd_prompts_show(args)
+
+
+def _cmd_github_setup(args):
+    from galangal.commands.github import cmd_github_setup
+    return cmd_github_setup(args)
 
 
 def _cmd_github_check(args):

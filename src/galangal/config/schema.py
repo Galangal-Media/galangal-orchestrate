@@ -189,6 +189,59 @@ class TaskTypeSettings(BaseModel):
     )
 
 
+class GitHubLabelMapping(BaseModel):
+    """Maps GitHub labels to task types."""
+
+    bug: list[str] = Field(
+        default_factory=lambda: ["bug", "bugfix"],
+        description="Labels that map to bug_fix task type",
+    )
+    feature: list[str] = Field(
+        default_factory=lambda: ["enhancement", "feature"],
+        description="Labels that map to feature task type",
+    )
+    docs: list[str] = Field(
+        default_factory=lambda: ["documentation", "docs"],
+        description="Labels that map to docs task type",
+    )
+    refactor: list[str] = Field(
+        default_factory=lambda: ["refactor"],
+        description="Labels that map to refactor task type",
+    )
+    chore: list[str] = Field(
+        default_factory=lambda: ["chore", "maintenance"],
+        description="Labels that map to chore task type",
+    )
+    hotfix: list[str] = Field(
+        default_factory=lambda: ["hotfix", "critical"],
+        description="Labels that map to hotfix task type",
+    )
+
+
+class GitHubConfig(BaseModel):
+    """GitHub integration configuration."""
+
+    pickup_label: str = Field(
+        default="galangal",
+        description="Label that marks issues for galangal to pick up",
+    )
+    in_progress_label: str = Field(
+        default="in-progress",
+        description="Label added when galangal starts working on an issue",
+    )
+    label_colors: dict[str, str] = Field(
+        default_factory=lambda: {
+            "galangal": "7C3AED",  # Purple
+            "in-progress": "FCD34D",  # Yellow
+        },
+        description="Hex colors for labels (without #)",
+    )
+    label_mapping: GitHubLabelMapping = Field(
+        default_factory=GitHubLabelMapping,
+        description="Maps GitHub labels to task types",
+    )
+
+
 class GalangalConfig(BaseModel):
     """Root configuration model."""
 
@@ -203,6 +256,7 @@ class GalangalConfig(BaseModel):
     pr: PRConfig = Field(default_factory=PRConfig)
     docs: DocsConfig = Field(default_factory=DocsConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    github: GitHubConfig = Field(default_factory=GitHubConfig)
     prompt_context: str = Field(
         default="", description="Global context added to all prompts"
     )

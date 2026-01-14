@@ -399,6 +399,7 @@ class WorkflowState:
     # GitHub integration
     github_issue: int | None = None  # Issue number if created from GitHub
     github_repo: str | None = None  # owner/repo for PR creation
+    screenshots: list[str] | None = None  # Local paths to screenshots from issue
 
     # -------------------------------------------------------------------------
     # Retry management methods
@@ -597,6 +598,7 @@ class WorkflowState:
             stage_durations=d.get("stage_durations"),
             github_issue=d.get("github_issue"),
             github_repo=d.get("github_repo"),
+            screenshots=d.get("screenshots"),
         )
 
     @classmethod
@@ -607,6 +609,7 @@ class WorkflowState:
         task_type: TaskType = TaskType.FEATURE,
         github_issue: int | None = None,
         github_repo: str | None = None,
+        screenshots: list[str] | None = None,
     ) -> "WorkflowState":
         return cls(
             stage=Stage.PM,
@@ -620,6 +623,7 @@ class WorkflowState:
             task_type=task_type,
             github_issue=github_issue,
             github_repo=github_repo,
+            screenshots=screenshots,
         )
 
 

@@ -41,25 +41,52 @@ class GitHubIssue:
 
     def get_task_type_hint(self) -> str | None:
         """
-        Infer task type from issue labels.
+        Infer task type from issue labels using config-based mapping.
 
         Returns:
             Suggested task type or None if no match
         """
+        from galangal.config.loader import get_config
+
         label_lower = [lbl.lower() for lbl in self.labels]
 
-        if "bug" in label_lower or "bugfix" in label_lower:
-            return "bug_fix"
-        if "enhancement" in label_lower or "feature" in label_lower:
-            return "feature"
-        if "documentation" in label_lower or "docs" in label_lower:
-            return "docs"
-        if "refactor" in label_lower:
-            return "refactor"
-        if "chore" in label_lower or "maintenance" in label_lower:
-            return "chore"
-        if "hotfix" in label_lower or "critical" in label_lower:
-            return "hotfix"
+        # Get label mapping from config
+        try:
+            config = get_config()
+            mapping = config.github.label_mapping
+        except Exception:
+            # Fall back to defaults if config not available
+            mapping = None
+
+        if mapping:
+            # Check each task type's labels
+            for label in label_lower:
+                if label in [lbl.lower() for lbl in mapping.bug]:
+                    return "bug_fix"
+                if label in [lbl.lower() for lbl in mapping.feature]:
+                    return "feature"
+                if label in [lbl.lower() for lbl in mapping.docs]:
+                    return "docs"
+                if label in [lbl.lower() for lbl in mapping.refactor]:
+                    return "refactor"
+                if label in [lbl.lower() for lbl in mapping.chore]:
+                    return "chore"
+                if label in [lbl.lower() for lbl in mapping.hotfix]:
+                    return "hotfix"
+        else:
+            # Fallback to hardcoded defaults
+            if "bug" in label_lower or "bugfix" in label_lower:
+                return "bug_fix"
+            if "enhancement" in label_lower or "feature" in label_lower:
+                return "feature"
+            if "documentation" in label_lower or "docs" in label_lower:
+                return "docs"
+            if "refactor" in label_lower:
+                return "refactor"
+            if "chore" in label_lower or "maintenance" in label_lower:
+                return "chore"
+            if "hotfix" in label_lower or "critical" in label_lower:
+                return "hotfix"
 
         return None
 

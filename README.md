@@ -148,6 +148,131 @@ The progress bar updates dynamically to show only relevant stages.
 | `galangal skip-to <stage>` | Jump to stage |
 | `galangal complete` | Finalize & create PR |
 | `galangal reset` | Delete active task |
+| `galangal github setup` | Set up GitHub integration |
+| `galangal github issues` | List galangal-labeled issues |
+| `galangal github run` | Process issues automatically |
+
+## GitHub Integration
+
+Galangal can create tasks directly from GitHub issues, automatically downloading screenshots and inferring task types from labels.
+
+### Quick Setup
+
+```bash
+# 1. Install GitHub CLI (if not already installed)
+# macOS:
+brew install gh
+
+# Windows:
+winget install GitHub.cli
+
+# Linux: See https://cli.github.com
+
+# 2. Authenticate
+gh auth login
+
+# 3. Set up GitHub integration (creates labels)
+galangal github setup
+```
+
+### How It Works
+
+1. Add the `galangal` label to any GitHub issue you want to work on
+2. Run `galangal start` and select "GitHub issue" as the task source
+3. Galangal will:
+   - Download any screenshots from the issue body
+   - Infer the task type from issue labels
+   - Create a task linked to the issue
+   - Mark the issue as "in-progress"
+
+When you complete the task with `galangal complete`, a PR is created that automatically closes the linked issue.
+
+### Batch Processing
+
+Process all galangal-labeled issues automatically:
+
+```bash
+# List issues that would be processed
+galangal github run --dry-run
+
+# Process all issues headlessly
+galangal github run
+```
+
+### Issue Screenshots
+
+Screenshots embedded in GitHub issues (using `![](url)` syntax) are automatically:
+- Downloaded to `galangal-tasks/<task>/screenshots/`
+- Passed to the AI during PM, Design, and Dev stages
+- Available for the AI to view using Claude's Read tool
+
+This is especially useful for bug reports with screenshots or design mockups.
+
+### Label Configuration
+
+Galangal maps GitHub labels to task types. The defaults are:
+
+| Task Type | Labels |
+|-----------|--------|
+| bug_fix | `bug`, `bugfix` |
+| feature | `enhancement`, `feature` |
+| docs | `documentation`, `docs` |
+| refactor | `refactor` |
+| chore | `chore`, `maintenance` |
+| hotfix | `hotfix`, `critical` |
+
+Customize in `.galangal/config.yaml`:
+
+```yaml
+github:
+  # Label that triggers galangal to pick up issues
+  pickup_label: galangal
+
+  # Label added when work starts
+  in_progress_label: in-progress
+
+  # Custom label colors (hex without #)
+  label_colors:
+    galangal: "7C3AED"
+    in-progress: "FCD34D"
+
+  # Map your labels to task types
+  label_mapping:
+    bug:
+      - bug
+      - bugfix
+      - defect           # Add your custom labels
+    feature:
+      - enhancement
+      - feature
+      - new-feature
+    docs:
+      - documentation
+      - docs
+    refactor:
+      - refactor
+      - tech-debt
+    chore:
+      - chore
+      - maintenance
+      - dependencies
+    hotfix:
+      - hotfix
+      - critical
+      - urgent
+```
+
+### GitHub Commands
+
+| Command | Description |
+|---------|-------------|
+| `galangal github setup` | Create required labels, show setup instructions |
+| `galangal github setup --help-install` | Show detailed gh CLI installation instructions |
+| `galangal github check` | Verify gh CLI installation and authentication |
+| `galangal github issues` | List issues with galangal label |
+| `galangal github issues --label <name>` | List issues with custom label |
+| `galangal github run` | Process all labeled issues headlessly |
+| `galangal github run --dry-run` | Preview without processing |
 
 ## Configuration
 

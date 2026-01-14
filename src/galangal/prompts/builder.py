@@ -106,6 +106,9 @@ class PromptBuilder:
             f"# Brief\n{state.task_description}",
         ]
 
+        # Add screenshot context if available
+        context_parts.extend(self._get_screenshot_context(state))
+
         # Add previous Q&A history
         if qa_history:
             qa_text = self._format_qa_history(qa_history)
@@ -119,6 +122,33 @@ class PromptBuilder:
 
         context = "\n".join(context_parts)
         return f"{context}\n\n---\n\n{base_prompt}"
+
+    def _get_screenshot_context(self, state: WorkflowState) -> list[str]:
+        """
+        Get screenshot context for inclusion in prompts.
+
+        When screenshots are available from a GitHub issue, instructs the AI
+        to read them for visual context (bug reports, designs, etc.).
+
+        Args:
+            state: Workflow state containing screenshot paths.
+
+        Returns:
+            List of context strings to include in prompt.
+        """
+        if not state.screenshots:
+            return []
+
+        parts = ["\n# Screenshots from GitHub Issue"]
+        parts.append(
+            "The following screenshots were attached to the GitHub issue. "
+            "Use the Read tool to view these images for visual context "
+            "(e.g., bug screenshots, design mockups, UI references):"
+        )
+        for i, path in enumerate(state.screenshots, 1):
+            parts.append(f"  {i}. {path}")
+
+        return ["\n".join(parts)]
 
     def _format_qa_history(self, qa_history: list[dict]) -> str:
         """Format Q&A history for prompt inclusion."""
@@ -210,6 +240,10 @@ class PromptBuilder:
             f"\n# Attempt: {state.attempt}",
             f"\n# Artifacts Directory: {self.config.tasks_dir}/{task_name}/",
         ]
+
+        # Add screenshot context if available (especially useful for PM and early stages)
+        if stage in [Stage.PM, Stage.DESIGN, Stage.DEV]:
+            context_parts.extend(self._get_screenshot_context(state))
 
         # Add failure context
         if state.last_failure:

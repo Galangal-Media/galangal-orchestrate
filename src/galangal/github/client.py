@@ -311,3 +311,84 @@ class GitHubClient:
         except GitHubError:
             pass
         return None
+
+    def list_labels(self) -> list[dict] | None:
+        """
+        List all labels in the repository.
+
+        Returns:
+            List of label dicts with 'name', 'color', 'description' keys,
+            or None on error
+        """
+        try:
+            return self.run_json_command(
+                ["label", "list", "--json", "name,color,description"]
+            )
+        except GitHubError:
+            return None
+
+    def label_exists(self, name: str) -> bool:
+        """
+        Check if a label exists in the repository.
+
+        Args:
+            name: Label name to check
+
+        Returns:
+            True if label exists
+        """
+        labels = self.list_labels()
+        if labels:
+            return any(label["name"].lower() == name.lower() for label in labels)
+        return False
+
+    def create_label(
+        self,
+        name: str,
+        color: str = "CCCCCC",
+        description: str = "",
+    ) -> bool:
+        """
+        Create a new label in the repository.
+
+        Args:
+            name: Label name
+            color: Hex color without # (e.g., "7C3AED")
+            description: Label description
+
+        Returns:
+            True if successful
+        """
+        try:
+            args = ["label", "create", name, "--color", color]
+            if description:
+                args.extend(["--description", description])
+            self._run_gh(args)
+            return True
+        except GitHubError:
+            return False
+
+    def create_label_if_missing(
+        self,
+        name: str,
+        color: str = "CCCCCC",
+        description: str = "",
+    ) -> tuple[bool, bool]:
+        """
+        Create a label if it doesn't already exist.
+
+        Args:
+            name: Label name
+            color: Hex color without # (e.g., "7C3AED")
+            description: Label description
+
+        Returns:
+            Tuple of (success, was_created). success is True if label exists
+            (whether created or already existed). was_created is True only
+            if the label was newly created.
+        """
+        if self.label_exists(name):
+            return True, False
+
+        success = self.create_label(name, color, description)
+        return success, success

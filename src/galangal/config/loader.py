@@ -112,3 +112,13 @@ def get_active_file() -> Path:
 def get_prompts_dir() -> Path:
     """Get the project prompts override directory."""
     return get_project_root() / ".galangal" / "prompts"
+
+
+def is_initialized() -> bool:
+    """Check if galangal has been initialized in this project.
+
+    Returns:
+        True if .galangal/config.yaml exists.
+    """
+    config_path = get_project_root() / ".galangal" / "config.yaml"
+    return config_path.exists()

@@ -28,6 +28,7 @@ def create_task(
     task_type: TaskType,
     github_issue: int | None = None,
     github_repo: str | None = None,
+    screenshots: list[str] | None = None,
 ) -> tuple[bool, str]:
     """Create a new task with the given name, description, and type.
 
@@ -37,6 +38,7 @@ def create_task(
         task_type: Type of task (Feature, Bug Fix, etc.)
         github_issue: Optional GitHub issue number this task is linked to
         github_repo: Optional GitHub repo (owner/repo) for the issue
+        screenshots: Optional list of local screenshot paths from the issue
 
     Returns:
         Tuple of (success, message)
@@ -58,7 +60,7 @@ def create_task(
 
     # Initialize state with task type and optional GitHub info
     state = WorkflowState.new(
-        description, task_name, task_type, github_issue, github_repo
+        description, task_name, task_type, github_issue, github_repo, screenshots
     )
     save_state(state)
 
@@ -70,6 +72,15 @@ def create_task(
 
 def cmd_start(args: argparse.Namespace) -> int:
     """Start a new task."""
+    from galangal.config.loader import is_initialized
+    from galangal.ui.console import print_error, print_info
+
+    # Check if project is initialized
+    if not is_initialized():
+        print_error("Galangal has not been initialized in this project.")
+        print_info("Run 'galangal init' first to set up your project.")
+        return 1
+
     description = " ".join(args.description) if args.description else ""
     task_name = args.name or ""
     from_issue = getattr(args, "issue", None)
@@ -83,6 +94,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         "name": task_name,
         "github_issue": from_issue,
         "github_repo": None,
+        "screenshots": None,
     }
     result_code = {"value": 0}
 
@@ -183,6 +195,19 @@ def cmd_start(args: argparse.Namespace) -> int:
                                 f"Selected issue #{selected_issue.number}",
                                 "success"
                             )
+
+                            # Download screenshots from issue body
+                            from galangal.github.images import extract_image_urls
+                            images = extract_image_urls(selected_issue.body)
+                            if images:
+                                app.set_status("setup", "downloading screenshots")
+                                app.show_message(
+                                    f"Found {len(images)} screenshot(s) in issue...",
+                                    "info"
+                                )
+                                # Note: Actual download happens after task_name is generated
+                                # Store the issue body for later processing
+                                task_info["_issue_body"] = selected_issue.body
 
                             # Try to infer task type from labels
                             type_hint = selected_issue.get_task_type_hint()
@@ -294,6 +319,30 @@ def cmd_start(args: argparse.Namespace) -> int:
 
             app.show_message(f"Task name: {task_info['name']}", "success")
 
+            # Step 3.5: Download screenshots if from GitHub issue
+            if task_info.get("_issue_body"):
+                app.set_status("setup", "downloading screenshots")
+                try:
+                    from galangal.github.images import download_issue_images
+
+                    task_dir = get_task_dir(task_info["name"])
+                    # Create task dir early for screenshots
+                    task_dir.mkdir(parents=True, exist_ok=True)
+
+                    screenshot_paths = download_issue_images(
+                        task_info["_issue_body"],
+                        task_dir,
+                    )
+                    if screenshot_paths:
+                        task_info["screenshots"] = screenshot_paths
+                        app.show_message(
+                            f"Downloaded {len(screenshot_paths)} screenshot(s)",
+                            "success"
+                        )
+                except Exception as e:
+                    app.show_message(f"Screenshot download failed: {e}", "warning")
+                    # Non-critical - continue without screenshots
+
             # Step 4: Create the task
             app.set_status("setup", "creating task")
             success, message = create_task(
@@ -302,6 +351,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 task_info["type"],
                 github_issue=task_info["github_issue"],
                 github_repo=task_info["github_repo"],
+                screenshots=task_info.get("screenshots"),
             )
 
             if success:

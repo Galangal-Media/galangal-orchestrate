@@ -12,6 +12,13 @@ from galangal.ui.console import display_status, print_error, print_info
 
 def cmd_status(args: argparse.Namespace) -> int:
     """Show status of active task."""
+    from galangal.config.loader import is_initialized
+
+    if not is_initialized():
+        print_error("Galangal has not been initialized in this project.")
+        print_info("Run 'galangal init' first to set up your project.")
+        return 1
+
     active = get_active_task()
     if not active:
         print_info("No active task. Use 'list' to see tasks, 'switch' to select one.")
