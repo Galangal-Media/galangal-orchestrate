@@ -1125,13 +1125,11 @@ def _start_new_task_tui() -> str:
                 app.show_message("Checking GitHub setup...", "info")
 
                 try:
-                    from galangal.github.client import GitHubClient
+                    from galangal.github.client import ensure_github_ready
                     from galangal.github.issues import list_issues
 
-                    client = await asyncio.to_thread(GitHubClient)
-                    check = await asyncio.to_thread(client.check_setup)
-
-                    if not check.is_ready:
+                    check = await asyncio.to_thread(ensure_github_ready)
+                    if not check:
                         app.show_message(
                             "GitHub not ready. Run 'galangal github check'", "error"
                         )
@@ -1190,20 +1188,11 @@ def _start_new_task_tui() -> str:
                         # Try to infer task type from labels
                         type_hint = selected_issue.get_task_type_hint()
                         if type_hint:
-                            type_map = {
-                                "feature": TaskType.FEATURE,
-                                "bug_fix": TaskType.BUG_FIX,
-                                "refactor": TaskType.REFACTOR,
-                                "chore": TaskType.CHORE,
-                                "docs": TaskType.DOCS,
-                                "hotfix": TaskType.HOTFIX,
-                            }
-                            task_info["type"] = type_map.get(type_hint)
-                            if task_info["type"]:
-                                app.show_message(
-                                    f"Inferred type: {task_info['type'].display_name()}",
-                                    "info",
-                                )
+                            task_info["type"] = TaskType.from_str(type_hint)
+                            app.show_message(
+                                f"Inferred type: {task_info['type'].display_name()}",
+                                "info",
+                            )
 
                 except Exception as e:
                     app.show_message(f"GitHub error: {e}", "error")
@@ -1224,15 +1213,7 @@ def _start_new_task_tui() -> str:
                     return
 
                 # Map selection to TaskType
-                type_map = {
-                    "feature": TaskType.FEATURE,
-                    "bugfix": TaskType.BUG_FIX,
-                    "refactor": TaskType.REFACTOR,
-                    "chore": TaskType.CHORE,
-                    "docs": TaskType.DOCS,
-                    "hotfix": TaskType.HOTFIX,
-                }
-                task_info["type"] = type_map.get(type_choice, TaskType.FEATURE)
+                task_info["type"] = TaskType.from_str(type_choice)
 
             app.show_message(f"Task type: {task_info['type'].display_name()}", "success")
 
@@ -1254,37 +1235,24 @@ def _start_new_task_tui() -> str:
             # Step 3: Generate task name
             app.set_status("setup", "generating task name")
             from galangal.commands.start import create_task
-            from galangal.core.tasks import generate_task_name, task_name_exists
+            from galangal.core.tasks import generate_unique_task_name
 
-            base_name = await asyncio.to_thread(
-                generate_task_name, task_info["description"]
+            # Use prefix for GitHub issues
+            prefix = f"issue-{task_info['github_issue']}" if task_info["github_issue"] else None
+            task_info["name"] = await asyncio.to_thread(
+                generate_unique_task_name, task_info["description"], prefix
             )
-
-            # Prefix with issue number if from GitHub
-            if task_info["github_issue"]:
-                base_name = f"issue-{task_info['github_issue']}-{base_name}"
-
-            final_name = base_name
-            suffix = 2
-            while await asyncio.to_thread(task_name_exists, final_name):
-                final_name = f"{base_name}-{suffix}"
-                suffix += 1
-
-            task_info["name"] = final_name
-            app.show_message(f"Task name: {final_name}", "info")
+            app.show_message(f"Task name: {task_info['name']}", "info")
 
             # Step 3.5: Download screenshots if from GitHub issue
             if issue_body_for_screenshots:
                 app.set_status("setup", "downloading screenshots")
                 try:
-                    from galangal.github.images import download_issue_images
+                    from galangal.github.issues import download_issue_screenshots
 
                     task_dir = get_task_dir(task_info["name"])
-                    # Create task dir early for screenshots
-                    task_dir.mkdir(parents=True, exist_ok=True)
-
                     screenshot_paths = await asyncio.to_thread(
-                        download_issue_images,
+                        download_issue_screenshots,
                         issue_body_for_screenshots,
                         task_dir,
                     )

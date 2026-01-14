@@ -204,3 +204,83 @@ def mark_issue_pr_created(issue_number: int, pr_url: str) -> bool:
     client = GitHubClient()
     comment = f"Pull request created: {pr_url}"
     return client.add_issue_comment(issue_number, comment)
+
+
+@dataclass
+class IssueTaskData:
+    """Data extracted from a GitHub issue for task creation."""
+
+    issue_number: int
+    description: str
+    task_type_hint: str | None
+    github_repo: str | None
+    screenshots: list[str]
+    issue_body: str  # Raw body for later screenshot download
+
+
+def prepare_issue_for_task(
+    issue: GitHubIssue,
+    repo_name: str | None = None,
+) -> IssueTaskData:
+    """
+    Extract task creation data from a GitHub issue.
+
+    This consolidates all the issue-to-task conversion logic:
+    - Forms description from title + body
+    - Infers task type from labels
+    - Identifies screenshots for later download
+
+    Args:
+        issue: The GitHub issue to process
+        repo_name: Optional repo name (owner/repo), fetched if not provided
+
+    Returns:
+        IssueTaskData with all info needed for task creation
+
+    Note:
+        Screenshots are NOT downloaded here - the task directory needs to
+        exist first. Use download_issue_screenshots() after task creation.
+    """
+    # Get repo name if not provided
+    if not repo_name:
+        client = GitHubClient()
+        repo_name = client.get_repo_name()
+
+    # Form description from title and body
+    description = f"{issue.title}\n\n{issue.body}"
+
+    # Note: screenshots are extracted later via download_issue_screenshots()
+    # We just store the body for later processing
+
+    return IssueTaskData(
+        issue_number=issue.number,
+        description=description,
+        task_type_hint=issue.get_task_type_hint(),
+        github_repo=repo_name,
+        screenshots=[],  # Populated after task dir exists
+        issue_body=issue.body,
+    )
+
+
+def download_issue_screenshots(
+    issue_body: str,
+    task_dir,
+) -> list[str]:
+    """
+    Download screenshots from an issue body to the task directory.
+
+    Args:
+        issue_body: The raw issue body markdown
+        task_dir: Path to the task directory (will create screenshots/ subdir)
+
+    Returns:
+        List of local file paths to downloaded screenshots
+    """
+    from pathlib import Path
+
+    from galangal.github.images import download_issue_images
+
+    task_dir = Path(task_dir)
+    task_dir.mkdir(parents=True, exist_ok=True)
+
+    return download_issue_images(issue_body, task_dir)

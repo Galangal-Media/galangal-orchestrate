@@ -203,14 +203,12 @@ def cmd_github_issues(args: argparse.Namespace) -> int:
     """List GitHub issues with the galangal label."""
     from rich.table import Table
 
-    from galangal.github.client import GitHubClient, GitHubError
+    from galangal.github.client import GitHubError, ensure_github_ready
     from galangal.github.issues import GALANGAL_LABEL, list_issues
 
     # First check setup
-    client = GitHubClient()
-    check = client.check_setup()
-
-    if not check.is_ready:
+    check = ensure_github_ready()
+    if not check:
         print_error("GitHub integration not ready. Run 'galangal github check' for details.")
         return 1
 
@@ -257,18 +255,16 @@ def cmd_github_run(args: argparse.Namespace) -> int:
     """Process all galangal-labeled GitHub issues headlessly."""
     from galangal.commands.start import create_task
     from galangal.core.state import TaskType, load_state
-    from galangal.core.tasks import generate_task_name, task_name_exists
+    from galangal.core.tasks import generate_unique_task_name
     from galangal.core.workflow import run_workflow
-    from galangal.github.client import GitHubClient, GitHubError
+    from galangal.github.client import GitHubError, ensure_github_ready
     from galangal.github.issues import GALANGAL_LABEL, list_issues, mark_issue_in_progress
 
     console.print("\n[bold]GitHub Issues Batch Processor[/bold]\n")
 
     # Check setup
-    client = GitHubClient()
-    check = client.check_setup()
-
-    if not check.is_ready:
+    check = ensure_github_ready()
+    if not check:
         print_error("GitHub integration not ready. Run 'galangal github check' for details.")
         return 1
 
@@ -302,38 +298,23 @@ def cmd_github_run(args: argparse.Namespace) -> int:
     for issue in issues:
         console.print(f"\n[bold]Processing issue #{issue.number}:[/bold] {issue.title[:50]}")
 
-        # Generate task name
-        base_name = generate_task_name(f"{issue.title}\n\n{issue.body}")
-        task_name = f"issue-{issue.number}-{base_name}"
-
-        # Ensure unique name
-        suffix = 2
-        while task_name_exists(task_name):
-            task_name = f"issue-{issue.number}-{base_name}-{suffix}"
-            suffix += 1
+        # Generate unique task name with issue prefix
+        description = f"{issue.title}\n\n{issue.body}"
+        task_name = generate_unique_task_name(description, prefix=f"issue-{issue.number}")
 
         # Infer task type from labels
         type_hint = issue.get_task_type_hint()
-        type_map = {
-            "feature": TaskType.FEATURE,
-            "bug_fix": TaskType.BUG_FIX,
-            "refactor": TaskType.REFACTOR,
-            "chore": TaskType.CHORE,
-            "docs": TaskType.DOCS,
-            "hotfix": TaskType.HOTFIX,
-        }
-        task_type = type_map.get(type_hint, TaskType.FEATURE)
+        task_type = TaskType.from_str(type_hint) if type_hint else TaskType.FEATURE
 
         # Download screenshots from issue body
         screenshots = None
         try:
             from galangal.core.state import get_task_dir
-            from galangal.github.images import download_issue_images
+            from galangal.github.issues import download_issue_screenshots
 
             if issue.body:
                 task_dir = get_task_dir(task_name)
-                task_dir.mkdir(parents=True, exist_ok=True)
-                screenshots = download_issue_images(issue.body, task_dir)
+                screenshots = download_issue_screenshots(issue.body, task_dir)
                 if screenshots:
                     print_info(f"Downloaded {len(screenshots)} screenshot(s)")
         except Exception as e:

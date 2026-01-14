@@ -392,3 +392,26 @@ class GitHubClient:
 
         success = self.create_label(name, color, description)
         return success, success
+
+
+def ensure_github_ready() -> GitHubCheckResult | None:
+    """
+    Check if GitHub integration is ready for use.
+
+    This is a convenience function that creates a GitHubClient, performs
+    setup verification, and returns the result if ready, or None if not.
+
+    Returns:
+        GitHubCheckResult if GitHub is ready (gh installed, authenticated,
+        and repo accessible), or None if any check fails.
+
+    Example:
+        check = ensure_github_ready()
+        if not check:
+            print("GitHub not ready")
+            return
+        repo_name = check.repo_name
+    """
+    client = GitHubClient()
+    check = client.check_setup()
+    return check if check.is_ready else None

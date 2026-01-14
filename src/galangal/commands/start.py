@@ -14,7 +14,7 @@ from galangal.core.state import (
 )
 from galangal.core.tasks import (
     create_task_branch,
-    generate_task_name,
+    generate_unique_task_name,
     set_active_task,
     task_name_exists,
 )
@@ -132,13 +132,11 @@ def cmd_start(args: argparse.Namespace) -> int:
                     app.show_message("Checking GitHub setup...", "info")
 
                     try:
-                        from galangal.github.client import GitHubClient
+                        from galangal.github.client import ensure_github_ready
                         from galangal.github.issues import list_issues
 
-                        client = GitHubClient()
-                        check = client.check_setup()
-
-                        if not check.is_ready:
+                        check = ensure_github_ready()
+                        if not check:
                             app.show_message(
                                 "GitHub not ready. Run 'galangal github check'",
                                 "error"
@@ -212,15 +210,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                             # Try to infer task type from labels
                             type_hint = selected_issue.get_task_type_hint()
                             if type_hint:
-                                type_map = {
-                                    "feature": TaskType.FEATURE,
-                                    "bug_fix": TaskType.BUG_FIX,
-                                    "refactor": TaskType.REFACTOR,
-                                    "chore": TaskType.CHORE,
-                                    "docs": TaskType.DOCS,
-                                    "hotfix": TaskType.HOTFIX,
-                                }
-                                task_info["type"] = type_map.get(type_hint)
+                                task_info["type"] = TaskType.from_str(type_hint)
                                 app.show_message(
                                     f"Inferred type from labels: {task_info['type'].display_name()}",
                                     "info"
@@ -258,15 +248,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                     return
 
                 # Map selection to TaskType
-                type_map = {
-                    "feature": TaskType.FEATURE,
-                    "bugfix": TaskType.BUG_FIX,
-                    "refactor": TaskType.REFACTOR,
-                    "chore": TaskType.CHORE,
-                    "docs": TaskType.DOCS,
-                    "hotfix": TaskType.HOTFIX,
-                }
-                task_info["type"] = type_map.get(type_result["value"], TaskType.FEATURE)
+                task_info["type"] = TaskType.from_str(type_result["value"])
 
             app.show_message(f"Task type: {task_info['type'].display_name()}", "success")
 
@@ -294,20 +276,9 @@ def cmd_start(args: argparse.Namespace) -> int:
                 app.set_status("setup", "generating task name")
                 app.show_message("Generating task name...", "info")
 
-                base_name = generate_task_name(task_info["description"])
-
-                # Prefix with issue number if from GitHub
-                if task_info["github_issue"]:
-                    base_name = f"issue-{task_info['github_issue']}-{base_name}"
-
-                final_name = base_name
-
-                suffix = 2
-                while task_name_exists(final_name):
-                    final_name = f"{base_name}-{suffix}"
-                    suffix += 1
-
-                task_info["name"] = final_name
+                # Use prefix for GitHub issues
+                prefix = f"issue-{task_info['github_issue']}" if task_info["github_issue"] else None
+                task_info["name"] = generate_unique_task_name(task_info["description"], prefix)
             else:
                 # Validate provided name
                 if task_name_exists(task_info["name"]):
@@ -323,13 +294,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             if task_info.get("_issue_body"):
                 app.set_status("setup", "downloading screenshots")
                 try:
-                    from galangal.github.images import download_issue_images
+                    from galangal.github.issues import download_issue_screenshots
 
                     task_dir = get_task_dir(task_info["name"])
-                    # Create task dir early for screenshots
-                    task_dir.mkdir(parents=True, exist_ok=True)
-
-                    screenshot_paths = download_issue_images(
+                    screenshot_paths = download_issue_screenshots(
                         task_info["_issue_body"],
                         task_dir,
                     )

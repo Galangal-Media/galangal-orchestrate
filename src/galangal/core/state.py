@@ -21,9 +21,29 @@ class TaskType(str, Enum):
 
     @classmethod
     def from_str(cls, value: str) -> "TaskType":
-        """Convert string to TaskType, defaulting to FEATURE."""
+        """Convert string to TaskType, defaulting to FEATURE.
+
+        Handles multiple string formats:
+        - Enum values: "feature", "bug_fix", "refactor", etc.
+        - UI keys: "bugfix" (maps to BUG_FIX)
+        - GitHub hints: "bug_fix" from label inference
+        """
+        normalized = value.lower().strip()
+
+        # Handle aliases that don't match enum values directly
+        aliases = {
+            "bugfix": cls.BUG_FIX,
+            "bug": cls.BUG_FIX,
+            "fix": cls.BUG_FIX,
+            "enhancement": cls.FEATURE,
+            "feat": cls.FEATURE,
+        }
+
+        if normalized in aliases:
+            return aliases[normalized]
+
         try:
-            return cls(value.lower())
+            return cls(normalized)
         except ValueError:
             return cls.FEATURE
 

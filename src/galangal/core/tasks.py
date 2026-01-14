@@ -136,6 +136,38 @@ def task_name_exists(name: str) -> bool:
     return get_task_dir(name).exists() or (get_done_dir() / name).exists()
 
 
+def generate_unique_task_name(
+    description: str,
+    prefix: str | None = None,
+) -> str:
+    """Generate a unique task name with automatic suffix if needed.
+
+    Uses AI to generate a meaningful task name from the description,
+    then ensures uniqueness by appending a numeric suffix if the name
+    already exists.
+
+    Args:
+        description: Task description to generate name from.
+        prefix: Optional prefix (e.g., "issue-123") to prepend to the name.
+
+    Returns:
+        A unique task name that doesn't conflict with existing tasks.
+    """
+    base_name = generate_task_name(description)
+
+    if prefix:
+        base_name = f"{prefix}-{base_name}"
+
+    # Find unique name with suffix if needed
+    final_name = base_name
+    suffix = 2
+    while task_name_exists(final_name):
+        final_name = f"{base_name}-{suffix}"
+        suffix += 1
+
+    return final_name
+
+
 def create_task_branch(task_name: str) -> tuple[bool, str]:
     """Create a git branch for the task."""
     config = get_config()
