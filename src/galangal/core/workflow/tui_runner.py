@@ -11,7 +11,7 @@ import asyncio
 from rich.console import Console
 
 from galangal.config.loader import get_config
-from galangal.core.artifacts import artifact_exists, parse_stage_plan, write_artifact
+from galangal.core.artifacts import artifact_exists, parse_stage_plan, read_artifact, write_artifact
 from galangal.core.metrics import record_stage_result
 from galangal.core.state import (
     STAGE_ORDER,
@@ -303,9 +303,41 @@ Please address the issues described above before proceeding.
                             app._workflow_result = "paused"
                             break
 
-                    # Handle clarification needed
+                    # Handle clarification needed - show questions and get answers
                     if result.type == StageResultType.CLARIFICATION_NEEDED:
-                        app.show_message(result.message, "warning")
+                        questions_content = read_artifact("QUESTIONS.md", state.task_name)
+                        if questions_content:
+                            # Parse questions from QUESTIONS.md
+                            questions = _parse_questions_from_artifact(questions_content)
+                            if questions:
+                                app.show_message(
+                                    f"Stage has {len(questions)} clarifying question(s)",
+                                    "warning"
+                                )
+                                # Show Q&A modal and collect answers
+                                answers = await app.question_answer_session_async(questions)
+                                if answers:
+                                    # Write answers to ANSWERS.md
+                                    answers_content = _format_answers_artifact(questions, answers)
+                                    write_artifact("ANSWERS.md", answers_content, state.task_name)
+                                    app.show_message("Answers saved - resuming stage", "success")
+                                    # Clear clarification flag and retry stage
+                                    state.clarification_required = False
+                                    save_state(state)
+                                    continue
+                                else:
+                                    # User cancelled - pause workflow
+                                    app.show_message("Answers cancelled - pausing workflow", "warning")
+                                    save_state(state)
+                                    app._workflow_result = "paused"
+                                    break
+                            else:
+                                app.show_message(
+                                    "QUESTIONS.md exists but couldn't parse questions",
+                                    "error"
+                                )
+                        else:
+                            app.show_message(result.message, "warning")
                         save_state(state)
                         app._workflow_result = "paused"
                         break
@@ -575,8 +607,16 @@ Please address the issues described above before proceeding.
             debug_exception("Workflow execution failed", e)
             app.show_error("Workflow error", str(e))
             app._workflow_result = "error"
-        finally:
+            # Wait for user to acknowledge the error before exiting
+            await app.ask_yes_no_async(
+                "An error occurred. Press Enter to exit and see details in the debug log."
+            )
             app.set_timer(0.5, app.exit)
+            return
+        finally:
+            # Only auto-exit if we haven't already handled exit (e.g., from error)
+            if app._workflow_result != "error":
+                app.set_timer(0.5, app.exit)
 
     # Start workflow as async worker
     app.call_later(lambda: app.run_worker(workflow_loop(), exclusive=True))
@@ -658,18 +698,9 @@ async def _run_pm_discovery(
             return False
 
         if not questions:
-            # AI found no gaps - ask user if they have questions
-            continue_qa = await app.ask_yes_no_async(
-                "AI found no gaps in the brief. Do you have your own questions to ask?"
-            )
-            if not continue_qa:
-                break
-
-            # Let user enter their own questions
-            user_questions = await app.get_user_questions_async()
-            if not user_questions:
-                break
-            questions = user_questions
+            # AI found no gaps in the brief - continue automatically
+            app.show_message("No clarifying questions needed", "success")
+            break
 
         # Present questions and collect answers
         app.add_activity(f"Asking {len(questions)} clarifying questions...", "❓")
@@ -802,6 +833,60 @@ def _write_discovery_log(task_name: str, qa_rounds: list[dict]) -> None:
             content_parts.append(f"{j}. {a}\n")
 
     write_artifact("DISCOVERY_LOG.md", "".join(content_parts), task_name)
+
+
+def _parse_questions_from_artifact(content: str) -> list[str]:
+    """Parse questions from QUESTIONS.md artifact.
+
+    Supports multiple formats:
+    - Numbered lists: 1. Question text
+    - Bulleted lists: - Question text
+    - Markdown headers: ## Question text
+    """
+    import re
+
+    questions = []
+    lines = content.split("\n")
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # Skip title/header lines
+        if line.startswith("# ") and "question" in line.lower():
+            continue
+
+        # Match numbered questions (1. Question text)
+        match = re.match(r"^\d+[\.\)]\s*(.+)$", line)
+        if match:
+            questions.append(match.group(1))
+            continue
+
+        # Match bulleted questions
+        if line.startswith("- ") or line.startswith("* "):
+            questions.append(line[2:].strip())
+            continue
+
+        # Match markdown headers as questions
+        if line.startswith("## "):
+            questions.append(line[3:].strip())
+            continue
+
+    return questions
+
+
+def _format_answers_artifact(questions: list[str], answers: list[str]) -> str:
+    """Format questions and answers into ANSWERS.md content."""
+    lines = ["# Answers\n"]
+    lines.append("Responses to clarifying questions.\n\n")
+
+    for i, (q, a) in enumerate(zip(questions, answers), 1):
+        lines.append(f"## Question {i}\n")
+        lines.append(f"**Q:** {q}\n\n")
+        lines.append(f"**A:** {a}\n\n")
+
+    return "".join(lines)
 
 
 # -----------------------------------------------------------------------------
