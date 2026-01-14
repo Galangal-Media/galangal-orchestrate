@@ -47,6 +47,26 @@ def write_artifact(name: str, content: str, task_name: str | None = None) -> Non
     path.write_text(content)
 
 
+def write_skip_artifact(stage: str, reason: str, task_name: str | None = None) -> None:
+    """Write a standardized skip artifact for a stage.
+
+    Creates a {STAGE}_SKIP.md artifact with consistent formatting.
+
+    Args:
+        stage: Stage name (e.g., "MIGRATION", "SECURITY").
+        reason: Reason for skipping the stage.
+        task_name: Task name, or None to use active task.
+    """
+    from galangal.core.utils import now_iso
+
+    content = f"""# {stage.upper()} Stage Skipped
+
+Date: {now_iso()}
+Reason: {reason}
+"""
+    write_artifact(f"{stage.upper()}_SKIP.md", content, task_name)
+
+
 def parse_stage_plan(task_name: str | None = None) -> dict[str, dict] | None:
     """
     Parse STAGE_PLAN.md artifact to extract stage recommendations.

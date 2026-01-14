@@ -7,12 +7,12 @@ other metrics that can be used to improve workflow behavior.
 
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
 from galangal.core.state import Stage
+from galangal.core.utils import now_iso
 
 
 @dataclass
@@ -140,7 +140,7 @@ class ProjectMetrics:
         """Record a stage execution result."""
         stage_metrics = self.get_stage(stage)
         run = StageRun(
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=now_iso(),
             success=success,
             attempts=attempts,
             turns_used=turns_used,

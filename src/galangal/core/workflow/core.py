@@ -5,7 +5,6 @@ Core workflow utilities - stage execution, rollback handling.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from galangal.ai.base import PauseCheck
@@ -21,6 +20,7 @@ from galangal.core.state import (
     save_state,
     should_skip_for_task_type,
 )
+from galangal.core.utils import now_iso
 from galangal.prompts.builder import PromptBuilder
 from galangal.results import StageResult, StageResultType
 from galangal.ui.tui import TUIAdapter
@@ -336,7 +336,7 @@ def archive_rollback_if_exists(task_name: str, tui_app: WorkflowTUIApp) -> None:
     rollback_content = read_artifact("ROLLBACK.md", task_name)
     resolved_path = artifact_path("ROLLBACK_RESOLVED.md", task_name)
 
-    resolution_note = f"\n\n## Resolved: {datetime.now(timezone.utc).isoformat()}\n\nIssues fixed by DEV stage.\n"
+    resolution_note = f"\n\n## Resolved: {now_iso()}\n\nIssues fixed by DEV stage.\n"
 
     if resolved_path.exists():
         existing = resolved_path.read_text()
@@ -412,7 +412,7 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
     rollback_entry = f"""
 ## Rollback from {from_stage.value}
 
-**Date:** {datetime.now(timezone.utc).isoformat()}
+**Date:** {now_iso()}
 **From Stage:** {from_stage.value}
 **Target Stage:** {target_stage.value}
 **Reason:** {reason}

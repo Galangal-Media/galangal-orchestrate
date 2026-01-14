@@ -18,6 +18,7 @@ from galangal.core.tasks import (
     set_active_task,
     task_name_exists,
 )
+from galangal.core.utils import debug_exception, debug_log
 from galangal.core.workflow import run_workflow
 from galangal.ui.tui import PromptType, WorkflowTUIApp
 
@@ -217,6 +218,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                                 )
 
                     except Exception as e:
+                        debug_exception("GitHub integration failed", e)
                         app.show_message(f"GitHub error: {e}", "error")
                         app._workflow_result = "error"
                         result_code["value"] = 1
@@ -289,42 +291,60 @@ def cmd_start(args: argparse.Namespace) -> int:
                     return
 
             app.show_message(f"Task name: {task_info['name']}", "success")
+            debug_log("Task name generated", name=task_info["name"])
 
-            # Step 3.5: Download screenshots if from GitHub issue
-            if task_info.get("_issue_body"):
-                app.set_status("setup", "downloading screenshots")
-                try:
-                    from galangal.github.issues import download_issue_screenshots
-
-                    task_dir = get_task_dir(task_info["name"])
-                    screenshot_paths = download_issue_screenshots(
-                        task_info["_issue_body"],
-                        task_dir,
-                    )
-                    if screenshot_paths:
-                        task_info["screenshots"] = screenshot_paths
-                        app.show_message(
-                            f"Downloaded {len(screenshot_paths)} screenshot(s)",
-                            "success"
-                        )
-                except Exception as e:
-                    app.show_message(f"Screenshot download failed: {e}", "warning")
-                    # Non-critical - continue without screenshots
-
-            # Step 4: Create the task
+            # Step 4: Create the task (must happen BEFORE screenshot download
+            # because download_issue_screenshots creates the task directory)
             app.set_status("setup", "creating task")
+            debug_log("Creating task", name=task_info["name"], type=str(task_info["type"]))
             success, message = create_task(
                 task_info["name"],
                 task_info["description"],
                 task_info["type"],
                 github_issue=task_info["github_issue"],
                 github_repo=task_info["github_repo"],
-                screenshots=task_info.get("screenshots"),
             )
 
             if success:
                 app.show_message(message, "success")
                 app._workflow_result = "task_created"
+                debug_log("Task created successfully", name=task_info["name"])
+
+                # Step 4.5: Download screenshots if from GitHub issue
+                # (must happen AFTER task creation since it writes to task directory)
+                if task_info.get("_issue_body"):
+                    app.set_status("setup", "downloading screenshots")
+                    issue_body = task_info["_issue_body"]
+                    debug_log(
+                        "Starting screenshot download",
+                        body_length=len(issue_body),
+                        body_preview=issue_body[:200] if issue_body else "empty",
+                    )
+                    try:
+                        from galangal.github.issues import download_issue_screenshots
+
+                        task_dir = get_task_dir(task_info["name"])
+                        screenshot_paths = download_issue_screenshots(
+                            task_info["_issue_body"],
+                            task_dir,
+                        )
+                        if screenshot_paths:
+                            task_info["screenshots"] = screenshot_paths
+                            app.show_message(
+                                f"Downloaded {len(screenshot_paths)} screenshot(s)",
+                                "success"
+                            )
+                            debug_log("Screenshots downloaded", count=len(screenshot_paths))
+
+                            # Update state with screenshot paths
+                            state = load_state(task_info["name"])
+                            if state:
+                                state.screenshots = screenshot_paths
+                                save_state(state)
+                    except Exception as e:
+                        debug_exception("Screenshot download failed", e)
+                        app.show_message(f"Screenshot download failed: {e}", "warning")
+                        # Non-critical - continue without screenshots
 
                 # Mark issue as in-progress if from GitHub
                 if task_info["github_issue"]:
@@ -332,14 +352,16 @@ def cmd_start(args: argparse.Namespace) -> int:
                         from galangal.github.issues import mark_issue_in_progress
                         mark_issue_in_progress(task_info["github_issue"])
                         app.show_message("Marked issue as in-progress", "info")
-                    except Exception:
-                        pass  # Non-critical
+                    except Exception as e:
+                        debug_exception("Failed to mark issue as in-progress", e)
+                        # Non-critical - continue anyway
             else:
                 app.show_message(f"Failed: {message}", "error")
                 app._workflow_result = "error"
                 result_code["value"] = 1
 
         except Exception as e:
+            debug_exception("Task creation failed", e)
             app.show_message(f"Error: {e}", "error")
             app._workflow_result = "error"
             result_code["value"] = 1
@@ -351,13 +373,36 @@ def cmd_start(args: argparse.Namespace) -> int:
     app.call_later(thread.start)
     app.run()
 
+    # Log the TUI result for debugging
+    debug_log(
+        "TUI app exited",
+        result=getattr(app, '_workflow_result', 'unknown'),
+        task_name=task_info.get("name", "none"),
+        result_code=result_code["value"],
+    )
+
     # If task was created, start the workflow
     if app._workflow_result == "task_created" and task_info["name"]:
+        debug_log("Task created, loading state", task=task_info["name"])
         state = load_state(task_info["name"])
         if state:
             # Pass skip_discovery flag via state attribute
             if getattr(args, 'skip_discovery', False):
                 state._skip_discovery = True
-            run_workflow(state)
+            try:
+                debug_log("Starting workflow", task=task_info["name"])
+                run_workflow(state)
+            except Exception as e:
+                debug_exception("Workflow failed to start", e)
+                from galangal.ui.console import print_error
+                print_error(f"Workflow failed: {e}")
+                return 1
+        else:
+            debug_log("Failed to load state", task=task_info["name"])
+    else:
+        debug_log(
+            "Not starting workflow",
+            reason=f"result={getattr(app, '_workflow_result', 'unknown')}, name={task_info.get('name', 'none')}",
+        )
 
     return result_code["value"]

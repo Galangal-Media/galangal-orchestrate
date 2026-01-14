@@ -3,19 +3,17 @@ galangal skip-* commands - Skip various stages.
 """
 
 import argparse
-from datetime import datetime, timezone
 
 from rich.prompt import Prompt
 
-from galangal.core.artifacts import artifact_exists, write_artifact
+from galangal.core.artifacts import artifact_exists, write_artifact, write_skip_artifact
 from galangal.core.state import (
     STAGE_ORDER,
     TASK_TYPE_SKIP_STAGES,
     Stage,
-    load_state,
     save_state,
 )
-from galangal.core.tasks import get_active_task
+from galangal.core.tasks import ensure_active_task_with_state
 from galangal.core.workflow import run_workflow
 from galangal.ui.console import console, print_error, print_info, print_success
 
@@ -27,14 +25,8 @@ def _skip_stage(
     default_reason: str,
 ) -> int:
     """Generic skip stage handler."""
-    active = get_active_task()
-    if not active:
-        print_error("No active task.")
-        return 1
-
-    state = load_state(active)
-    if state is None:
-        print_error(f"Could not load state for '{active}'.")
+    active, state = ensure_active_task_with_state()
+    if not active or not state:
         return 1
 
     if artifact_exists(skip_artifact, active):
@@ -48,12 +40,7 @@ def _skip_stage(
 
     reason = Prompt.ask(prompt_text, default=default_reason).strip()
 
-    skip_content = f"""# {stage.value} Stage Skipped
-
-Date: {datetime.now(timezone.utc).isoformat()}
-Reason: {reason}
-"""
-    write_artifact(skip_artifact, skip_content, active)
+    write_skip_artifact(stage.value, reason, active)
 
     print_success(f"{stage.value} stage marked as skipped: {reason}")
 
@@ -66,14 +53,8 @@ Reason: {reason}
 
 def cmd_skip_design(args: argparse.Namespace) -> int:
     """Skip design stage for trivial tasks."""
-    active = get_active_task()
-    if not active:
-        print_error("No active task.")
-        return 1
-
-    state = load_state(active)
-    if state is None:
-        print_error(f"Could not load state for '{active}'.")
+    active, state = ensure_active_task_with_state()
+    if not active or not state:
         return 1
 
     if state.stage not in [Stage.PM, Stage.DESIGN]:
@@ -95,12 +76,7 @@ def cmd_skip_design(args: argparse.Namespace) -> int:
         "Reason for skipping design", default="Trivial task, no design needed"
     ).strip()
 
-    skip_content = f"""# Design Stage Skipped
-
-Date: {datetime.now(timezone.utc).isoformat()}
-Reason: {reason}
-"""
-    write_artifact("DESIGN_SKIP.md", skip_content, active)
+    write_skip_artifact("DESIGN", reason, active)
     write_artifact(
         "APPROVAL.md", f"# Auto-Approval\n\nDesign skipped: {reason}\n", active
     )
@@ -156,14 +132,8 @@ def cmd_skip_benchmark(args: argparse.Namespace) -> int:
 
 def cmd_skip_to(args: argparse.Namespace) -> int:
     """Jump to a specific stage (for debugging/re-running)."""
-    active = get_active_task()
-    if not active:
-        print_error("No active task.")
-        return 1
-
-    state = load_state(active)
-    if state is None:
-        print_error(f"Could not load state for '{active}'.")
+    active, state = ensure_active_task_with_state()
+    if not active or not state:
         return 1
 
     # Parse target stage

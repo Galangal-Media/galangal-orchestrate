@@ -197,25 +197,37 @@ def _download_with_gh(url: str, output_path: Path) -> bool:
     Returns:
         True if successful, False otherwise
     """
+    from galangal.core.utils import debug_log
+
     try:
-        # For private-user-images.githubusercontent.com, we need to use gh api
-        # with the raw URL to get authenticated access
         parsed = urlparse(url)
 
-        if parsed.netloc == "private-user-images.githubusercontent.com":
-            # Private images need authenticated download via gh api
-            # Extract the path and use gh api to fetch it
+        # For private-user-images or user-attachments, use gh api
+        # These URLs require authenticated access for private repos
+        if (
+            parsed.netloc == "private-user-images.githubusercontent.com"
+            or (parsed.netloc == "github.com" and "/user-attachments/" in parsed.path)
+        ):
+            debug_log("Downloading with gh api", url=url[:80])
+            # Use gh api to fetch with authentication
             result = subprocess.run(
                 ["gh", "api", "-H", "Accept: application/octet-stream", url],
                 capture_output=True,
                 timeout=60,
             )
-            if result.returncode == 0:
+            if result.returncode == 0 and result.stdout:
                 output_path.write_bytes(result.stdout)
+                debug_log("gh api download successful", path=str(output_path))
                 return True
+            debug_log(
+                "gh api download failed",
+                returncode=result.returncode,
+                stderr=result.stderr.decode()[:200] if result.stderr else "",
+            )
             return False
 
         # For other GitHub URLs, use curl with gh auth token
+        debug_log("Downloading with auth token", url=url[:80])
         result = subprocess.run(
             ["gh", "auth", "token"],
             capture_output=True,
@@ -223,10 +235,12 @@ def _download_with_gh(url: str, output_path: Path) -> bool:
             timeout=10,
         )
         if result.returncode != 0:
+            debug_log("Failed to get gh auth token")
             return False
 
         token = result.stdout.strip()
         if not token:
+            debug_log("gh auth token is empty")
             return False
 
         # Download with auth header
@@ -235,9 +249,11 @@ def _download_with_gh(url: str, output_path: Path) -> bool:
 
         with urllib.request.urlopen(request, timeout=60) as response:
             output_path.write_bytes(response.read())
+        debug_log("Auth token download successful", path=str(output_path))
         return True
 
-    except Exception:
+    except Exception as e:
+        debug_log("Download with gh failed", error=str(e))
         return False
 
 
@@ -279,12 +295,31 @@ def download_issue_images(
     Returns:
         List of local file paths for successfully downloaded images
     """
+    from galangal.core.utils import debug_log
+
     images = extract_image_urls(markdown_body)
+    debug_log(
+        "Extracted image URLs from issue body",
+        count=len(images),
+        urls=[img["url"][:80] for img in images[:5]],  # First 5, truncated
+    )
+
     if not images:
+        debug_log("No images found in issue body")
         return []
 
     output_dir = task_dir / screenshots_subdir
     results = download_images(images, output_dir)
+
+    # Log results
+    successful = [r for r in results if r["success"]]
+    failed = [r for r in results if not r["success"]]
+    debug_log(
+        "Image download results",
+        successful=len(successful),
+        failed=len(failed),
+        errors=[r.get("error") for r in failed if r.get("error")],
+    )
 
     # Return only successful downloads
     return [r["local_path"] for r in results if r["success"]]

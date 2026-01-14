@@ -5,7 +5,6 @@ galangal status - Show active task status.
 import argparse
 
 from galangal.core.artifacts import artifact_exists
-from galangal.core.state import load_state
 from galangal.core.tasks import get_active_task
 from galangal.ui.console import display_status, print_error, print_info
 
@@ -13,6 +12,7 @@ from galangal.ui.console import display_status, print_error, print_info
 def cmd_status(args: argparse.Namespace) -> int:
     """Show status of active task."""
     from galangal.config.loader import is_initialized
+    from galangal.core.state import load_state
 
     if not is_initialized():
         print_error("Galangal has not been initialized in this project.")

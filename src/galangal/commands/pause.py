@@ -4,21 +4,15 @@ galangal pause - Pause the active task.
 
 import argparse
 
-from galangal.core.state import Stage, load_state
-from galangal.core.tasks import get_active_task
-from galangal.ui.console import console, print_error, print_info
+from galangal.core.state import Stage
+from galangal.core.tasks import ensure_active_task_with_state
+from galangal.ui.console import console, print_info
 
 
 def cmd_pause(args: argparse.Namespace) -> int:
     """Pause the active task for a break or shutdown."""
-    active = get_active_task()
-    if not active:
-        print_error("No active task.")
-        return 1
-
-    state = load_state(active)
-    if state is None:
-        print_error(f"Could not load state for '{active}'.")
+    active, state = ensure_active_task_with_state()
+    if not active or not state:
         return 1
 
     if state.stage == Stage.COMPLETE:

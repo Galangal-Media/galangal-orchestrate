@@ -13,8 +13,8 @@ from rich.prompt import Prompt
 from galangal.ai.claude import ClaudeBackend
 from galangal.config.loader import get_config, get_done_dir, get_project_root
 from galangal.core.artifacts import read_artifact, run_command
-from galangal.core.state import Stage, get_task_dir, load_state
-from galangal.core.tasks import clear_active_task, get_active_task
+from galangal.core.state import Stage, get_task_dir
+from galangal.core.tasks import clear_active_task
 from galangal.ui.console import console, print_error, print_success, print_warning
 
 
@@ -315,14 +315,10 @@ def finalize_task(task_name: str, state, force: bool = False, progress_callback=
 
 def cmd_complete(args: argparse.Namespace) -> int:
     """Move completed task to done/, commit, create PR."""
-    active = get_active_task()
-    if not active:
-        print_error("No active task.")
-        return 1
+    from galangal.core.tasks import ensure_active_task_with_state
 
-    state = load_state(active)
-    if state is None:
-        print_error(f"Could not load state for '{active}'.")
+    active, state = ensure_active_task_with_state()
+    if not active or not state:
         return 1
 
     if state.stage != Stage.COMPLETE:

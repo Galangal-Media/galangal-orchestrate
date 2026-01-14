@@ -7,27 +7,32 @@ from rich.panel import Panel
 from rich.table import Table
 
 from galangal.core.state import TASK_TYPE_SKIP_STAGES, Stage, TaskType
+from galangal.core.utils import debug_log
 
 console = Console()
 
 
 def print_success(message: str) -> None:
     """Print a success message."""
+    debug_log("[SUCCESS]", content=message)
     console.print(f"[green]✓ {message}[/green]")
 
 
 def print_error(message: str) -> None:
     """Print an error message."""
+    debug_log("[ERROR]", content=message)
     console.print(f"[red]✗ {message}[/red]")
 
 
 def print_warning(message: str) -> None:
     """Print a warning message."""
+    debug_log("[WARNING]", content=message)
     console.print(f"[yellow]⚠ {message}[/yellow]")
 
 
 def print_info(message: str) -> None:
     """Print an info message."""
+    debug_log("[INFO]", content=message)
     console.print(f"[blue]ℹ {message}[/blue]")
 
 

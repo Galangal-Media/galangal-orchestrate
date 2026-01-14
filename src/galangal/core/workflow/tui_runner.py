@@ -178,7 +178,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                         target_stage = valid_targets[0] if valid_targets else interrupted_stage
 
                     # Create ROLLBACK.md artifact for persistent context
-                    from datetime import datetime, timezone
+                    from galangal.core.utils import now_iso
                     rollback_content = f"""# User Interrupt Rollback
 
 ## Source
@@ -188,7 +188,7 @@ User interrupt (Ctrl+I) during {interrupted_stage_name} stage
 {target_stage.value}
 
 ## Date
-{datetime.now(timezone.utc).isoformat()}
+{now_iso()}
 
 ## Issues to Fix
 {feedback_text}
@@ -571,6 +571,8 @@ Please address the issues described above before proceeding.
                 await _handle_workflow_complete(app, state)
 
         except Exception as e:
+            from galangal.core.utils import debug_exception
+            debug_exception("Workflow execution failed", e)
             app.show_error("Workflow error", str(e))
             app._workflow_result = "error"
         finally:
@@ -932,13 +934,13 @@ async def _handle_plan_approval(
     if choice == "yes":
         name = await app.text_input_async("Enter approver name:", default_approver)
         if name:
-            from datetime import datetime, timezone
+            from galangal.core.utils import now_formatted
 
             approval_content = f"""# Plan Approval
 
 - **Status:** Approved
 - **Approved By:** {name}
-- **Date:** {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
+- **Date:** {now_formatted()}
 """
             write_artifact("APPROVAL.md", approval_content, state.task_name)
             app.show_message(f"Plan approved by {name}", "success")
@@ -1051,7 +1053,7 @@ async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -
         )
 
         if feedback:
-            from datetime import datetime, timezone
+            from galangal.core.utils import now_iso
 
             rollback_content = f"""# Manual Review Rollback
 
@@ -1059,7 +1061,7 @@ async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -
 Manual review at COMPLETE stage
 
 ## Date
-{datetime.now(timezone.utc).isoformat()}
+{now_iso()}
 
 ## Issues to Fix
 {feedback}
@@ -1195,6 +1197,8 @@ def _start_new_task_tui() -> str:
                             )
 
                 except Exception as e:
+                    from galangal.core.utils import debug_exception
+                    debug_exception("GitHub integration failed in new task flow", e)
                     app.show_message(f"GitHub error: {e}", "error")
                     app._workflow_result = "error"
                     app.set_timer(0.5, app.exit)
@@ -1263,6 +1267,8 @@ def _start_new_task_tui() -> str:
                             "success",
                         )
                 except Exception as e:
+                    from galangal.core.utils import debug_exception
+                    debug_exception("Screenshot download failed", e)
                     app.show_message(f"Screenshot download failed: {e}", "warning")
                     # Non-critical - continue without screenshots
 
@@ -1291,13 +1297,17 @@ def _start_new_task_tui() -> str:
                             mark_issue_in_progress, task_info["github_issue"]
                         )
                         app.show_message("Marked issue as in-progress", "info")
-                    except Exception:
-                        pass  # Non-critical
+                    except Exception as e:
+                        from galangal.core.utils import debug_exception
+                        debug_exception("Failed to mark issue as in-progress", e)
+                        # Non-critical - continue anyway
             else:
                 app.show_error("Task creation failed", message)
                 app._workflow_result = "error"
 
         except Exception as e:
+            from galangal.core.utils import debug_exception
+            debug_exception("Task creation failed in new task flow", e)
             app.show_error("Task creation error", str(e))
             app._workflow_result = "error"
         finally:

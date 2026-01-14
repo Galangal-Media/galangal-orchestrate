@@ -19,10 +19,45 @@ Usage:
     galangal complete                       - Move task to done/, create PR
     galangal stats                          - Show project metrics and insights
     galangal prompts export                 - Export default prompts for customization
+
+Debug mode:
+    galangal --debug <command>              - Enable debug logging to logs/galangal_debug.log
+    GALANGAL_DEBUG=1 galangal <command>     - Alternative via environment variable
 """
 
 import argparse
+import os
 import sys
+
+
+def _setup_debug_mode() -> None:
+    """Enable debug mode by setting environment variable and configuring logging."""
+    os.environ["GALANGAL_DEBUG"] = "1"
+
+    from pathlib import Path
+
+    # Create logs directory if needed
+    logs_dir = Path.cwd() / "logs"
+    logs_dir.mkdir(exist_ok=True)
+
+    # Write initial debug log entry immediately so file is always created
+    # Do this BEFORE configure_logging to ensure we have a log even if that fails
+    from galangal.core.utils import debug_log, reset_debug_state
+    reset_debug_state()  # Clear any cached state
+    debug_log("Debug mode enabled", command=" ".join(sys.argv))
+
+    # Also enable structured logging to file
+    try:
+        from galangal.logging import configure_logging
+
+        configure_logging(
+            level="debug",
+            log_file=logs_dir / "galangal.jsonl",
+            json_format=True,
+            console_output=False,  # Don't spam console, just log to file
+        )
+    except Exception as e:
+        debug_log("Failed to configure structured logging", error=str(e))
 
 
 def main() -> int:
@@ -30,6 +65,10 @@ def main() -> int:
         description="Galangal Orchestrate - AI-Driven Development Workflow",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Debug mode:
+  galangal --debug start "task"   Enable verbose logging to logs/galangal_debug.log
+  GALANGAL_DEBUG=1 galangal ...   Alternative via environment variable
+
 Examples:
   galangal init
   galangal start "Add user authentication"
@@ -65,6 +104,13 @@ Workflow:
 
 Tip: Press Ctrl+C during execution to pause gracefully.
         """,
+    )
+
+    # Global --debug flag (before subparsers)
+    parser.add_argument(
+        "--debug", "-d",
+        action="store_true",
+        help="Enable debug logging to logs/galangal_debug.log and logs/galangal.jsonl"
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -256,6 +302,11 @@ Tip: Press Ctrl+C during execution to pause gracefully.
     github_run.set_defaults(func=_cmd_github_run)
 
     args = parser.parse_args()
+
+    # Enable debug mode if requested
+    if args.debug:
+        _setup_debug_mode()
+
     return args.func(args)
 
 

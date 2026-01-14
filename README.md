@@ -594,6 +594,45 @@ Create any of these in `.galangal/prompts/`:
 
 ## Troubleshooting
 
+### Debug Mode
+
+When something goes wrong and you need to see what happened:
+
+```bash
+# Enable debug logging (writes to logs/galangal_debug.log)
+galangal --debug start "task description"
+galangal --debug resume
+
+# Alternative: set environment variable
+GALANGAL_DEBUG=1 galangal start "task description"
+```
+
+Debug mode creates two log files:
+- `logs/galangal_debug.log` - Human-readable debug trace with timestamps
+- `logs/galangal.jsonl` - Structured JSON logs for programmatic analysis
+
+**Example debug log:**
+```
+[14:32:15.123] GitHub integration failed: HTTPError: 401 Unauthorized
+[14:32:15.124] Traceback:
+  File "/path/to/start.py", line 138, in task_creation_thread
+    check = ensure_github_ready()
+  ...
+```
+
+### Structured Logging Configuration
+
+Enable structured logging in `.galangal/config.yaml`:
+
+```yaml
+logging:
+  enabled: true        # Enable logging
+  level: debug         # debug, info, warning, error
+  file: logs/galangal.jsonl
+  json_format: true    # JSON for parsing, false for console format
+  console: false       # Also output to stderr
+```
+
 ### Tests Hang at TEST Stage
 
 Test frameworks must run non-interactively. Common issues:
@@ -640,6 +679,44 @@ If the TEST stage keeps retrying instead of rolling back to DEV:
 ### "Galangal has not been initialized" Error
 
 Run `galangal init` in your project root before using other commands.
+
+### Task Exits Without Error Message
+
+If a task quits unexpectedly with no visible error:
+
+1. **Enable debug mode** and re-run:
+   ```bash
+   galangal --debug start "your task"
+   ```
+
+2. **Check the debug log** for the actual error:
+   ```bash
+   tail -50 logs/galangal_debug.log
+   ```
+
+3. **Common causes**:
+   - GitHub authentication failed (run `gh auth status`)
+   - Network timeout fetching issues
+   - Missing permissions for the repository
+   - Invalid issue number or no issues with `galangal` label
+
+### GitHub Integration Fails Silently
+
+If `galangal start` from a GitHub issue exits without creating a task:
+
+```bash
+# Check GitHub CLI is working
+gh auth status
+gh repo view
+
+# Try with debug mode
+galangal --debug start --issue 123
+```
+
+Check `logs/galangal_debug.log` for specific errors like:
+- `401 Unauthorized` - Re-authenticate with `gh auth login`
+- `404 Not Found` - Issue doesn't exist or wrong repo
+- `No issues with 'galangal' label` - Add the label to an issue first
 
 ## License
 

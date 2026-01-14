@@ -30,6 +30,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.widgets import Footer, RichLog
 
+from galangal.core.utils import debug_log
 from galangal.ui.tui.adapters import PromptType, TUIAdapter, get_prompt_options
 from galangal.ui.tui.mixins import WidgetAccessMixin
 from galangal.ui.tui.modals import (
@@ -307,6 +308,10 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
             style: Style name (info, success, error, warning).
             category: Category for filtering.
         """
+        # Log errors and warnings to debug log
+        if style in ("error", "warning"):
+            debug_log(f"[TUI {style.upper()}]", content=message)
+
         icons = {"info": "ℹ", "success": "✓", "error": "✗", "warning": "⚠"}
         levels = {
             "info": ActivityLevel.INFO,

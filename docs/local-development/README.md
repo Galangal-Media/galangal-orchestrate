@@ -72,6 +72,41 @@ galangal start "my test task" --type bug_fix
 
 This is useful when you want to quickly run a command without activating the environment, or when you have a global install and want to explicitly use the local version.
 
+## Global Install from Local Code
+
+If you want to replace your global pipx install with the local development version (so `galangal` works everywhere without activating a venv):
+
+### Install globally in editable mode
+
+```bash
+# Uninstall the PyPI version first
+pipx uninstall galangal-orchestrate
+
+# Install from local code in editable mode
+pipx install -e /path/to/galangal-orchestrate
+```
+
+Now `galangal` is available globally and uses your local source code. Any changes you make take effect immediately.
+
+### Verify it's using local code
+
+```bash
+# Should show your local path
+pipx list | grep galangal
+
+# Test the CLI
+galangal --help
+```
+
+### Switch back to PyPI version
+
+When you want to go back to the released version:
+
+```bash
+pipx uninstall galangal-orchestrate
+pipx install galangal-orchestrate
+```
+
 ## Testing Changes
 
 ### Using a sandbox directory

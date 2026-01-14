@@ -2,11 +2,14 @@
 Task directory management - creating, listing, and switching tasks.
 """
 
+from __future__ import annotations
+
 import json
 import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from galangal.config.loader import (
     get_active_file,
@@ -16,6 +19,9 @@ from galangal.config.loader import (
     get_tasks_dir,
 )
 from galangal.core.artifacts import run_command
+
+if TYPE_CHECKING:
+    from galangal.core.state import WorkflowState
 
 
 def get_active_task() -> str | None:
@@ -199,3 +205,37 @@ def get_current_branch() -> str:
         return result.stdout.strip() or "unknown"
     except Exception:
         return "unknown"
+
+
+def ensure_active_task_with_state(
+    no_task_msg: str = "No active task.",
+    no_state_msg: str = "Could not load state for '{task}'.",
+) -> tuple[str, WorkflowState] | tuple[None, None]:
+    """Load active task and its state, with error handling.
+
+    This helper consolidates the common pattern of loading the active task
+    and its state, with appropriate error messages for each failure case.
+
+    Args:
+        no_task_msg: Message to print if no active task.
+        no_state_msg: Message template if state can't be loaded.
+            Use {task} placeholder for task name.
+
+    Returns:
+        Tuple of (task_name, state) if successful,
+        or (None, None) with error printed if failed.
+    """
+    from galangal.core.state import load_state
+    from galangal.ui.console import print_error
+
+    active = get_active_task()
+    if not active:
+        print_error(no_task_msg)
+        return None, None
+
+    state = load_state(active)
+    if state is None:
+        print_error(no_state_msg.format(task=active))
+        return None, None
+
+    return active, state

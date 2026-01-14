@@ -4,22 +4,17 @@ galangal resume - Resume the active task.
 
 import argparse
 
-from galangal.core.state import load_state
-from galangal.core.tasks import get_active_task
+from galangal.core.tasks import ensure_active_task_with_state
 from galangal.core.workflow import run_workflow
-from galangal.ui.console import console, print_error
+from galangal.ui.console import console
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
     """Resume the active task."""
-    active = get_active_task()
-    if not active:
-        print_error("No active task. Use 'list' to see tasks, 'switch' to select one.")
-        return 1
-
-    state = load_state(active)
-    if state is None:
-        print_error(f"Could not load state for '{active}'.")
+    active, state = ensure_active_task_with_state(
+        no_task_msg="No active task. Use 'list' to see tasks, 'switch' to select one."
+    )
+    if not active or not state:
         return 1
 
     console.print(f"[bold]Resuming task:[/bold] {active}")

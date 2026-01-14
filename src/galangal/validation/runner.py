@@ -8,7 +8,13 @@ from dataclasses import dataclass
 
 from galangal.config.loader import get_config, get_project_root
 from galangal.config.schema import PreflightCheck, StageValidation, ValidationCommand
-from galangal.core.artifacts import artifact_exists, read_artifact, write_artifact
+from galangal.core.artifacts import (
+    artifact_exists,
+    read_artifact,
+    write_artifact,
+    write_skip_artifact,
+)
+from galangal.core.utils import now_iso, truncate_text
 
 
 def read_decision_file(stage: str, task_name: str) -> str | None:
@@ -46,6 +52,30 @@ def read_decision_file(stage: str, task_name: str) -> str | None:
     return decision
 
 
+# Decision configurations for each stage type
+# Maps decision values to (success, message, rollback_to)
+DECISION_CONFIGS: dict[str, dict[str, tuple[bool, str, str | None]]] = {
+    "SECURITY": {
+        "APPROVED": (True, "Security review approved", None),
+        "REJECTED": (False, "Security review found blocking issues", "DEV"),
+        "BLOCKED": (False, "Security review found blocking issues", "DEV"),
+    },
+    "QA": {
+        "PASS": (True, "QA passed", None),
+        "FAIL": (False, "QA failed", "DEV"),
+    },
+    "TEST": {
+        "PASS": (True, "Tests passed", None),
+        "FAIL": (False, "Tests failed due to implementation issues - needs DEV fix", "DEV"),
+        "BLOCKED": (False, "Tests blocked by implementation issues - needs DEV fix", "DEV"),
+    },
+    "REVIEW": {
+        "APPROVE": (True, "Review approved", None),
+        "REQUEST_CHANGES": (False, "Review requested changes", "DEV"),
+    },
+}
+
+
 @dataclass
 class ValidationResult:
     """
@@ -65,6 +95,60 @@ class ValidationResult:
     rollback_to: str | None = None  # Stage to rollback to on failure
     skipped: bool = False  # True if stage was skipped due to conditions
     needs_user_decision: bool = False  # True if decision file missing/unclear
+
+
+def validate_stage_decision(
+    stage: str,
+    task_name: str,
+    artifact_name: str,
+    missing_artifact_msg: str | None = None,
+    skip_artifact: str | None = None,
+) -> ValidationResult:
+    """Generic decision file validation for stages.
+
+    This helper consolidates the repeated pattern of:
+    1. Check skip artifact
+    2. Check decision file for known values
+    3. Check if report artifact exists
+    4. Request user decision if unclear
+
+    Args:
+        stage: Stage name (e.g., "SECURITY", "QA", "REVIEW").
+        task_name: Name of the task being validated.
+        artifact_name: Name of the report artifact (e.g., "QA_REPORT.md").
+        missing_artifact_msg: Custom message if artifact is missing.
+        skip_artifact: Optional skip artifact name (e.g., "SECURITY_SKIP.md").
+
+    Returns:
+        ValidationResult based on decision file or artifact status.
+    """
+    stage_upper = stage.upper()
+
+    # Check for skip artifact first
+    if skip_artifact and artifact_exists(skip_artifact, task_name):
+        return ValidationResult(True, f"{stage_upper} skipped")
+
+    # Check for decision file
+    decision = read_decision_file(stage_upper, task_name)
+    decision_config = DECISION_CONFIGS.get(stage_upper, {})
+
+    if decision and decision in decision_config:
+        success, message, rollback_to = decision_config[decision]
+        return ValidationResult(success, message, rollback_to=rollback_to)
+
+    # Decision file missing or unclear - check if artifact exists
+    if not artifact_exists(artifact_name, task_name):
+        msg = missing_artifact_msg or f"{artifact_name} not found"
+        return ValidationResult(False, msg, rollback_to="DEV")
+
+    # Artifact exists but no valid decision file - need user to decide
+    content = read_artifact(artifact_name, task_name) or ""
+    return ValidationResult(
+        False,
+        f"{stage_upper}_DECISION file missing or unclear - user confirmation required",
+        output=truncate_text(content, 2000),
+        needs_user_decision=True,
+    )
 
 
 class ValidationRunner:
@@ -131,33 +215,13 @@ class ValidationRunner:
                 self._write_skip_artifact(stage, task_name, "Condition met")
                 return ValidationResult(True, f"{stage} skipped (condition met)", skipped=True)
 
-        # SECURITY stage: check SECURITY_DECISION file first, fall back to user prompt
+        # SECURITY stage: use generic decision validation
         if stage_lower == "security":
-            if artifact_exists("SECURITY_SKIP.md", task_name):
-                return ValidationResult(True, "Security skipped")
-
-            # Check for decision file first (preferred method)
-            decision = read_decision_file("SECURITY", task_name)
-            if decision == "APPROVED":
-                return ValidationResult(True, "Security review approved")
-            if decision in ("REJECTED", "BLOCKED"):
-                return ValidationResult(
-                    False, "Security review found blocking issues", rollback_to="DEV"
-                )
-
-            # Decision file missing or unclear - check if checklist exists
-            if not artifact_exists("SECURITY_CHECKLIST.md", task_name):
-                return ValidationResult(
-                    False, "SECURITY_CHECKLIST.md not found", rollback_to="DEV"
-                )
-
-            # Checklist exists but no valid decision file - need user to decide
-            checklist = read_artifact("SECURITY_CHECKLIST.md", task_name) or ""
-            return ValidationResult(
-                False,
-                "SECURITY_DECISION file missing or unclear - user confirmation required",
-                output=checklist[:2000],  # Include checklist summary for user
-                needs_user_decision=True,
+            return validate_stage_decision(
+                "SECURITY",
+                task_name,
+                "SECURITY_CHECKLIST.md",
+                skip_artifact="SECURITY_SKIP.md",
             )
 
         # Run preflight checks (for PREFLIGHT stage)
@@ -245,14 +309,7 @@ class ValidationRunner:
 
     def _write_skip_artifact(self, stage: str, task_name: str, reason: str) -> None:
         """Write a skip marker artifact."""
-        from datetime import datetime, timezone
-
-        content = f"""# {stage} Stage Skipped
-
-Date: {datetime.now(timezone.utc).isoformat()}
-Reason: {reason}
-"""
-        write_artifact(f"{stage.upper()}_SKIP.md", content, task_name)
+        write_skip_artifact(stage, reason, task_name)
 
     def _run_preflight_checks(
         self, checks: list[PreflightCheck], task_name: str
@@ -279,8 +336,6 @@ Reason: {reason}
             ValidationResult with success=True if all required checks pass.
             Output contains the generated report content.
         """
-        from datetime import datetime, timezone
-
         results: dict[str, dict] = {}
         all_ok = True
 
@@ -327,13 +382,13 @@ Reason: {reason}
                     if not check.warn_only:
                         all_ok = False
 
-        # Generate report
+        # Generate report (uses now_iso imported at module level)
         status = "READY" if all_ok else "NOT_READY"
         report = f"""# Preflight Report
 
 ## Summary
 - **Status:** {status}
-- **Date:** {datetime.now(timezone.utc).isoformat()}
+- **Date:** {now_iso()}
 
 ## Checks
 """
@@ -472,25 +527,7 @@ Reason: {reason}
 
     def _check_qa_report(self, task_name: str) -> ValidationResult:
         """Check QA_DECISION file first, then fall back to QA_REPORT.md parsing."""
-        # Check for decision file first (preferred method)
-        decision = read_decision_file("QA", task_name)
-        if decision == "PASS":
-            return ValidationResult(True, "QA passed")
-        if decision == "FAIL":
-            return ValidationResult(False, "QA failed", rollback_to="DEV")
-
-        # Decision file missing or unclear - check if report exists
-        if not artifact_exists("QA_REPORT.md", task_name):
-            return ValidationResult(False, "QA_REPORT.md not found", rollback_to="DEV")
-
-        # Report exists but no valid decision file - need user to decide
-        content = read_artifact("QA_REPORT.md", task_name) or ""
-        return ValidationResult(
-            False,
-            "QA_DECISION file missing or unclear - user confirmation required",
-            output=content[:2000],  # Include report summary for user
-            needs_user_decision=True,
-        )
+        return validate_stage_decision("QA", task_name, "QA_REPORT.md")
 
     def _validate_with_defaults(
         self, stage: str, task_name: str
@@ -543,16 +580,11 @@ Reason: {reason}
             if not artifact_exists("TEST_PLAN.md", task_name):
                 return ValidationResult(False, "TEST_PLAN.md not found")
 
-            # Check for decision file
+            # Check for decision file first
             decision = read_decision_file("TEST", task_name)
-            if decision == "PASS":
-                return ValidationResult(True, "Tests passed")
-            if decision in ("FAIL", "BLOCKED"):
-                return ValidationResult(
-                    False,
-                    "Tests failed due to implementation issues - needs DEV fix",
-                    rollback_to="DEV",
-                )
+            if decision and decision in DECISION_CONFIGS.get("TEST", {}):
+                success, message, rollback_to = DECISION_CONFIGS["TEST"][decision]
+                return ValidationResult(success, message, rollback_to=rollback_to)
 
             # No decision file - check TEST_PLAN.md content for markers
             report = read_artifact("TEST_PLAN.md", task_name) or ""
@@ -582,71 +614,26 @@ Reason: {reason}
             return ValidationResult(
                 False,
                 "TEST_DECISION file missing - confirm test results",
-                output=report[:2000],
+                output=truncate_text(report, 2000),
                 needs_user_decision=True,
             )
 
-        # QA stage - check QA_DECISION file first
+        # QA stage - use generic decision validation
         if stage_upper == "QA":
-            decision = read_decision_file("QA", task_name)
-            if decision == "PASS":
-                return ValidationResult(True, "QA passed")
-            if decision == "FAIL":
-                return ValidationResult(False, "QA failed", rollback_to="DEV")
-            # Decision file missing - check if report exists for user to review
-            if not artifact_exists("QA_REPORT.md", task_name):
-                return ValidationResult(False, "QA_REPORT.md not found", rollback_to="DEV")
-            report = read_artifact("QA_REPORT.md", task_name) or ""
-            return ValidationResult(
-                False,
-                "QA_DECISION file missing - user confirmation required",
-                output=report[:2000],
-                needs_user_decision=True,
-            )
+            return validate_stage_decision("QA", task_name, "QA_REPORT.md")
 
-        # SECURITY stage - check SECURITY_DECISION file first
+        # SECURITY stage - use generic decision validation
         if stage_upper == "SECURITY":
-            if artifact_exists("SECURITY_SKIP.md", task_name):
-                return ValidationResult(True, "Security skipped")
-            decision = read_decision_file("SECURITY", task_name)
-            if decision == "APPROVED":
-                return ValidationResult(True, "Security review approved")
-            if decision in ("REJECTED", "BLOCKED"):
-                return ValidationResult(
-                    False, "Security review found blocking issues", rollback_to="DEV"
-                )
-            # Decision file missing - check if checklist exists for user to review
-            if not artifact_exists("SECURITY_CHECKLIST.md", task_name):
-                return ValidationResult(
-                    False, "SECURITY_CHECKLIST.md not found", rollback_to="DEV"
-                )
-            checklist = read_artifact("SECURITY_CHECKLIST.md", task_name) or ""
-            return ValidationResult(
-                False,
-                "SECURITY_DECISION file missing - user confirmation required",
-                output=checklist[:2000],
-                needs_user_decision=True,
+            return validate_stage_decision(
+                "SECURITY",
+                task_name,
+                "SECURITY_CHECKLIST.md",
+                skip_artifact="SECURITY_SKIP.md",
             )
 
-        # REVIEW stage - check REVIEW_DECISION file first
+        # REVIEW stage - use generic decision validation
         if stage_upper == "REVIEW":
-            decision = read_decision_file("REVIEW", task_name)
-            if decision == "APPROVE":
-                return ValidationResult(True, "Review approved")
-            if decision == "REQUEST_CHANGES":
-                return ValidationResult(
-                    False, "Review requested changes", rollback_to="DEV"
-                )
-            # Decision file missing - check if notes exist for user to review
-            if not artifact_exists("REVIEW_NOTES.md", task_name):
-                return ValidationResult(False, "REVIEW_NOTES.md not found", rollback_to="DEV")
-            notes = read_artifact("REVIEW_NOTES.md", task_name) or ""
-            return ValidationResult(
-                False,
-                "REVIEW_DECISION file missing - user confirmation required",
-                output=notes[:2000],
-                needs_user_decision=True,
-            )
+            return validate_stage_decision("REVIEW", task_name, "REVIEW_NOTES.md")
 
         # DOCS stage - check for DOCS_REPORT.md
         if stage_upper == "DOCS":
