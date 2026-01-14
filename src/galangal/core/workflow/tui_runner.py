@@ -1092,72 +1092,239 @@ def _start_new_task_tui() -> str:
     """
     app = WorkflowTUIApp("New Task", "SETUP", hidden_stages=frozenset())
 
-    task_info = {"type": None, "description": None, "name": None}
+    task_info = {
+        "type": None,
+        "description": None,
+        "name": None,
+        "github_issue": None,
+        "github_repo": None,
+        "screenshots": None,
+    }
 
     async def task_creation_loop():
         """Async task creation flow."""
         try:
             app.add_activity("[bold]Starting new task...[/bold]", "🆕")
-            app.set_status("setup", "select task type")
 
-            # Step 1: Get task type
-            type_choice = await app.prompt_async(
-                PromptType.TASK_TYPE, "Select task type:"
+            # Step 0: Choose task source (manual or GitHub)
+            app.set_status("setup", "select task source")
+            source_choice = await app.prompt_async(
+                PromptType.TASK_SOURCE, "Create task from:"
             )
 
-            if type_choice == "quit":
+            if source_choice == "quit":
                 app._workflow_result = "cancelled"
                 app.set_timer(0.5, app.exit)
                 return
 
-            # Map selection to TaskType
-            type_map = {
-                "feature": TaskType.FEATURE,
-                "bugfix": TaskType.BUG_FIX,
-                "refactor": TaskType.REFACTOR,
-                "chore": TaskType.CHORE,
-                "docs": TaskType.DOCS,
-                "hotfix": TaskType.HOTFIX,
-            }
-            task_info["type"] = type_map.get(type_choice, TaskType.FEATURE)
+            issue_body_for_screenshots = None
+
+            if source_choice == "github":
+                # Handle GitHub issue selection
+                app.set_status("setup", "checking GitHub")
+                app.show_message("Checking GitHub setup...", "info")
+
+                try:
+                    from galangal.github.client import GitHubClient
+                    from galangal.github.issues import list_issues
+
+                    client = await asyncio.to_thread(GitHubClient)
+                    check = await asyncio.to_thread(client.check_setup)
+
+                    if not check.is_ready:
+                        app.show_message(
+                            "GitHub not ready. Run 'galangal github check'", "error"
+                        )
+                        app._workflow_result = "error"
+                        app.set_timer(0.5, app.exit)
+                        return
+
+                    task_info["github_repo"] = check.repo_name
+
+                    # List issues with galangal label
+                    app.set_status("setup", "fetching issues")
+                    app.show_message("Fetching issues...", "info")
+
+                    issues = await asyncio.to_thread(list_issues)
+                    if not issues:
+                        app.show_message(
+                            "No issues with 'galangal' label found", "warning"
+                        )
+                        app._workflow_result = "cancelled"
+                        app.set_timer(0.5, app.exit)
+                        return
+
+                    # Show issue selection
+                    app.set_status("setup", "select issue")
+                    issue_options = [(i.number, i.title) for i in issues]
+                    issue_num = await app.select_github_issue_async(issue_options)
+
+                    if issue_num is None:
+                        app._workflow_result = "cancelled"
+                        app.set_timer(0.5, app.exit)
+                        return
+
+                    # Get the selected issue details
+                    selected_issue = next(
+                        (i for i in issues if i.number == issue_num), None
+                    )
+                    if selected_issue:
+                        task_info["github_issue"] = selected_issue.number
+                        task_info["description"] = (
+                            f"{selected_issue.title}\n\n{selected_issue.body}"
+                        )
+                        app.show_message(
+                            f"Selected issue #{selected_issue.number}", "success"
+                        )
+
+                        # Check for screenshots
+                        from galangal.github.images import extract_image_urls
+
+                        images = extract_image_urls(selected_issue.body)
+                        if images:
+                            app.show_message(
+                                f"Found {len(images)} screenshot(s) in issue...", "info"
+                            )
+                            issue_body_for_screenshots = selected_issue.body
+
+                        # Try to infer task type from labels
+                        type_hint = selected_issue.get_task_type_hint()
+                        if type_hint:
+                            type_map = {
+                                "feature": TaskType.FEATURE,
+                                "bug_fix": TaskType.BUG_FIX,
+                                "refactor": TaskType.REFACTOR,
+                                "chore": TaskType.CHORE,
+                                "docs": TaskType.DOCS,
+                                "hotfix": TaskType.HOTFIX,
+                            }
+                            task_info["type"] = type_map.get(type_hint)
+                            if task_info["type"]:
+                                app.show_message(
+                                    f"Inferred type: {task_info['type'].display_name()}",
+                                    "info",
+                                )
+
+                except Exception as e:
+                    app.show_message(f"GitHub error: {e}", "error")
+                    app._workflow_result = "error"
+                    app.set_timer(0.5, app.exit)
+                    return
+
+            # Step 1: Get task type (if not already set from GitHub labels)
+            if task_info["type"] is None:
+                app.set_status("setup", "select task type")
+                type_choice = await app.prompt_async(
+                    PromptType.TASK_TYPE, "Select task type:"
+                )
+
+                if type_choice == "quit":
+                    app._workflow_result = "cancelled"
+                    app.set_timer(0.5, app.exit)
+                    return
+
+                # Map selection to TaskType
+                type_map = {
+                    "feature": TaskType.FEATURE,
+                    "bugfix": TaskType.BUG_FIX,
+                    "refactor": TaskType.REFACTOR,
+                    "chore": TaskType.CHORE,
+                    "docs": TaskType.DOCS,
+                    "hotfix": TaskType.HOTFIX,
+                }
+                task_info["type"] = type_map.get(type_choice, TaskType.FEATURE)
+
             app.show_message(f"Task type: {task_info['type'].display_name()}", "success")
 
-            # Step 2: Get task description
-            app.set_status("setup", "enter description")
-            description = await app.multiline_input_async(
-                "Enter task description (Ctrl+S to submit):", ""
-            )
+            # Step 2: Get task description (if not from GitHub)
+            if not task_info["description"]:
+                app.set_status("setup", "enter description")
+                description = await app.multiline_input_async(
+                    "Enter task description (Ctrl+S to submit):", ""
+                )
 
-            if not description:
-                app.show_message("Task creation cancelled", "warning")
-                app._workflow_result = "cancelled"
-                app.set_timer(0.5, app.exit)
-                return
+                if not description:
+                    app.show_message("Task creation cancelled", "warning")
+                    app._workflow_result = "cancelled"
+                    app.set_timer(0.5, app.exit)
+                    return
 
-            task_info["description"] = description
+                task_info["description"] = description
 
-            # Step 3: Generate and create task
+            # Step 3: Generate task name
             app.set_status("setup", "generating task name")
-            from galangal.commands.start import create_task, generate_task_name
+            from galangal.commands.start import create_task
+            from galangal.core.tasks import generate_task_name, task_name_exists
 
-            task_name = await asyncio.to_thread(
+            base_name = await asyncio.to_thread(
                 generate_task_name, task_info["description"]
             )
-            task_info["name"] = task_name
-            app.show_message(f"Task name: {task_name}", "info")
 
-            # Create the task
+            # Prefix with issue number if from GitHub
+            if task_info["github_issue"]:
+                base_name = f"issue-{task_info['github_issue']}-{base_name}"
+
+            final_name = base_name
+            suffix = 2
+            while await asyncio.to_thread(task_name_exists, final_name):
+                final_name = f"{base_name}-{suffix}"
+                suffix += 1
+
+            task_info["name"] = final_name
+            app.show_message(f"Task name: {final_name}", "info")
+
+            # Step 3.5: Download screenshots if from GitHub issue
+            if issue_body_for_screenshots:
+                app.set_status("setup", "downloading screenshots")
+                try:
+                    from galangal.github.images import download_issue_images
+
+                    task_dir = get_task_dir(task_info["name"])
+                    # Create task dir early for screenshots
+                    task_dir.mkdir(parents=True, exist_ok=True)
+
+                    screenshot_paths = await asyncio.to_thread(
+                        download_issue_images,
+                        issue_body_for_screenshots,
+                        task_dir,
+                    )
+                    if screenshot_paths:
+                        task_info["screenshots"] = screenshot_paths
+                        app.show_message(
+                            f"Downloaded {len(screenshot_paths)} screenshot(s)",
+                            "success",
+                        )
+                except Exception as e:
+                    app.show_message(f"Screenshot download failed: {e}", "warning")
+                    # Non-critical - continue without screenshots
+
+            # Step 4: Create the task
             app.set_status("setup", "creating task")
             success, message = await asyncio.to_thread(
                 create_task,
-                task_name,
+                task_info["name"],
                 task_info["description"],
                 task_info["type"],
+                task_info["github_issue"],
+                task_info["github_repo"],
+                task_info["screenshots"],
             )
 
             if success:
                 app.show_message(message, "success")
                 app._workflow_result = "task_created"
+
+                # Mark issue as in-progress if from GitHub
+                if task_info["github_issue"]:
+                    try:
+                        from galangal.github.issues import mark_issue_in_progress
+
+                        await asyncio.to_thread(
+                            mark_issue_in_progress, task_info["github_issue"]
+                        )
+                        app.show_message("Marked issue as in-progress", "info")
+                    except Exception:
+                        pass  # Non-critical
             else:
                 app.show_error("Task creation failed", message)
                 app._workflow_result = "error"
