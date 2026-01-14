@@ -169,5 +169,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     console.print("  [cyan]galangal prompts export[/cyan]    # Export defaults to .galangal/prompts/")
     console.print("\nNext steps:")
     console.print("  [cyan]galangal start \"Your first task\"[/cyan]")
+    console.print("\nFor GitHub Issues integration:")
+    console.print("  [cyan]galangal github setup[/cyan]      # Create labels and configure")
 
     return 0

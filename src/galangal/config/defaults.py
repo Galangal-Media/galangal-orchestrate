@@ -99,6 +99,45 @@ pr:
   base_branch: main
 
 # =============================================================================
+# GitHub Integration
+# =============================================================================
+# Configure how galangal integrates with GitHub Issues.
+# Run 'galangal github setup' to create required labels.
+
+github:
+  # Label that marks issues for galangal to pick up
+  pickup_label: galangal
+
+  # Label added when galangal starts working on an issue
+  in_progress_label: in-progress
+
+  # Colors for labels (hex without #)
+  label_colors:
+    galangal: "7C3AED"       # Purple
+    in-progress: "FCD34D"    # Yellow
+
+  # Map GitHub labels to task types
+  # Add your custom labels here
+  label_mapping:
+    bug:
+      - bug
+      - bugfix
+    feature:
+      - enhancement
+      - feature
+    docs:
+      - documentation
+      - docs
+    refactor:
+      - refactor
+    chore:
+      - chore
+      - maintenance
+    hotfix:
+      - hotfix
+      - critical
+
+# =============================================================================
 # Prompt Context
 # =============================================================================
 # Add project-specific patterns and instructions here.
