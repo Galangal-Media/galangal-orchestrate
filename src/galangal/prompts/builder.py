@@ -86,7 +86,9 @@ class PromptBuilder:
         # No marker = full override
         return project_prompt
 
-    def build_discovery_prompt(self, state: WorkflowState, qa_history: list[dict[str, Any]] | None = None) -> str:
+    def build_discovery_prompt(
+        self, state: WorkflowState, qa_history: list[dict[str, Any]] | None = None
+    ) -> str:
         """Build the prompt for PM discovery questions.
 
         Args:
@@ -377,13 +379,38 @@ Only update documentation types marked as YES above.""")
             if artifact_exists("TEST_PLAN.md", task_name):
                 parts.append(f"\n# TEST_PLAN.md\n{read_artifact('TEST_PLAN.md', task_name)}")
 
+        # QA stage: include test summary for context on what was tested
+        if stage == Stage.QA:
+            if artifact_exists("TEST_SUMMARY.md", task_name):
+                parts.append(
+                    f"\n# TEST_SUMMARY.md (Test results summary)\n{read_artifact('TEST_SUMMARY.md', task_name)}"
+                )
+
+        # SECURITY stage: include test summary for coverage context
+        if stage == Stage.SECURITY:
+            if artifact_exists("TEST_SUMMARY.md", task_name):
+                parts.append(
+                    f"\n# TEST_SUMMARY.md (Test results)\n{read_artifact('TEST_SUMMARY.md', task_name)}"
+                )
+
         # REVIEW stage: needs QA and Security reports to verify they were addressed
         if stage == Stage.REVIEW:
+            if artifact_exists("TEST_SUMMARY.md", task_name):
+                parts.append(
+                    f"\n# TEST_SUMMARY.md (Test results)\n{read_artifact('TEST_SUMMARY.md', task_name)}"
+                )
             if artifact_exists("QA_REPORT.md", task_name):
                 parts.append(f"\n# QA_REPORT.md\n{read_artifact('QA_REPORT.md', task_name)}")
             if artifact_exists("SECURITY_CHECKLIST.md", task_name):
                 parts.append(
                     f"\n# SECURITY_CHECKLIST.md\n{read_artifact('SECURITY_CHECKLIST.md', task_name)}"
+                )
+
+        # DOCS stage: include test summary for documentation context
+        if stage == Stage.DOCS:
+            if artifact_exists("TEST_SUMMARY.md", task_name):
+                parts.append(
+                    f"\n# TEST_SUMMARY.md (Test results)\n{read_artifact('TEST_SUMMARY.md', task_name)}"
                 )
 
         return parts
@@ -446,7 +473,9 @@ Only update documentation types marked as YES above.""")
                 all_files.update(files.split("\n"))
         all_files.discard("")
 
-        files_list = "\n".join(f"- {f}" for f in sorted(all_files)) if all_files else "(No files changed)"
+        files_list = (
+            "\n".join(f"- {f}" for f in sorted(all_files)) if all_files else "(No files changed)"
+        )
 
         # Build minimal context - instruct to READ files, not dump diff
         context = f"""# Independent Code Review

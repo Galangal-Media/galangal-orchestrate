@@ -16,9 +16,11 @@ from galangal.config.schema import GalangalConfig
 from galangal.core.artifacts import artifact_exists, parse_stage_plan, read_artifact, write_artifact
 from galangal.core.state import (
     STAGE_ORDER,
+    TASK_TYPE_SKIP_STAGES,
     Stage,
     TaskType,
     WorkflowState,
+    get_conditional_stages,
     get_hidden_stages_for_task_type,
     get_task_dir,
     save_state,
@@ -34,6 +36,7 @@ from galangal.logging import workflow_logger
 from galangal.prompts.builder import PromptBuilder
 from galangal.results import StageResult, StageResultType
 from galangal.ui.tui import PromptType, WorkflowTUIApp
+from galangal.validation.runner import ValidationRunner
 
 console = Console()
 
@@ -66,9 +69,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
     config = get_config()
 
     # Compute hidden stages based on task type and config
-    hidden_stages = frozenset(
-        get_hidden_stages_for_task_type(state.task_type, config.stages.skip)
-    )
+    hidden_stages = frozenset(get_hidden_stages_for_task_type(state.task_type, config.stages.skip))
 
     app = WorkflowTUIApp(
         state.task_name,
@@ -87,17 +88,14 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                 if state.github_issue:
                     try:
                         from galangal.github.issues import is_issue_open
-                        issue_open = await asyncio.to_thread(
-                            is_issue_open, state.github_issue
-                        )
+
+                        issue_open = await asyncio.to_thread(is_issue_open, state.github_issue)
                         if issue_open is False:
                             app.show_message(
-                                f"GitHub issue #{state.github_issue} has been closed",
-                                "warning"
+                                f"GitHub issue #{state.github_issue} has been closed", "warning"
                             )
                             app.add_activity(
-                                f"Issue #{state.github_issue} closed externally - pausing",
-                                "⚠"
+                                f"Issue #{state.github_issue} closed externally - pausing", "⚠"
                             )
                             app._workflow_result = "paused"
                             break
@@ -115,7 +113,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                 # Run PM discovery Q&A before PM stage execution
                 if state.stage == Stage.PM and not state.qa_complete:
                     # Check for skip flag (passed via state or config)
-                    skip_discovery = getattr(state, '_skip_discovery', False)
+                    skip_discovery = getattr(state, "_skip_discovery", False)
                     discovery_ok = await _run_pm_discovery(app, state, skip_discovery)
                     if not discovery_ok:
                         app._workflow_result = "paused"
@@ -162,10 +160,13 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     if len(valid_targets) > 1:
                         # Build options string
                         options_text = "\n".join(
-                            f"  [{i+1}] {s.value}" + (" (recommended)" if s == default_target else "")
+                            f"  [{i + 1}] {s.value}"
+                            + (" (recommended)" if s == default_target else "")
                             for i, s in enumerate(valid_targets)
                         )
-                        target_prompt = f"Roll back to which stage?\n\n{options_text}\n\nEnter number:"
+                        target_prompt = (
+                            f"Roll back to which stage?\n\n{options_text}\n\nEnter number:"
+                        )
 
                         target_input = await app.text_input_async(target_prompt, "1")
                         try:
@@ -181,6 +182,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
 
                     # Append to ROLLBACK.md (preserves history from earlier failures)
                     from galangal.core.workflow.core import append_rollback_entry
+
                     append_rollback_entry(
                         task_name=state.task_name,
                         source=f"User interrupt (Ctrl+I) during {interrupted_stage_name}",
@@ -200,7 +202,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     app._paused = False
                     app.show_message(
                         f"Interrupted {interrupted_stage_name} - rolling back to {target_stage.value}",
-                        "warning"
+                        "warning",
                     )
                     app.update_stage(state.stage.value, state.attempt)
                     continue
@@ -217,8 +219,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                         state.reset_attempts()
                         save_state(state)
                         app.show_message(
-                            f"Skipped {skipped_stage.value} → {next_stage.value}",
-                            "info"
+                            f"Skipped {skipped_stage.value} → {next_stage.value}", "info"
                         )
                         app.update_stage(state.stage.value, state.attempt)
                     else:
@@ -239,10 +240,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                         state.stage = prev_stage
                         state.reset_attempts()
                         save_state(state)
-                        app.show_message(
-                            f"Back to {prev_stage.value}",
-                            "info"
-                        )
+                        app.show_message(f"Back to {prev_stage.value}", "info")
                         app.update_stage(state.stage.value, state.attempt)
                     else:
                         app.show_message("Already at first stage", "warning")
@@ -255,14 +253,11 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                 if app._manual_edit_requested:
                     app.add_activity("Paused for manual editing", "✏️")
                     app.show_message(
-                        "Workflow paused - make your edits, then press Enter to continue",
-                        "info"
+                        "Workflow paused - make your edits, then press Enter to continue", "info"
                     )
 
                     # Wait for user to press Enter
-                    await app.text_input_async(
-                        "Press Enter when ready to continue...", ""
-                    )
+                    await app.text_input_async("Press Enter when ready to continue...", "")
 
                     app.add_activity("Resuming workflow", "▶️")
                     app.show_message("Resuming...", "info")
@@ -282,9 +277,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     # Handle preflight failures - prompt for retry
                     if result.type == StageResultType.PREFLIGHT_FAILED:
                         modal_message = _build_preflight_error_message(result)
-                        choice = await app.prompt_async(
-                            PromptType.PREFLIGHT_RETRY, modal_message
-                        )
+                        choice = await app.prompt_async(PromptType.PREFLIGHT_RETRY, modal_message)
 
                         if choice == "retry":
                             app.show_message("Retrying preflight checks...", "info")
@@ -302,8 +295,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                             questions = _parse_questions_from_artifact(questions_content)
                             if questions:
                                 app.show_message(
-                                    f"Stage has {len(questions)} clarifying question(s)",
-                                    "warning"
+                                    f"Stage has {len(questions)} clarifying question(s)", "warning"
                                 )
                                 # Show Q&A modal and collect answers
                                 answers = await app.question_answer_session_async(questions)
@@ -318,14 +310,15 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                                     continue
                                 else:
                                     # User cancelled - pause workflow
-                                    app.show_message("Answers cancelled - pausing workflow", "warning")
+                                    app.show_message(
+                                        "Answers cancelled - pausing workflow", "warning"
+                                    )
                                     save_state(state)
                                     app._workflow_result = "paused"
                                     break
                             else:
                                 app.show_message(
-                                    "QUESTIONS.md exists but couldn't parse questions",
-                                    "error"
+                                    "QUESTIONS.md exists but couldn't parse questions", "error"
                                 )
                         else:
                             app.show_message(result.message, "warning")
@@ -345,7 +338,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                                 PromptType.USER_DECISION,
                                 f"Decision file missing for {state.stage.value} stage.\n\n"
                                 f"Report preview:\n{artifact_preview}\n\n"
-                                "Please review and decide:"
+                                "Please review and decide:",
                             )
 
                             if choice == "view":
@@ -447,21 +440,23 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
 
                     # Handle rollback required
                     if result.type == StageResultType.ROLLBACK_REQUIRED:
-                        target = result.rollback_to.value if result.rollback_to else 'None'
-                        app.add_activity(
-                            f"Validation requested rollback to {target}",
-                            "⚠"
-                        )
+                        target = result.rollback_to.value if result.rollback_to else "None"
+                        app.add_activity(f"Validation requested rollback to {target}", "⚠")
                         if handle_rollback(state, result):
                             app.show_message(
-                                f"Rolling back to {state.stage.value}: {result.message[:60]}", "warning"
+                                f"Rolling back to {state.stage.value}: {result.message[:60]}",
+                                "warning",
                             )
                             app.update_stage(state.stage.value, state.attempt)
                             continue
                         else:
                             # Rollback was blocked - prompt user for action
                             # This happens when: rollback loop detected, or rollback_to was None
-                            rollback_count = state.get_rollback_count(result.rollback_to) if result.rollback_to else 0
+                            rollback_count = (
+                                state.get_rollback_count(result.rollback_to)
+                                if result.rollback_to
+                                else 0
+                            )
                             if rollback_count >= 3:
                                 block_reason = f"Too many rollbacks to {target} ({rollback_count} in last hour)"
                             elif result.rollback_to is None:
@@ -481,7 +476,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                                 f"Rollback to {target} was blocked.\n\n"
                                 f"Reason: {block_reason}\n\n"
                                 f"Error: {result.message[:300]}\n\n"
-                                "What would you like to do?"
+                                "What would you like to do?",
                             )
                             app.clear_error()
 
@@ -494,11 +489,14 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                                 # Force rollback to DEV by clearing rollback history for DEV
                                 original_stage = state.stage.value  # Capture before changing
                                 state.rollback_history = [
-                                    r for r in state.rollback_history
+                                    r
+                                    for r in state.rollback_history
                                     if r.to_stage != Stage.DEV.value
                                 ]
                                 state.stage = Stage.DEV
-                                state.last_failure = f"Manual rollback from {original_stage}: {result.message[:500]}"
+                                state.last_failure = (
+                                    f"Manual rollback from {original_stage}: {result.message[:500]}"
+                                )
                                 state.reset_attempts(clear_failure=False)
                                 save_state(state)
                                 app.show_message("Rolling back to DEV (manual override)", "warning")
@@ -510,10 +508,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                                 break
                     else:
                         # Log what result type we got (for debugging)
-                        app.add_activity(
-                            f"Validation result type: {result.type.name}",
-                            "⚙"
-                        )
+                        app.add_activity(f"Validation result type: {result.type.name}", "⚙")
 
                     # Handle stage failure with retries
                     error_message = result.output or result.message
@@ -596,6 +591,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
 
         except Exception as e:
             from galangal.core.utils import debug_exception
+
             debug_exception("Workflow execution failed", e)
             app.show_error("Workflow error", str(e))
             app._workflow_result = "error"
@@ -711,7 +707,9 @@ async def _run_pm_discovery(
         # Update discovery log
         _write_discovery_log(state.task_name, qa_rounds)
 
-        app.show_message(f"Round {len(qa_rounds)} complete - {len(questions)} Q&As recorded", "success")
+        app.show_message(
+            f"Round {len(qa_rounds)} complete - {len(questions)} Q&As recorded", "success"
+        )
 
         # Ask if user wants more questions
         more_questions = await app.ask_yes_no_async("Got more questions?")
@@ -802,6 +800,7 @@ def _parse_discovery_questions(output: str) -> list[str]:
         if in_questions and line:
             # Match numbered questions (1. Question text)
             import re
+
             match = re.match(r"^\d+[\.\)]\s*(.+)$", line)
             if match:
                 questions.append(match.group(1))
@@ -894,12 +893,7 @@ def _build_preflight_error_message(result: StageResult) -> str:
 
     failed_lines = []
     for line in detailed_error.split("\n"):
-        if (
-            line.strip().startswith("✗")
-            or "Failed" in line
-            or "Missing" in line
-            or "Error" in line
-        ):
+        if line.strip().startswith("✗") or "Failed" in line or "Missing" in line or "Error" in line:
             failed_lines.append(line.strip())
 
     modal_message = "Preflight checks failed:\n\n"
@@ -912,6 +906,72 @@ def _build_preflight_error_message(result: StageResult) -> str:
     return modal_message
 
 
+def _get_skip_reasons(
+    state: WorkflowState,
+    config: GalangalConfig,
+) -> dict[str, str]:
+    """
+    Get a mapping of stage names to their skip reasons.
+
+    Checks multiple skip sources in order of precedence:
+    1. Task type skips (from TASK_TYPE_SKIP_STAGES)
+    2. Config skips (from config.stages.skip)
+    3. PM stage plan skips (from STAGE_PLAN.md)
+    4. skip_if conditions (glob patterns for conditional stages)
+
+    Args:
+        state: Current workflow state with task_type and stage_plan.
+        config: Configuration with stages.skip list.
+
+    Returns:
+        Dict mapping stage name -> reason string (e.g., "task type: bug_fix")
+    """
+    skip_reasons: dict[str, str] = {}
+    task_type = state.task_type
+
+    # 1. Task type skips
+    for stage in TASK_TYPE_SKIP_STAGES.get(task_type, set()):
+        skip_reasons[stage.value] = f"task type: {task_type.value}"
+
+    # 2. Config skips
+    if config.stages.skip:
+        for stage_name in config.stages.skip:
+            stage_upper = stage_name.upper()
+            if stage_upper not in skip_reasons:
+                skip_reasons[stage_upper] = "config: stages.skip"
+
+    # 3. PM stage plan skips
+    if state.stage_plan:
+        for stage_name, plan_entry in state.stage_plan.items():
+            if plan_entry.get("action") == "skip":
+                reason = plan_entry.get("reason", "PM recommendation")
+                if stage_name not in skip_reasons:
+                    skip_reasons[stage_name] = f"PM: {reason}"
+
+    # 4. skip_if conditions for conditional stages
+    # Only check stages not already skipped by other means
+    conditional_stages = get_conditional_stages()
+    runner = ValidationRunner()
+
+    for stage in conditional_stages:
+        if stage.value not in skip_reasons:
+            if runner.should_skip_stage(stage.value, state.task_name):
+                # Get the skip_if pattern for context
+                stage_config = getattr(config.validation, stage.value.lower(), None)
+                if stage_config and stage_config.skip_if and stage_config.skip_if.no_files_match:
+                    patterns = stage_config.skip_if.no_files_match
+                    if isinstance(patterns, str):
+                        patterns = [patterns]
+                    pattern_str = ", ".join(patterns[:2])
+                    if len(patterns) > 2:
+                        pattern_str += "..."
+                    skip_reasons[stage.value] = f"no files match: {pattern_str}"
+                else:
+                    skip_reasons[stage.value] = "skip_if condition"
+
+    return skip_reasons
+
+
 async def _show_stage_preview(
     app: WorkflowTUIApp,
     state: WorkflowState,
@@ -920,19 +980,41 @@ async def _show_stage_preview(
     """
     Show a preview of stages to run before continuing.
 
+    Displays which stages will run and which will be skipped, with
+    annotated reasons for each skip (task type, config, PM plan, skip_if).
+
     Returns "continue" or "quit".
     """
+    # Get all skip reasons (includes skip_if conditions)
+    skip_reasons = _get_skip_reasons(state, config)
+
+    # Update hidden stages to include skip_if-based skips
+    # This ensures the progress bar reflects the preview
+    current_hidden = set(app._hidden_stages)
+    new_hidden = current_hidden | set(skip_reasons.keys())
+    if new_hidden != current_hidden:
+        app.update_hidden_stages(frozenset(new_hidden))
+
     # Calculate stages to run vs skip
     all_stages = [s for s in STAGE_ORDER if s != Stage.COMPLETE]
-    hidden = set(app._hidden_stages)
-
-    # Get stages that will run (not hidden)
-    stages_to_run = [s for s in all_stages if s.value not in hidden]
-    stages_skipped = [s for s in all_stages if s.value in hidden]
+    stages_to_run = [s for s in all_stages if s.value not in new_hidden]
+    stages_skipped = [s for s in all_stages if s.value in new_hidden]
 
     # Build preview message
     run_str = " → ".join(s.value for s in stages_to_run)
-    skip_str = ", ".join(s.value for s in stages_skipped) if stages_skipped else "None"
+
+    # Build annotated skip list
+    if stages_skipped:
+        skip_lines = []
+        for stage in stages_skipped:
+            reason = skip_reasons.get(stage.value, "")
+            if reason:
+                skip_lines.append(f"  {stage.value} ({reason})")
+            else:
+                skip_lines.append(f"  {stage.value}")
+        skip_str = "\n".join(skip_lines)
+    else:
+        skip_str = "  None"
 
     # Build a nice preview
     preview = f"""Workflow Preview
@@ -941,7 +1023,7 @@ Stages to run:
   {run_str}
 
 Skipping:
-  {skip_str}
+{skip_str}
 
 Controls during execution:
   ^N Skip stage  ^B Back  ^E Pause for edit  ^I Interrupt"""
@@ -1020,9 +1102,7 @@ async def _handle_stage_approval(
     # Determine prompt type based on stage
     prompt_type = PromptType.PLAN_APPROVAL  # Default, works for most stages
 
-    choice = await app.prompt_async(
-        prompt_type, f"Approve {stage_name} to continue?"
-    )
+    choice = await app.prompt_async(prompt_type, f"Approve {stage_name} to continue?")
 
     if choice == "yes":
         name = await app.text_input_async("Enter approver name:", default_approver)
@@ -1081,9 +1161,7 @@ async def _handle_stage_approval(
         return False
 
 
-def _show_skipped_stages(
-    app: WorkflowTUIApp, current_stage: Stage, next_stage: Stage
-) -> None:
+def _show_skipped_stages(app: WorkflowTUIApp, current_stage: Stage, next_stage: Stage) -> None:
     """Show messages for any stages that were skipped."""
     expected_next_idx = STAGE_ORDER.index(current_stage) + 1
     actual_next_idx = STAGE_ORDER.index(next_stage)
@@ -1153,6 +1231,7 @@ async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -
         if feedback:
             # Append to ROLLBACK.md (preserves history from earlier failures)
             from galangal.core.workflow.core import append_rollback_entry
+
             append_rollback_entry(
                 task_name=state.task_name,
                 source="Manual review at COMPLETE stage",
@@ -1200,9 +1279,7 @@ def _start_new_task_tui() -> str:
 
             # Step 0: Choose task source (manual or GitHub)
             app.set_status("setup", "select task source")
-            source_choice = await app.prompt_async(
-                PromptType.TASK_SOURCE, "Create task from:"
-            )
+            source_choice = await app.prompt_async(PromptType.TASK_SOURCE, "Create task from:")
 
             if source_choice == "quit":
                 app._workflow_result = "cancelled"
@@ -1222,9 +1299,7 @@ def _start_new_task_tui() -> str:
 
                     check = await asyncio.to_thread(ensure_github_ready)
                     if not check:
-                        app.show_message(
-                            "GitHub not ready. Run 'galangal github check'", "error"
-                        )
+                        app.show_message("GitHub not ready. Run 'galangal github check'", "error")
                         app._workflow_result = "error"
                         app.set_timer(0.5, app.exit)
                         return
@@ -1237,9 +1312,7 @@ def _start_new_task_tui() -> str:
 
                     issues = await asyncio.to_thread(list_issues)
                     if not issues:
-                        app.show_message(
-                            "No issues with 'galangal' label found", "warning"
-                        )
+                        app.show_message("No issues with 'galangal' label found", "warning")
                         app._workflow_result = "cancelled"
                         app.set_timer(0.5, app.exit)
                         return
@@ -1255,17 +1328,13 @@ def _start_new_task_tui() -> str:
                         return
 
                     # Get the selected issue details
-                    selected_issue = next(
-                        (i for i in issues if i.number == issue_num), None
-                    )
+                    selected_issue = next((i for i in issues if i.number == issue_num), None)
                     if selected_issue:
                         task_info["github_issue"] = selected_issue.number
                         task_info["description"] = (
                             f"{selected_issue.title}\n\n{selected_issue.body}"
                         )
-                        app.show_message(
-                            f"Selected issue #{selected_issue.number}", "success"
-                        )
+                        app.show_message(f"Selected issue #{selected_issue.number}", "success")
 
                         # Check for screenshots
                         from galangal.github.images import extract_image_urls
@@ -1288,6 +1357,7 @@ def _start_new_task_tui() -> str:
 
                 except Exception as e:
                     from galangal.core.utils import debug_exception
+
                     debug_exception("GitHub integration failed in new task flow", e)
                     app.show_message(f"GitHub error: {e}", "error")
                     app._workflow_result = "error"
@@ -1297,9 +1367,7 @@ def _start_new_task_tui() -> str:
             # Step 1: Get task type (if not already set from GitHub labels)
             if task_info["type"] is None:
                 app.set_status("setup", "select task type")
-                type_choice = await app.prompt_async(
-                    PromptType.TASK_TYPE, "Select task type:"
-                )
+                type_choice = await app.prompt_async(PromptType.TASK_TYPE, "Select task type:")
 
                 if type_choice == "quit":
                     app._workflow_result = "cancelled"
@@ -1358,6 +1426,7 @@ def _start_new_task_tui() -> str:
                         )
                 except Exception as e:
                     from galangal.core.utils import debug_exception
+
                     debug_exception("Screenshot download failed", e)
                     app.show_message(f"Screenshot download failed: {e}", "warning")
                     # Non-critical - continue without screenshots
@@ -1383,12 +1452,11 @@ def _start_new_task_tui() -> str:
                     try:
                         from galangal.github.issues import mark_issue_in_progress
 
-                        await asyncio.to_thread(
-                            mark_issue_in_progress, task_info["github_issue"]
-                        )
+                        await asyncio.to_thread(mark_issue_in_progress, task_info["github_issue"])
                         app.show_message("Marked issue as in-progress", "info")
                     except Exception as e:
                         from galangal.core.utils import debug_exception
+
                         debug_exception("Failed to mark issue as in-progress", e)
                         # Non-critical - continue anyway
             else:
@@ -1397,6 +1465,7 @@ def _start_new_task_tui() -> str:
 
         except Exception as e:
             from galangal.core.utils import debug_exception
+
             debug_exception("Task creation failed in new task flow", e)
             app.show_error("Task creation error", str(e))
             app._workflow_result = "error"

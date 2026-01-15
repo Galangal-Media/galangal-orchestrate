@@ -73,7 +73,12 @@ DECISION_CONFIGS: dict[str, dict[str, tuple[bool, str, str | None, bool]]] = {
     "REVIEW": {
         "APPROVE": (True, "Review approved", None, False),
         "REQUEST_CHANGES": (False, "Review requested changes", "DEV", False),
-        "REQUEST_MINOR_CHANGES": (False, "Review requested minor changes (fast-track)", "DEV", True),
+        "REQUEST_MINOR_CHANGES": (
+            False,
+            "Review requested minor changes (fast-track)",
+            "DEV",
+            True,
+        ),
     },
 }
 
@@ -188,9 +193,12 @@ class ValidationRunner:
         Executes the validation pipeline for a stage:
         1. Check skip conditions (no_files_match, manual skip artifacts)
         2. Run preflight checks (for PREFLIGHT stage)
-        3. Run validation commands
+        3. Run validation commands (all commands run, outputs aggregated)
         4. Check artifact markers (APPROVED, PASS, etc.)
         5. Verify required artifacts exist
+
+        Validation command outputs are aggregated into VALIDATION_REPORT.md
+        for easier debugging when failures occur.
 
         Special handling for:
         - PREFLIGHT: Runs environment checks, generates PREFLIGHT_REPORT.md
@@ -208,9 +216,7 @@ class ValidationRunner:
 
         # Get stage validation config
         validation_config = self.config.validation
-        stage_config: StageValidation | None = getattr(
-            validation_config, stage_lower, None
-        )
+        stage_config: StageValidation | None = getattr(validation_config, stage_lower, None)
 
         if stage_config is None:
             # No config for this stage - use defaults
@@ -237,16 +243,17 @@ class ValidationRunner:
             if not result.success:
                 return result
 
-        # Run validation commands
-        for cmd_config in stage_config.commands:
-            result = self._run_command(cmd_config, task_name, stage_config.timeout)
-            if not result.success:
-                if cmd_config.optional:
-                    continue
-                if cmd_config.allow_failure:
-                    # Log but don't fail
-                    continue
-                return result
+        # Run validation commands and aggregate outputs
+        command_results = self._run_all_commands(stage_config, task_name)
+        if command_results["has_failure"]:
+            # Write validation report with all outputs for debugging
+            self._write_validation_report(stage, task_name, command_results)
+            return ValidationResult(
+                False,
+                command_results["first_failure_message"],
+                output=command_results["aggregated_output"],
+                rollback_to="DEV",
+            )
 
         # Check for pass/fail markers in artifacts (for AI-driven stages)
         if stage_config.artifact and stage_config.pass_marker:
@@ -373,7 +380,9 @@ class ValidationRunner:
 
                 for f in changed_files:
                     for pattern in patterns:
-                        if fnmatch.fnmatch(f, pattern) or fnmatch.fnmatch(f.lower(), pattern.lower()):
+                        if fnmatch.fnmatch(f, pattern) or fnmatch.fnmatch(
+                            f.lower(), pattern.lower()
+                        ):
                             return False  # Found a match, don't skip
 
                 return True  # No matches, skip
@@ -403,9 +412,7 @@ class ValidationRunner:
         """
         stage_lower = stage.lower()
         validation_config = self.config.validation
-        stage_config: StageValidation | None = getattr(
-            validation_config, stage_lower, None
-        )
+        stage_config: StageValidation | None = getattr(validation_config, stage_lower, None)
 
         if stage_config is None:
             return False
@@ -598,7 +605,9 @@ class ValidationRunner:
         try:
             if isinstance(cmd_config.command, list):
                 # List form: substitute placeholders in each element, run without shell
-                cmd = [self._substitute_placeholders(arg, placeholders) for arg in cmd_config.command]
+                cmd = [
+                    self._substitute_placeholders(arg, placeholders) for arg in cmd_config.command
+                ]
                 result = subprocess.run(
                     cmd,
                     shell=False,
@@ -646,6 +655,278 @@ class ValidationRunner:
                 rollback_to="DEV",
             )
 
+    def _run_all_commands(self, stage_config: StageValidation, task_name: str) -> dict:
+        """
+        Run all validation commands and aggregate their outputs.
+
+        Unlike early-return behavior, this runs ALL commands to collect
+        complete debugging information when failures occur.
+
+        Args:
+            stage_config: Stage validation configuration with commands list.
+            task_name: Task name for placeholder substitution.
+
+        Returns:
+            Dict with:
+            - has_failure: True if any non-optional command failed
+            - first_failure_message: Message from first failing command
+            - aggregated_output: Combined output from all commands
+            - results: List of (name, success, output) tuples
+        """
+        results: list[tuple[str, bool, str]] = []
+        has_failure = False
+        first_failure_message = ""
+
+        for cmd_config in stage_config.commands:
+            result = self._run_command(cmd_config, task_name, stage_config.timeout)
+            output = result.output or ""
+            results.append((cmd_config.name, result.success, output))
+
+            if not result.success:
+                if cmd_config.optional:
+                    continue
+                if cmd_config.allow_failure:
+                    continue
+                if not has_failure:
+                    has_failure = True
+                    first_failure_message = result.message
+
+        # Build aggregated output for debugging
+        aggregated_parts = []
+        for name, success, output in results:
+            status = "✓ PASSED" if success else "✗ FAILED"
+            aggregated_parts.append(f"=== {name}: {status} ===")
+            if output:
+                aggregated_parts.append(output.strip())
+            aggregated_parts.append("")
+
+        return {
+            "has_failure": has_failure,
+            "first_failure_message": first_failure_message,
+            "aggregated_output": "\n".join(aggregated_parts),
+            "results": results,
+        }
+
+    def _write_validation_report(self, stage: str, task_name: str, command_results: dict) -> None:
+        """
+        Write VALIDATION_REPORT.md with aggregated command outputs.
+
+        Creates a structured report showing all validation command results,
+        making it easier to debug failures without re-running commands.
+
+        Args:
+            stage: Stage name (e.g., "TEST", "QA").
+            task_name: Task name for artifact path.
+            command_results: Results from _run_all_commands().
+        """
+        from datetime import datetime
+
+        lines = [
+            f"# {stage} Validation Report",
+            "",
+            f"**Generated:** {datetime.now().isoformat()}",
+            "",
+            "## Summary",
+            "",
+        ]
+
+        passed = sum(1 for _, success, _ in command_results["results"] if success)
+        failed = len(command_results["results"]) - passed
+        lines.append(f"- **Passed:** {passed}")
+        lines.append(f"- **Failed:** {failed}")
+        lines.append("")
+        lines.append("## Command Results")
+        lines.append("")
+
+        for name, success, output in command_results["results"]:
+            status = "✓ PASSED" if success else "✗ FAILED"
+            lines.append(f"### {name}: {status}")
+            lines.append("")
+            if output:
+                # Truncate very long outputs
+                truncated = output[:5000]
+                if len(output) > 5000:
+                    truncated += "\n\n... (output truncated)"
+                lines.append("```")
+                lines.append(truncated.strip())
+                lines.append("```")
+            else:
+                lines.append("_(no output)_")
+            lines.append("")
+
+        report_content = "\n".join(lines)
+        write_artifact("VALIDATION_REPORT.md", report_content, task_name)
+
+        # For TEST stage, also write a concise summary for downstream prompts
+        if stage.upper() == "TEST":
+            self._write_test_summary(task_name, command_results)
+
+    def _write_test_summary(self, task_name: str, command_results: dict) -> None:
+        """
+        Write TEST_SUMMARY.md with concise test results for downstream prompts.
+
+        Parses test output to extract key information without verbose logs.
+        Supports pytest output format primarily.
+
+        Args:
+            task_name: Task name for artifact path.
+            command_results: Results from _run_all_commands().
+        """
+        from datetime import datetime
+
+        # Find test command output (look for pytest, jest, etc.)
+        test_output = ""
+        test_cmd_name = ""
+        for name, success, output in command_results["results"]:
+            name_lower = name.lower()
+            if any(kw in name_lower for kw in ["test", "pytest", "jest", "mocha", "unittest"]):
+                test_output = output
+                test_cmd_name = name
+                break
+
+        # If no specific test command found, use all output
+        if not test_output:
+            test_output = command_results.get("aggregated_output", "")
+            test_cmd_name = "tests"
+
+        # Parse test results
+        summary = self._parse_test_output(test_output)
+
+        # Determine overall status
+        has_failure = command_results.get("has_failure", False)
+        status = "FAIL" if has_failure else "PASS"
+
+        lines = [
+            "# Test Summary",
+            "",
+            f"**Status:** {status}",
+            f"**Command:** {test_cmd_name}",
+            f"**Generated:** {datetime.now().isoformat()}",
+            "",
+        ]
+
+        # Add counts if parsed
+        if summary["counts"]:
+            lines.append(summary["counts"])
+            lines.append("")
+
+        # Add duration if found
+        if summary["duration"]:
+            lines.append(f"**Duration:** {summary['duration']}")
+            lines.append("")
+
+        # Add failed tests
+        if summary["failed_tests"]:
+            lines.append("## Failed Tests")
+            lines.append("")
+            for test_info in summary["failed_tests"][:20]:  # Limit to 20 failures
+                lines.append(f"- {test_info}")
+            if len(summary["failed_tests"]) > 20:
+                lines.append(f"- ... and {len(summary['failed_tests']) - 20} more failures")
+            lines.append("")
+
+        # Add coverage if found
+        if summary["coverage"]:
+            lines.append("## Coverage")
+            lines.append("")
+            lines.append(summary["coverage"])
+            lines.append("")
+
+        # Add warnings/errors summary (not full output)
+        if summary["warnings"]:
+            lines.append("## Warnings")
+            lines.append("")
+            for warning in summary["warnings"][:10]:
+                lines.append(f"- {warning}")
+            lines.append("")
+
+        write_artifact("TEST_SUMMARY.md", "\n".join(lines), task_name)
+
+    def _parse_test_output(self, output: str) -> dict:
+        """
+        Parse test output to extract summary information.
+
+        Supports pytest output format. Returns structured summary data.
+
+        Args:
+            output: Raw test command output.
+
+        Returns:
+            Dict with counts, duration, failed_tests, coverage, warnings.
+        """
+        import re
+
+        result = {
+            "counts": "",
+            "duration": "",
+            "failed_tests": [],
+            "coverage": "",
+            "warnings": [],
+        }
+
+        if not output:
+            return result
+
+        lines = output.split("\n")
+
+        # Parse pytest-style summary line: "5 passed, 2 failed, 1 skipped in 3.45s"
+        for line in lines:
+            # Match pytest summary
+            summary_match = re.search(
+                r"(\d+)\s+passed.*?(\d+)\s+failed|(\d+)\s+passed",
+                line,
+                re.IGNORECASE,
+            )
+            if summary_match:
+                result["counts"] = line.strip()
+
+            # Match duration
+            duration_match = re.search(r"in\s+([\d.]+)s", line)
+            if duration_match:
+                result["duration"] = f"{duration_match.group(1)}s"
+
+            # Match pytest short summary (=== short test summary info ===)
+            # or individual FAILED lines
+            if "FAILED" in line:
+                # Extract test name and brief error
+                failed_match = re.match(r"FAILED\s+(\S+)(?:\s+-\s+(.+))?", line.strip())
+                if failed_match:
+                    test_name = failed_match.group(1)
+                    error_brief = failed_match.group(2) or ""
+                    if error_brief:
+                        result["failed_tests"].append(f"`{test_name}` - {error_brief[:100]}")
+                    else:
+                        result["failed_tests"].append(f"`{test_name}`")
+
+            # Match coverage summary
+            if "TOTAL" in line and "%" in line:
+                result["coverage"] = line.strip()
+            elif re.match(r"^(Lines|Branches|Coverage):\s*\d+%", line.strip()):
+                result["coverage"] += line.strip() + "\n"
+
+            # Collect warnings (pytest warnings summary)
+            if "warning" in line.lower() and "PytestWarning" not in line:
+                warning_text = line.strip()[:150]
+                if warning_text and warning_text not in result["warnings"]:
+                    result["warnings"].append(warning_text)
+
+        # Also look for assertion errors in failed test output
+        if not result["failed_tests"]:
+            # Try to find test failures from assertion errors
+            for i, line in enumerate(lines):
+                if "AssertionError" in line or "Error:" in line:
+                    # Look backwards for test name
+                    for j in range(max(0, i - 5), i):
+                        test_match = re.search(r"(test_\w+)", lines[j])
+                        if test_match:
+                            error_brief = line.strip()[:80]
+                            test_entry = f"`{test_match.group(1)}` - {error_brief}"
+                            if test_entry not in result["failed_tests"]:
+                                result["failed_tests"].append(test_entry)
+                            break
+
+        return result
+
     def _check_artifact_markers(
         self, stage_config: StageValidation, task_name: str
     ) -> ValidationResult:
@@ -674,18 +955,19 @@ class ValidationRunner:
                 rollback_to="DEV",
             )
 
+        # Markers unclear - prompt user to decide instead of retry loop
         return ValidationResult(
             False,
             f"{artifact_name}: unclear result - must contain {stage_config.pass_marker} or {stage_config.fail_marker}",
+            output=truncate_text(content, 2000),
+            needs_user_decision=True,
         )
 
     def _check_qa_report(self, task_name: str) -> ValidationResult:
         """Check QA_DECISION file first, then fall back to QA_REPORT.md parsing."""
         return validate_stage_decision("QA", task_name, "QA_REPORT.md")
 
-    def _validate_with_defaults(
-        self, stage: str, task_name: str
-    ) -> ValidationResult:
+    def _validate_with_defaults(self, stage: str, task_name: str) -> ValidationResult:
         """
         Validate a stage using built-in default logic.
 

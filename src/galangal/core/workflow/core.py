@@ -30,26 +30,72 @@ if TYPE_CHECKING:
     from galangal.ui.tui import WorkflowTUIApp
 
 
+# Stage→artifact schema for read-only backends
+# Maps each stage to its expected artifact files and JSON field sources
+STAGE_ARTIFACT_SCHEMA: dict[Stage, dict[str, str]] = {
+    Stage.REVIEW: {
+        "notes_file": "REVIEW_NOTES.md",
+        "notes_field": "review_notes",
+        "decision_file": "REVIEW_DECISION",
+        "decision_field": "decision",
+        "issues_field": "issues",
+    },
+    Stage.SECURITY: {
+        "notes_file": "SECURITY_NOTES.md",
+        "notes_field": "security_notes",
+        "decision_file": "SECURITY_DECISION",
+        "decision_field": "decision",
+        "issues_field": "issues",
+    },
+    Stage.QA: {
+        "notes_file": "QA_NOTES.md",
+        "notes_field": "qa_notes",
+        "decision_file": "QA_DECISION",
+        "decision_field": "decision",
+        "issues_field": "issues",
+    },
+}
+
 # Get conditional stages from metadata (cached at module load)
 CONDITIONAL_STAGES: dict[Stage, str] = get_conditional_stages()
 
 
-def _write_artifacts_from_codex_output(
+def _format_issues(issues: list[dict]) -> str:
+    """Format issues list into markdown."""
+    if not issues:
+        return ""
+
+    formatted = "\n\n## Issues Found\n\n"
+    for issue in issues:
+        severity = issue.get("severity", "unknown")
+        desc = issue.get("description", "")
+        file_ref = issue.get("file", "")
+        line = issue.get("line")
+        loc = f" ({file_ref}:{line})" if file_ref and line else ""
+        formatted += f"- **[{severity.upper()}]** {desc}{loc}\n"
+    return formatted
+
+
+def _write_artifacts_from_readonly_output(
     stage: Stage,
     output: str,
     task_name: str,
     tui_app: WorkflowTUIApp,
 ) -> None:
     """
-    Write stage artifacts from Codex's structured JSON output.
+    Write stage artifacts from read-only backend's structured JSON output.
 
-    Codex runs in read-only mode and cannot write files directly.
-    Instead, it returns structured JSON which we post-process to
-    create the expected artifacts.
+    Read-only backends (like Codex) cannot write files directly. Instead,
+    they return structured JSON which we post-process to create the expected
+    artifacts based on STAGE_ARTIFACT_SCHEMA.
+
+    Supports two modes:
+    1. Schema-based: Uses STAGE_ARTIFACT_SCHEMA mapping for known stages
+    2. Generic fallback: Looks for 'artifacts' array in JSON output
 
     Args:
         stage: The stage that was executed
-        output: JSON string from Codex containing structured output
+        output: JSON string containing structured output
         task_name: Task name for artifact paths
         tui_app: TUI app for activity logging
     """
@@ -58,40 +104,81 @@ def _write_artifacts_from_codex_output(
     try:
         data = json.loads(output)
     except json.JSONDecodeError:
-        tui_app.add_activity("Warning: Codex output is not valid JSON", "⚠️")
+        tui_app.add_activity("Warning: Backend output is not valid JSON", "⚠️")
         return
 
-    if stage == Stage.REVIEW:
-        # Write REVIEW_NOTES.md from review_notes field
-        review_notes = data.get("review_notes", "")
-        if review_notes:
-            # Format the review notes with issues if present
-            issues = data.get("issues", [])
-            if issues:
-                review_notes += "\n\n## Issues Found\n\n"
-                for issue in issues:
-                    severity = issue.get("severity", "unknown")
-                    desc = issue.get("description", "")
-                    file_ref = issue.get("file", "")
-                    line = issue.get("line")
-                    loc = f" ({file_ref}:{line})" if file_ref and line else ""
-                    review_notes += f"- **[{severity.upper()}]** {desc}{loc}\n"
+    # Try schema-based artifact writing first
+    if stage in STAGE_ARTIFACT_SCHEMA:
+        schema = STAGE_ARTIFACT_SCHEMA[stage]
+        _write_schema_artifacts(data, schema, task_name, tui_app)
+        return
 
-            write_artifact("REVIEW_NOTES.md", review_notes, task_name)
-            tui_app.add_activity("Wrote REVIEW_NOTES.md from Codex output", "📝")
-
-        # Write REVIEW_DECISION file
-        decision = data.get("decision", "")
-        if decision in ("APPROVE", "REQUEST_CHANGES"):
-            write_artifact("REVIEW_DECISION", decision, task_name)
-            tui_app.add_activity(f"Wrote REVIEW_DECISION: {decision}", "📝")
-        else:
-            tui_app.add_activity(f"Warning: Invalid decision '{decision}' from Codex", "⚠️")
+    # Fall back to generic artifacts array
+    artifacts = data.get("artifacts", [])
+    if artifacts:
+        _write_generic_artifacts(artifacts, task_name, tui_app)
+    else:
+        tui_app.add_activity(f"Warning: No artifact schema for {stage.value}", "⚠️")
 
 
-def get_next_stage(
-    current: Stage, state: WorkflowState
-) -> Stage | None:
+def _write_schema_artifacts(
+    data: dict,
+    schema: dict[str, str],
+    task_name: str,
+    tui_app: WorkflowTUIApp,
+) -> None:
+    """Write artifacts based on stage schema mapping."""
+    notes_file = schema.get("notes_file")
+    notes_field = schema.get("notes_field")
+    decision_file = schema.get("decision_file")
+    decision_field = schema.get("decision_field")
+    issues_field = schema.get("issues_field")
+
+    # Write notes file
+    if notes_file and notes_field:
+        notes = data.get(notes_field, "")
+        if notes:
+            # Append formatted issues if present
+            if issues_field:
+                issues = data.get(issues_field, [])
+                notes += _format_issues(issues)
+
+            write_artifact(notes_file, notes, task_name)
+            tui_app.add_activity(f"Wrote {notes_file} from backend output", "📝")
+
+    # Write decision file
+    if decision_file and decision_field:
+        decision = data.get(decision_field, "")
+        valid_decisions = ("APPROVE", "REQUEST_CHANGES", "REQUEST_MINOR_CHANGES")
+        if decision in valid_decisions:
+            write_artifact(decision_file, decision, task_name)
+            tui_app.add_activity(f"Wrote {decision_file}: {decision}", "📝")
+        elif decision:
+            tui_app.add_activity(f"Warning: Invalid decision '{decision}'", "⚠️")
+
+
+def _write_generic_artifacts(
+    artifacts: list[dict],
+    task_name: str,
+    tui_app: WorkflowTUIApp,
+) -> None:
+    """Write artifacts from generic artifacts array in JSON output.
+
+    Expected format:
+    [
+        {"name": "ARTIFACT_NAME.md", "content": "..."},
+        ...
+    ]
+    """
+    for artifact in artifacts:
+        name = artifact.get("name")
+        content = artifact.get("content")
+        if name and content:
+            write_artifact(name, content, task_name)
+            tui_app.add_activity(f"Wrote {name} from backend output", "📝")
+
+
+def get_next_stage(current: Stage, state: WorkflowState) -> Stage | None:
     """
     Determine the next stage in the workflow pipeline.
 
@@ -232,9 +319,7 @@ def execute_stage(
         return StageResult.skipped(f"{stage.value} skipped (condition met)")
 
     # Check for clarification
-    if artifact_exists("QUESTIONS.md", task_name) and not artifact_exists(
-        "ANSWERS.md", task_name
-    ):
+    if artifact_exists("QUESTIONS.md", task_name) and not artifact_exists("ANSWERS.md", task_name):
         state.clarification_required = True
         save_state(state)
         return StageResult.clarification_needed()
@@ -261,9 +346,10 @@ def execute_stage(
     # Build prompt
     builder = PromptBuilder()
 
-    # For independent review backends (like Codex), use minimal context
+    # For read-only backends on review-type stages, use minimal context
     # This gives an unbiased review without Claude's interpretations
-    if backend.name == "codex" and stage == Stage.REVIEW:
+    review_stages = {Stage.REVIEW, Stage.SECURITY, Stage.QA}
+    if backend.read_only and stage in review_stages:
         prompt = builder.build_minimal_review_prompt(state, backend_name=backend.name)
         tui_app.add_activity("Using minimal context for independent review", "📋")
     else:
@@ -312,8 +398,8 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
 
     # Post-process for read-only backends (e.g., Codex)
     # These backends return structured JSON instead of writing files directly
-    if backend.name == "codex" and invoke_result.output:
-        _write_artifacts_from_codex_output(stage, invoke_result.output, task_name, tui_app)
+    if backend.read_only and invoke_result.output:
+        _write_artifacts_from_readonly_output(stage, invoke_result.output, task_name, tui_app)
 
     # Validate stage
     tui_app.add_activity("Validating stage outputs...", "⚙")
@@ -328,6 +414,8 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         f.write(f"message: {result.message}\n")
         f.write(f"rollback_to: {result.rollback_to}\n")
         f.write(f"skipped: {result.skipped}\n")
+        if result.output:
+            f.write(f"\n=== Validation Output ===\n{result.output}\n")
 
     duration = time.time() - start_time
 
@@ -449,9 +537,7 @@ def archive_rollback_if_exists(task_name: str, tui_app: WorkflowTUIApp) -> None:
 
     if resolved_path.exists():
         existing = resolved_path.read_text()
-        resolved_path.write_text(
-            existing + "\n---\n" + rollback_content + resolution_note
-        )
+        resolved_path.write_text(existing + "\n---\n" + rollback_content + resolution_note)
     else:
         resolved_path.write_text(rollback_content + resolution_note)
 
