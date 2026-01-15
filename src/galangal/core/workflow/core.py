@@ -215,6 +215,22 @@ def execute_stage(
     if stage == Stage.COMPLETE:
         return StageResult.create_success("Workflow complete")
 
+    # Check skip conditions BEFORE building prompts or invoking AI
+    # This avoids wasted execution when a stage should be skipped
+    runner = ValidationRunner()
+    if runner.should_skip_stage(stage.value.upper(), task_name):
+        from galangal.core.artifacts import write_skip_artifact
+
+        write_skip_artifact(stage.value, "skip_if condition met", task_name)
+        tui_app.add_activity(f"{stage.value} skipped (condition met)", "⏭")
+        workflow_logger.stage_completed(
+            stage=stage.value,
+            task_name=task_name,
+            success=True,
+            skipped=True,
+        )
+        return StageResult.skipped(f"{stage.value} skipped (condition met)")
+
     # Check for clarification
     if artifact_exists("QUESTIONS.md", task_name) and not artifact_exists(
         "ANSWERS.md", task_name
@@ -364,6 +380,49 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         return StageResult.validation_failed(result.message)
 
 
+def append_rollback_entry(
+    task_name: str,
+    source: str,
+    from_stage: str,
+    target_stage: str,
+    reason: str,
+) -> None:
+    """
+    Append a rollback entry to ROLLBACK.md, preserving history.
+
+    Creates a structured entry documenting the rollback event and appends it
+    to existing ROLLBACK.md content (or creates new file if none exists).
+
+    Args:
+        task_name: Name of the task.
+        source: Description of what triggered the rollback
+            (e.g., "User interrupt (Ctrl+I)", "Validation failure", "Manual review").
+        from_stage: Stage where the rollback was triggered.
+        target_stage: Stage to roll back to.
+        reason: Description of issues to fix.
+    """
+    rollback_entry = f"""
+---
+
+## {source}
+
+**Date:** {now_iso()}
+**From Stage:** {from_stage}
+**Target Stage:** {target_stage}
+
+### Issues to Fix
+{reason}
+"""
+
+    existing = read_artifact("ROLLBACK.md", task_name)
+    if existing:
+        new_content = existing + rollback_entry
+    else:
+        new_content = f"# Rollback Log\n\nThis file tracks issues that required rolling back to earlier stages.\n{rollback_entry}"
+
+    write_artifact("ROLLBACK.md", new_content, task_name)
+
+
 def archive_rollback_if_exists(task_name: str, tui_app: WorkflowTUIApp) -> None:
     """
     Archive ROLLBACK.md to ROLLBACK_RESOLVED.md after DEV stage succeeds.
@@ -459,27 +518,14 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
     # Record rollback in state history
     state.record_rollback(from_stage, target_stage, reason)
 
-    rollback_entry = f"""
-## Rollback from {from_stage.value}
-
-**Date:** {now_iso()}
-**From Stage:** {from_stage.value}
-**Target Stage:** {target_stage.value}
-**Reason:** {reason}
-
-### Required Actions
-{reason}
-
----
-"""
-
-    existing = read_artifact("ROLLBACK.md", task_name)
-    if existing:
-        new_content = existing + rollback_entry
-    else:
-        new_content = f"# Rollback Log\n\nThis file tracks issues that required rolling back to earlier stages.\n{rollback_entry}"
-
-    write_artifact("ROLLBACK.md", new_content, task_name)
+    # Append to ROLLBACK.md
+    append_rollback_entry(
+        task_name=task_name,
+        source=f"Validation failure in {from_stage.value}",
+        from_stage=from_stage.value,
+        target_stage=target_stage.value,
+        reason=reason,
+    )
 
     # Log rollback event
     from galangal.logging import workflow_logger

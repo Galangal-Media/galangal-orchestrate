@@ -179,26 +179,15 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     else:
                         target_stage = valid_targets[0] if valid_targets else interrupted_stage
 
-                    # Create ROLLBACK.md artifact for persistent context
-                    from galangal.core.utils import now_iso
-                    rollback_content = f"""# User Interrupt Rollback
-
-## Source
-User interrupt (Ctrl+I) during {interrupted_stage_name} stage
-
-## Rollback Target
-{target_stage.value}
-
-## Date
-{now_iso()}
-
-## Issues to Fix
-{feedback_text}
-
-## Instructions
-Please address the issues described above before proceeding.
-"""
-                    write_artifact("ROLLBACK.md", rollback_content, state.task_name)
+                    # Append to ROLLBACK.md (preserves history from earlier failures)
+                    from galangal.core.workflow.core import append_rollback_entry
+                    append_rollback_entry(
+                        task_name=state.task_name,
+                        source=f"User interrupt (Ctrl+I) during {interrupted_stage_name}",
+                        from_stage=interrupted_stage_name,
+                        target_stage=target_stage.value,
+                        reason=feedback_text,
+                    )
 
                     state.stage = target_stage
                     state.last_failure = (
@@ -1162,23 +1151,15 @@ async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -
         )
 
         if feedback:
-            from galangal.core.utils import now_iso
-
-            rollback_content = f"""# Manual Review Rollback
-
-## Source
-Manual review at COMPLETE stage
-
-## Date
-{now_iso()}
-
-## Issues to Fix
-{feedback}
-
-## Instructions
-Please address the issues described above before proceeding.
-"""
-            write_artifact("ROLLBACK.md", rollback_content, state.task_name)
+            # Append to ROLLBACK.md (preserves history from earlier failures)
+            from galangal.core.workflow.core import append_rollback_entry
+            append_rollback_entry(
+                task_name=state.task_name,
+                source="Manual review at COMPLETE stage",
+                from_stage="COMPLETE",
+                target_stage="DEV",
+                reason=feedback,
+            )
             state.last_failure = f"Manual review feedback: {feedback}"
             app.show_message("Feedback recorded, rolling back to DEV", "warning")
         else:

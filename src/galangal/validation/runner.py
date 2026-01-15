@@ -279,13 +279,77 @@ class ValidationRunner:
 
         return ValidationResult(True, f"{stage} validation passed")
 
+    def _get_all_changed_files(self) -> set[str]:
+        """
+        Get all changed files from commits, staging area, and working tree.
+
+        Collects files from multiple sources to ensure skip detection works
+        correctly even in dirty working trees:
+
+        1. Committed changes: `git diff --name-only base_branch...HEAD`
+        2. Working tree changes: `git status --porcelain` (staged, unstaged, untracked)
+
+        Returns:
+            Set of file paths that have been changed, staged, or are untracked.
+            Empty set on error.
+        """
+        changed: set[str] = set()
+
+        try:
+            # 1. Committed changes vs base branch
+            base_branch = self.config.pr.base_branch
+            result = subprocess.run(
+                ["git", "diff", "--name-only", f"{base_branch}...HEAD"],
+                cwd=self.project_root,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                changed.update(f for f in result.stdout.strip().split("\n") if f)
+
+            # 2. Working tree changes (staged, unstaged, untracked)
+            # Porcelain format: "XY filename" or "XY old -> new" for renames
+            # X = staging area status, Y = working tree status
+            # ?? = untracked, M = modified, A = added, D = deleted, R = renamed
+            result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=self.project_root,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                for line in result.stdout.strip().split("\n"):
+                    if line and len(line) >= 3:
+                        # Extract filename (handle renames: "R  old -> new")
+                        file_part = line[3:]
+                        if " -> " in file_part:
+                            # For renames, include both old and new paths
+                            old, new = file_part.split(" -> ", 1)
+                            changed.add(old)
+                            changed.add(new)
+                        else:
+                            changed.add(file_part)
+
+        except Exception:
+            pass  # Return whatever we collected so far
+
+        return changed
+
     def _should_skip(self, skip_condition: SkipCondition, task_name: str) -> bool:
         """
         Check if a stage's skip condition is met.
 
-        Currently supports `no_files_match` condition which checks if any files
-        in `git diff <base_branch>...HEAD` match the given glob patterns. If no
-        files match, the stage should be skipped.
+        Supports `no_files_match` condition which checks if any changed files
+        match the given glob patterns. Changed files include:
+        - Committed changes vs base branch
+        - Staged changes (git add)
+        - Unstaged changes (modified tracked files)
+        - Untracked files (new files not yet added)
+
+        This ensures conditional stages are not incorrectly skipped when
+        relevant files exist in the working tree but haven't been committed.
 
         Args:
             skip_condition: Config object with skip criteria (e.g., no_files_match).
@@ -295,23 +359,12 @@ class ValidationRunner:
             True if the stage should be skipped, False otherwise.
         """
         if skip_condition.no_files_match:
-            # Check if any files match the glob pattern(s) in git diff
             try:
-                # Use configured base branch instead of hardcoded 'main'
-                base_branch = self.config.pr.base_branch
-                result = subprocess.run(
-                    ["git", "diff", "--name-only", f"{base_branch}...HEAD"],
-                    cwd=self.project_root,
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
+                changed_files = self._get_all_changed_files()
 
-                # On git error (e.g., branch doesn't exist), don't skip
-                if result.returncode != 0:
+                # If we couldn't get any file info, don't skip (safe default)
+                if not changed_files:
                     return False
-
-                changed_files = result.stdout.strip().split("\n")
 
                 # Support both single pattern and list of patterns
                 patterns = skip_condition.no_files_match
@@ -400,14 +453,25 @@ class ValidationRunner:
 
             elif check.command:
                 try:
-                    result = subprocess.run(
-                        check.command,
-                        shell=True,
-                        cwd=self.project_root,
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                    )
+                    # Support both string (shell) and list (direct) commands
+                    if isinstance(check.command, list):
+                        result = subprocess.run(
+                            check.command,
+                            shell=False,
+                            cwd=self.project_root,
+                            capture_output=True,
+                            text=True,
+                            timeout=30,
+                        )
+                    else:
+                        result = subprocess.run(
+                            check.command,
+                            shell=True,
+                            cwd=self.project_root,
+                            capture_output=True,
+                            text=True,
+                            timeout=30,
+                        )
                     output = result.stdout.strip()
 
                     if check.expect_empty:
@@ -483,38 +547,77 @@ class ValidationRunner:
 
         return "\n".join(filtered_lines)
 
+    def _get_placeholders(self, task_name: str) -> dict[str, str]:
+        """
+        Build placeholder substitution dictionary for commands.
+
+        Returns:
+            Dict mapping placeholder names to their values:
+            - {task_dir}: Full path to task directory
+            - {project_root}: Full path to project root
+            - {base_branch}: Configured base branch name
+        """
+        config = get_config()
+        return {
+            "{task_dir}": str(self.project_root / config.tasks_dir / task_name),
+            "{project_root}": str(self.project_root),
+            "{base_branch}": config.pr.base_branch,
+        }
+
+    def _substitute_placeholders(self, text: str, placeholders: dict[str, str]) -> str:
+        """Substitute all placeholders in a string."""
+        for key, value in placeholders.items():
+            text = text.replace(key, value)
+        return text
+
     def _run_command(
         self, cmd_config: ValidationCommand, task_name: str, default_timeout: int
     ) -> ValidationResult:
         """
         Execute a validation command and return the result.
 
-        Runs a shell command (e.g., pytest, ruff check) and interprets the
-        exit code to determine success. The command can use `{task_dir}`
-        placeholder which is replaced with the task's directory path.
+        Commands can be specified as:
+        - String: Executed via shell (supports &&, |, etc.)
+        - List: Executed directly without shell (safer for paths with spaces)
+
+        Supported placeholders: {task_dir}, {project_root}, {base_branch}
 
         Args:
-            cmd_config: Command configuration with name, command string,
+            cmd_config: Command configuration with name, command (str or list),
                 timeout, and optional/allow_failure flags.
-            task_name: Task name for {task_dir} substitution.
+            task_name: Task name for placeholder substitution.
             default_timeout: Timeout to use if not specified in config.
 
         Returns:
             ValidationResult with success based on exit code.
             Failure results include rollback_to="DEV".
         """
-        command = cmd_config.command.replace("{task_dir}", str(get_project_root() / get_config().tasks_dir / task_name))
+        placeholders = self._get_placeholders(task_name)
         timeout = cmd_config.timeout if cmd_config.timeout is not None else default_timeout
 
         try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                cwd=self.project_root,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
+            if isinstance(cmd_config.command, list):
+                # List form: substitute placeholders in each element, run without shell
+                cmd = [self._substitute_placeholders(arg, placeholders) for arg in cmd_config.command]
+                result = subprocess.run(
+                    cmd,
+                    shell=False,
+                    cwd=self.project_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                )
+            else:
+                # String form: substitute and run via shell (backwards compatible)
+                command = self._substitute_placeholders(cmd_config.command, placeholders)
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    cwd=self.project_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                )
 
             if result.returncode == 0:
                 return ValidationResult(

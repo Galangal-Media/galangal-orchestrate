@@ -225,6 +225,7 @@ class WorkflowLogger:
         success: bool,
         duration: float | None = None,
         output: str | None = None,
+        skipped: bool = False,
     ) -> None:
         """Log stage completion."""
         self._logger.info(
@@ -233,6 +234,7 @@ class WorkflowLogger:
             task=task_name,
             success=success,
             duration_seconds=duration,
+            skipped=skipped,
         )
 
     def stage_failed(

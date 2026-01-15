@@ -34,17 +34,39 @@ class PreflightCheck(BaseModel):
     """A single preflight check."""
 
     name: str = Field(description="Check name for display")
-    command: str | None = Field(default=None, description="Command to run")
+    command: str | list[str] | None = Field(
+        default=None,
+        description="Command to run. String uses shell, list runs directly (safer for paths with spaces).",
+    )
     path_exists: str | None = Field(default=None, description="Path that must exist")
     expect_empty: bool = Field(default=False, description="Pass if output is empty")
     warn_only: bool = Field(default=False, description="Warn but don't fail the stage")
 
 
 class ValidationCommand(BaseModel):
-    """A validation command configuration."""
+    """A validation command configuration.
+
+    Commands can be specified as a string (shell execution) or list (direct execution).
+    List form is preferred when using placeholders like {task_dir} as it handles
+    paths with spaces correctly.
+
+    Supported placeholders:
+    - {task_dir}: Path to the task directory (galangal-tasks/<task-name>)
+    - {project_root}: Path to the project root directory
+    - {base_branch}: Configured base branch (e.g., "main")
+
+    Examples:
+        # String form (uses shell, supports &&, |, etc.)
+        command: "pytest tests/ && ruff check src/"
+
+        # List form (no shell, handles spaces in paths)
+        command: ["pytest", "{task_dir}/tests"]
+    """
 
     name: str = Field(description="Command name for display")
-    command: str = Field(description="Shell command to run")
+    command: str | list[str] = Field(
+        description="Command to run. String uses shell, list runs directly (safer for paths with spaces).",
+    )
     optional: bool = Field(default=False, description="Don't fail if this command fails")
     allow_failure: bool = Field(default=False, description="Report but don't block on failure")
     timeout: int | None = Field(
