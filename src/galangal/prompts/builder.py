@@ -3,6 +3,7 @@ Prompt building with project override support.
 """
 
 from pathlib import Path
+from typing import Any
 
 from galangal.config.loader import get_config, get_project_root, get_prompts_dir
 from galangal.core.artifacts import artifact_exists, read_artifact
@@ -35,7 +36,7 @@ class PromptBuilder:
         ```
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.config = get_config()
         self.project_root = get_project_root()
         self.override_dir = get_prompts_dir()
@@ -85,7 +86,7 @@ class PromptBuilder:
         # No marker = full override
         return project_prompt
 
-    def build_discovery_prompt(self, state: WorkflowState, qa_history: list[dict] | None = None) -> str:
+    def build_discovery_prompt(self, state: WorkflowState, qa_history: list[dict[str, Any]] | None = None) -> str:
         """Build the prompt for PM discovery questions.
 
         Args:
@@ -149,7 +150,7 @@ class PromptBuilder:
 
         return ["\n".join(parts)]
 
-    def _format_qa_history(self, qa_history: list[dict]) -> str:
+    def _format_qa_history(self, qa_history: list[dict[str, Any]]) -> str:
         """Format Q&A history for prompt inclusion."""
         parts = []
         for i, round_data in enumerate(qa_history, 1):

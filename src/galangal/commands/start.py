@@ -16,6 +16,7 @@ from galangal.core.tasks import (
     create_task_branch,
     generate_unique_task_name,
     is_on_base_branch,
+    pull_base_branch,
     set_active_task,
     switch_to_base_branch,
     task_name_exists,
@@ -132,6 +133,15 @@ def cmd_start(args: argparse.Namespace) -> int:
                     success, message = switch_to_base_branch()
                     if success:
                         app.add_activity(f"Switched to '{base_branch}' branch", "✓")
+                        # Pull latest changes after switching
+                        app.set_status("setup", "pulling latest")
+                        pull_success, pull_msg = pull_base_branch()
+                        if pull_success:
+                            app.add_activity(f"Pulled latest from '{base_branch}'", "✓")
+                        else:
+                            app.add_activity(f"Pull failed: {pull_msg}", "⚠️")
+                            # Non-fatal - warn but continue
+                            app.show_message(f"Warning: {pull_msg}", "warning")
                     else:
                         app.add_activity(f"Failed to switch branch: {message}", "✗")
                         app.show_message(
@@ -148,6 +158,16 @@ def cmd_start(args: argparse.Namespace) -> int:
                         f"Continuing on '{current_branch}' branch",
                         "ℹ️",
                     )
+            else:
+                # Already on base branch - pull latest changes
+                app.set_status("setup", "pulling latest")
+                pull_success, pull_msg = pull_base_branch()
+                if pull_success:
+                    app.add_activity(f"Pulled latest from '{base_branch}'", "✓")
+                else:
+                    app.add_activity(f"Pull failed: {pull_msg}", "⚠️")
+                    # Non-fatal - warn but continue
+                    app.show_message(f"Warning: {pull_msg}", "warning")
 
             # Step 0: Choose task source (manual or GitHub) if no description/issue provided
             if not task_info["description"] and not task_info["github_issue"]:

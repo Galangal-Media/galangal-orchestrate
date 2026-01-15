@@ -15,6 +15,13 @@ _config: GalangalConfig | None = None
 _project_root: Path | None = None
 
 
+def reset_caches() -> None:
+    """Reset all global caches. Used between tests to ensure clean state."""
+    global _config, _project_root
+    _config = None
+    _project_root = None
+
+
 def find_project_root(start_path: Path | None = None) -> Path:
     """
     Find the project root by looking for .galangal/ directory.
@@ -94,9 +101,23 @@ def get_config() -> GalangalConfig:
 
 
 def get_tasks_dir() -> Path:
-    """Get the tasks directory path."""
+    """Get the tasks directory path.
+
+    Always returns an absolute path inside the project root.
+    Validates that the configured tasks_dir doesn't escape the project root.
+    """
     config = get_config()
-    return get_project_root() / config.tasks_dir
+    project_root = get_project_root()
+    tasks_dir = (project_root / config.tasks_dir).resolve()
+
+    # Ensure tasks_dir is inside project root (prevent path traversal)
+    try:
+        tasks_dir.relative_to(project_root)
+    except ValueError:
+        # tasks_dir is outside project root - use default
+        tasks_dir = project_root / "galangal-tasks"
+
+    return tasks_dir
 
 
 def get_done_dir() -> Path:

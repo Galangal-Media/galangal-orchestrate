@@ -271,7 +271,7 @@ class CodexBackend(AIBackend):
 
                 # Return success with structured JSON output
                 # The workflow will post-process this to write artifacts
-                return StageResult.success(
+                return StageResult.create_success(
                     message=f"Codex review complete: {decision}",
                     output=output_content,
                 )

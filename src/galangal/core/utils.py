@@ -45,7 +45,9 @@ def debug_log(message: str, **context) -> None:
 
     global _debug_file
     if _debug_file is None:
-        logs_dir = Path.cwd() / "logs"
+        from galangal.config.loader import get_project_root
+
+        logs_dir = get_project_root() / "logs"
         logs_dir.mkdir(exist_ok=True)
         _debug_file = logs_dir / "galangal_debug.log"
 

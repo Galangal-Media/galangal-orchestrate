@@ -2,18 +2,30 @@
 Shared pytest fixtures for galangal tests.
 """
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
-from unittest.mock import MagicMock
 
 import pytest
 
 from galangal.ai.base import AIBackend, PauseCheck
+from galangal.config.loader import reset_caches
 from galangal.config.schema import GalangalConfig, ProjectConfig, StageConfig
 from galangal.core.state import Stage, TaskType, WorkflowState
 from galangal.results import StageResult
 from galangal.ui.tui import StageUI
+
+
+@pytest.fixture(autouse=True)
+def reset_global_caches():
+    """Reset global caches before each test to ensure clean state.
+
+    This prevents issues where a test sets the project root and
+    subsequent tests use the wrong cached value.
+    """
+    reset_caches()
+    yield
+    reset_caches()
 
 
 class MockAIBackend(AIBackend):
@@ -39,7 +51,7 @@ class MockAIBackend(AIBackend):
             artifact_callback: Optional callback(stage, task_name) to create artifacts.
         """
         self.responses = responses or {}
-        self.default_response = default_response or StageResult.success("Mock success")
+        self.default_response = default_response or StageResult.create_success("Mock success")
         self.artifact_callback = artifact_callback
         self.calls: list[tuple[str, Stage | None, str | None]] = []
 

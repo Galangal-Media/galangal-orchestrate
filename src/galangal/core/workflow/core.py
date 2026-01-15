@@ -162,6 +162,10 @@ def get_next_stage(
     if should_skip_for_task_type(next_stage, task_type):
         return get_next_stage(next_stage, state)
 
+    # Check fast-track skipping (minor rollback - skip stages that already passed)
+    if state.should_fast_track_skip(next_stage):
+        return get_next_stage(next_stage, state)
+
     # Check PM-driven stage plan (STAGE_PLAN.md recommendations)
     if state.stage_plan and next_stage.value in state.stage_plan:
         plan_entry = state.stage_plan[next_stage.value]
@@ -235,7 +239,7 @@ def execute_stage(
     )
 
     if stage == Stage.COMPLETE:
-        return StageResult.success("Workflow complete")
+        return StageResult.create_success("Workflow complete")
 
     # Check for clarification
     if artifact_exists("QUESTIONS.md", task_name) and not artifact_exists(
@@ -254,7 +258,7 @@ def execute_stage(
 
         if result.success:
             tui_app.show_message(f"Preflight: {result.message}", "success")
-            return StageResult.success(result.message)
+            return StageResult.create_success(result.message)
         else:
             return StageResult.preflight_failed(
                 message=result.message,
@@ -354,7 +358,7 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
             success=True,
             duration=duration,
         )
-        return StageResult.success(result.message, output=invoke_result.output)
+        return StageResult.create_success(result.message, output=invoke_result.output)
     else:
         # Check if user decision is needed (decision file missing)
         if result.needs_user_decision:
@@ -373,11 +377,13 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         )
         # Check if rollback is required
         if result.rollback_to:
-            tui_app.add_activity(f"Triggering rollback to {result.rollback_to}", "🔄")
+            rollback_type = "fast-track rollback" if result.is_fast_track else "rollback"
+            tui_app.add_activity(f"Triggering {rollback_type} to {result.rollback_to}", "🔄")
             return StageResult.rollback_required(
                 message=result.message,
                 rollback_to=Stage.from_str(result.rollback_to),
                 output=invoke_result.output,
+                is_fast_track=result.is_fast_track,
             )
         # Log when rollback_to is not set (helps debug missing rollback)
         tui_app.add_activity("Validation failed without rollback target", "⚠")
@@ -403,7 +409,7 @@ def archive_rollback_if_exists(task_name: str, tui_app: WorkflowTUIApp) -> None:
     if not artifact_exists("ROLLBACK.md", task_name):
         return
 
-    rollback_content = read_artifact("ROLLBACK.md", task_name)
+    rollback_content = read_artifact("ROLLBACK.md", task_name) or ""
     resolved_path = artifact_path("ROLLBACK_RESOLVED.md", task_name)
 
     resolution_note = f"\n\n## Resolved: {now_iso()}\n\nIssues fixed by DEV stage.\n"
@@ -510,6 +516,15 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
         task_name=task_name,
         reason=reason,
     )
+
+    # Handle fast-track vs full rollback
+    if result.is_fast_track:
+        # Minor rollback: skip stages that already passed
+        state.setup_fast_track()
+    else:
+        # Full rollback: re-run all stages
+        state.clear_fast_track()
+        state.clear_passed_stages()
 
     state.stage = target_stage
     state.last_failure = f"Rollback from {from_stage.value}: {reason}"

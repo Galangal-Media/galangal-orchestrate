@@ -65,7 +65,7 @@ class TestHandleRollback:
         original_stage = state.stage
 
         # Test with success
-        result = StageResult.success("All good")
+        result = StageResult.create_success("All good")
         handled = handle_rollback(state, result)
         assert handled is False
         assert state.stage == original_stage
@@ -132,7 +132,7 @@ class TestStageResultPatternMatching:
     def test_can_match_on_result_type(self):
         """Test that result.type enables clean branching logic."""
         results = [
-            StageResult.success("done"),
+            StageResult.create_success("done"),
             StageResult.preflight_failed("deps missing", "details"),
             StageResult.validation_failed("tests failed"),
             StageResult.rollback_required("issues", Stage.DEV),
@@ -180,9 +180,9 @@ class TestStageResultPatternMatching:
     def test_success_failure_grouping(self):
         """Test grouping results by success/failure status."""
         results = [
-            StageResult.success("ok"),
+            StageResult.create_success("ok"),
             StageResult.error("failed"),
-            StageResult.success("also ok"),
+            StageResult.create_success("also ok"),
             StageResult.timeout(100),
         ]
 

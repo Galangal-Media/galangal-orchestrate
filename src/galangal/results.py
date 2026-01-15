@@ -57,9 +57,10 @@ class StageResult(Result):
     type: StageResultType = StageResultType.SUCCESS
     rollback_to: Stage | None = None
     output: str | None = None
+    is_fast_track: bool = False  # True for minor rollbacks (skip passed stages)
 
     @classmethod
-    def success(cls, message: str = "", output: str | None = None) -> StageResult:
+    def create_success(cls, message: str = "", output: str | None = None) -> StageResult:
         """Create a successful stage result."""
         return cls(
             success=True,
@@ -89,15 +90,28 @@ class StageResult(Result):
 
     @classmethod
     def rollback_required(
-        cls, message: str, rollback_to: Stage, output: str | None = None
+        cls,
+        message: str,
+        rollback_to: Stage,
+        output: str | None = None,
+        is_fast_track: bool = False,
     ) -> StageResult:
-        """Create a rollback required result."""
+        """Create a rollback required result.
+
+        Args:
+            message: Description of why rollback is needed.
+            rollback_to: Stage to roll back to.
+            output: Optional detailed output.
+            is_fast_track: If True, this is a minor rollback that should
+                skip stages that already passed (REQUEST_MINOR_CHANGES).
+        """
         return cls(
             success=False,
             message=message,
             type=StageResultType.ROLLBACK_REQUIRED,
             rollback_to=rollback_to,
             output=output,
+            is_fast_track=is_fast_track,
         )
 
     @classmethod

@@ -8,7 +8,6 @@ import json
 import re
 import subprocess
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from galangal.config.loader import (
@@ -44,11 +43,6 @@ def clear_active_task() -> None:
     active_file = get_active_file()
     if active_file.exists():
         active_file.unlink()
-
-
-def get_task_dir(task_name: str) -> Path:
-    """Get the directory for a task."""
-    return get_tasks_dir() / task_name
 
 
 def list_tasks() -> list[tuple[str, str, str, str]]:
@@ -139,7 +133,7 @@ def generate_task_name(description: str) -> str:
 
 def task_name_exists(name: str) -> bool:
     """Check if task name exists in active or done folders."""
-    return get_task_dir(name).exists() or (get_done_dir() / name).exists()
+    return (get_tasks_dir() / name).exists() or (get_done_dir() / name).exists()
 
 
 def generate_unique_task_name(
@@ -239,6 +233,29 @@ def switch_to_base_branch() -> tuple[bool, str]:
         return False, f"Failed to switch to {base_branch}: {err}"
 
     return True, f"Switched to {base_branch}"
+
+
+def pull_base_branch() -> tuple[bool, str]:
+    """
+    Pull the latest changes from the remote base branch.
+
+    Returns:
+        Tuple of (success, message)
+    """
+    config = get_config()
+    base_branch = config.pr.base_branch
+
+    code, out, err = run_command(["git", "pull", "origin", base_branch])
+    if code != 0:
+        # Check if it's a "no tracking" error - try without remote name
+        if "no tracking information" in err.lower():
+            code, out, err = run_command(["git", "pull"])
+            if code != 0:
+                return False, f"Failed to pull: {err}"
+        else:
+            return False, f"Failed to pull from origin/{base_branch}: {err}"
+
+    return True, f"Pulled latest from {base_branch}"
 
 
 def ensure_active_task_with_state(

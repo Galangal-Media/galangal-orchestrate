@@ -33,10 +33,10 @@ def _setup_debug_mode() -> None:
     """Enable debug mode by setting environment variable and configuring logging."""
     os.environ["GALANGAL_DEBUG"] = "1"
 
-    from pathlib import Path
+    from galangal.config.loader import get_project_root
 
-    # Create logs directory if needed
-    logs_dir = Path.cwd() / "logs"
+    # Create logs directory in project root (not cwd)
+    logs_dir = get_project_root() / "logs"
     logs_dir.mkdir(exist_ok=True)
 
     # Write initial debug log entry immediately so file is always created

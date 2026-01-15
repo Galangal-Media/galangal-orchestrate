@@ -30,8 +30,8 @@ class TestStageResult:
     """Tests for the StageResult class."""
 
     def test_success_factory(self):
-        """Test StageResult.success() factory method."""
-        result = StageResult.success("Stage completed", output="some output")
+        """Test StageResult.create_success() factory method."""
+        result = StageResult.create_success("Stage completed", output="some output")
 
         assert result.success is True
         assert result.type == StageResultType.SUCCESS
@@ -40,8 +40,8 @@ class TestStageResult:
         assert result.rollback_to is None
 
     def test_success_default_message(self):
-        """Test StageResult.success() with default empty message."""
-        result = StageResult.success()
+        """Test StageResult.create_success() with default empty message."""
+        result = StageResult.create_success()
 
         assert result.success is True
         assert result.message == ""
@@ -135,7 +135,7 @@ class TestStageResult:
 
     def test_stage_result_inherits_bool_behavior(self):
         """Test that StageResult inherits __bool__ from Result."""
-        success = StageResult.success("done")
+        success = StageResult.create_success("done")
         failure = StageResult.error("failed")
 
         assert success

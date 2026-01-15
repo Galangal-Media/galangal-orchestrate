@@ -7,10 +7,12 @@ coordination in favor of asyncio.Future-based prompts.
 """
 
 import asyncio
+from typing import Any
 
 from rich.console import Console
 
 from galangal.config.loader import get_config
+from galangal.config.schema import GalangalConfig
 from galangal.core.artifacts import artifact_exists, parse_stage_plan, read_artifact, write_artifact
 from galangal.core.state import (
     STAGE_ORDER,
@@ -30,7 +32,7 @@ from galangal.core.workflow.core import (
 from galangal.core.workflow.pause import _handle_pause
 from galangal.logging import workflow_logger
 from galangal.prompts.builder import PromptBuilder
-from galangal.results import StageResultType
+from galangal.results import StageResult, StageResultType
 from galangal.ui.tui import PromptType, WorkflowTUIApp
 
 console = Console()
@@ -75,7 +77,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
         stage_durations=state.stage_durations,
     )
 
-    async def workflow_loop():
+    async def workflow_loop() -> None:
         """Async workflow loop running within Textual's event loop."""
         max_retries = config.stages.max_retries
 
@@ -156,6 +158,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     feedback_text = feedback or "No details provided"
 
                     # Ask which stage to roll back to (if there are choices)
+                    target_stage: Stage  # Type annotation for mypy
                     if len(valid_targets) > 1:
                         # Build options string
                         options_text = "\n".join(
@@ -166,7 +169,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
 
                         target_input = await app.text_input_async(target_prompt, "1")
                         try:
-                            target_idx = int(target_input) - 1
+                            target_idx = int(target_input or "1") - 1
                             if 0 <= target_idx < len(valid_targets):
                                 target_stage = valid_targets[target_idx]
                             else:
@@ -556,9 +559,14 @@ Please address the issues described above before proceeding.
                             break
                         continue  # Rejected - loop back to PM
 
-                # Archive rollback after successful DEV
+                # Archive rollback after successful DEV and clear passed_stages
                 if state.stage == Stage.DEV:
                     archive_rollback_if_exists(state.task_name, app)
+                    # Start fresh tracking of passed stages for this iteration
+                    state.clear_passed_stages()
+
+                # Record this stage as passed (for fast-track rollback support)
+                state.record_passed_stage(state.stage)
 
                 # Advance to next stage
                 next_stage = get_next_stage(state.stage, state)
@@ -659,7 +667,7 @@ async def _run_pm_discovery(
     app.show_message("Starting brief discovery Q&A...", "info")
     app.set_status("discovery", "refining brief")
 
-    qa_rounds: list[dict] = state.qa_rounds or []
+    qa_rounds: list[dict[str, Any]] = state.qa_rounds or []
     builder = PromptBuilder()
 
     while True:
@@ -718,7 +726,7 @@ async def _generate_discovery_questions(
     app: WorkflowTUIApp,
     state: WorkflowState,
     builder: PromptBuilder,
-    qa_history: list[dict],
+    qa_history: list[dict[str, Any]],
 ) -> list[str] | None:
     """
     Generate discovery questions by invoking the AI.
@@ -795,7 +803,7 @@ def _parse_discovery_questions(output: str) -> list[str]:
     return questions
 
 
-def _write_discovery_log(task_name: str, qa_rounds: list[dict]) -> None:
+def _write_discovery_log(task_name: str, qa_rounds: list[dict[str, Any]]) -> None:
     """Write or update DISCOVERY_LOG.md artifact."""
     content_parts = ["# Discovery Log\n"]
     content_parts.append("This log captures the Q&A from brief refinement.\n")
@@ -871,7 +879,7 @@ def _format_answers_artifact(questions: list[str], answers: list[str]) -> str:
 # -----------------------------------------------------------------------------
 
 
-def _build_preflight_error_message(result) -> str:
+def _build_preflight_error_message(result: StageResult) -> str:
     """Build error message for preflight failure modal."""
     detailed_error = result.output or result.message
 
@@ -898,7 +906,7 @@ def _build_preflight_error_message(result) -> str:
 async def _show_stage_preview(
     app: WorkflowTUIApp,
     state: WorkflowState,
-    config,
+    config: GalangalConfig,
 ) -> str:
     """
     Show a preview of stages to run before continuing.
@@ -980,7 +988,7 @@ async def _handle_max_retries_exceeded(
 
 
 async def _handle_plan_approval(
-    app: WorkflowTUIApp, state: WorkflowState, config
+    app: WorkflowTUIApp, state: WorkflowState, config: GalangalConfig
 ) -> bool:
     """
     Handle plan approval gate after PM stage.
@@ -1064,6 +1072,11 @@ def _show_skipped_stages(
 
 async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -> None:
     """Handle workflow completion - finalization and post-completion options."""
+    # Clear fast-track state on completion
+    state.clear_fast_track()
+    state.clear_passed_stages()
+    save_state(state)
+
     app.show_workflow_complete()
     app.update_stage("COMPLETE")
     app.set_status("complete", "workflow finished")
@@ -1074,7 +1087,7 @@ async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -
         # Run finalization
         app.set_status("finalizing", "creating PR...")
 
-        def progress_callback(message, status):
+        def progress_callback(message: str, status: str) -> None:
             app.show_message(message, status)
 
         from galangal.commands.complete import finalize_task
@@ -1156,7 +1169,7 @@ def _start_new_task_tui() -> str:
     """
     app = WorkflowTUIApp("New Task", "SETUP", hidden_stages=frozenset())
 
-    task_info = {
+    task_info: dict[str, Any] = {
         "type": None,
         "description": None,
         "name": None,
@@ -1165,7 +1178,7 @@ def _start_new_task_tui() -> str:
         "screenshots": None,
     }
 
-    async def task_creation_loop():
+    async def task_creation_loop() -> None:
         """Async task creation flow."""
         try:
             app.add_activity("[bold]Starting new task...[/bold]", "🆕")

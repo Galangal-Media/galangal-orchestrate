@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 
 class TaskType(str, Enum):
@@ -313,7 +314,7 @@ def get_conditional_stages() -> dict[Stage, str]:
     }
 
 
-def get_hidden_stages_for_task_type(task_type: TaskType, config_skip: list[str] = None) -> set[str]:
+def get_hidden_stages_for_task_type(task_type: TaskType, config_skip: list[str] | None = None) -> set[str]:
     """Get stages to hide from progress bar based on task type and config.
 
     Args:
@@ -373,12 +374,12 @@ class RollbackEvent:
             reason=reason,
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, str]:
         """Convert to dictionary for JSON serialization."""
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "RollbackEvent":
+    def from_dict(cls, d: dict[str, str]) -> "RollbackEvent":
         """Create from dictionary."""
         return cls(
             timestamp=d["timestamp"],
@@ -405,12 +406,12 @@ class WorkflowState:
 
     # PM Discovery Q&A tracking
     pm_subphase: str | None = None  # "analyzing", "questioning", "answering", "specifying"
-    qa_rounds: list[dict] | None = None  # [{"questions": [...], "answers": [...]}]
+    qa_rounds: list[dict[str, Any]] | None = None  # [{"questions": [...], "answers": [...]}]
     qa_complete: bool = False
 
     # PM-driven stage planning
     # Maps stage name to {"action": "skip"|"run", "reason": "..."}
-    stage_plan: dict[str, dict] | None = None
+    stage_plan: dict[str, dict[str, Any]] | None = None
 
     # Stage timing tracking
     stage_start_time: str | None = None  # ISO timestamp when current stage started
@@ -420,6 +421,12 @@ class WorkflowState:
     github_issue: int | None = None  # Issue number if created from GitHub
     github_repo: str | None = None  # owner/repo for PR creation
     screenshots: list[str] | None = None  # Local paths to screenshots from issue
+
+    # Fast-track rollback support
+    # Stages that passed since last DEV run (cleared when entering DEV)
+    passed_stages: set[str] = field(default_factory=set)
+    # Stages to skip on this iteration (set from passed_stages on minor rollback)
+    fast_track_skip: set[str] = field(default_factory=set)
 
     # -------------------------------------------------------------------------
     # Retry management methods
@@ -585,15 +592,74 @@ class WorkflowState:
             if r.to_stage == target_stage.value and r.timestamp > cutoff_str
         ])
 
-    def to_dict(self) -> dict:
+    # -------------------------------------------------------------------------
+    # Fast-track rollback methods
+    # -------------------------------------------------------------------------
+
+    def record_passed_stage(self, stage: Stage) -> None:
+        """
+        Record that a stage has passed in the current iteration.
+
+        Called when a stage completes successfully. Used to track which
+        stages can be skipped on a minor rollback.
+
+        Args:
+            stage: The stage that passed.
+        """
+        self.passed_stages.add(stage.value)
+
+    def clear_passed_stages(self) -> None:
+        """
+        Clear the passed stages tracking.
+
+        Called when entering DEV stage to start fresh tracking,
+        or on a full rollback (REQUEST_CHANGES).
+        """
+        self.passed_stages = set()
+
+    def setup_fast_track(self) -> None:
+        """
+        Setup fast-track skipping from passed stages.
+
+        Called on a minor rollback (REQUEST_MINOR_CHANGES). Copies
+        passed_stages to fast_track_skip so those stages will be
+        skipped on the re-run.
+        """
+        self.fast_track_skip = self.passed_stages.copy()
+        # Don't clear passed_stages - we'll clear it when entering DEV
+
+    def clear_fast_track(self) -> None:
+        """
+        Clear fast-track skipping.
+
+        Called when workflow completes or on a full rollback.
+        """
+        self.fast_track_skip = set()
+
+    def should_fast_track_skip(self, stage: Stage) -> bool:
+        """
+        Check if a stage should be skipped due to fast-track.
+
+        Args:
+            stage: The stage to check.
+
+        Returns:
+            True if the stage is in fast_track_skip set.
+        """
+        return stage.value in self.fast_track_skip
+
+    def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["stage"] = self.stage.value
         d["task_type"] = self.task_type.value
         # rollback_history is already converted to list of dicts by asdict
+        # Convert sets to lists for JSON serialization
+        d["passed_stages"] = list(self.passed_stages)
+        d["fast_track_skip"] = list(self.fast_track_skip)
         return d
 
     @classmethod
-    def from_dict(cls, d: dict) -> "WorkflowState":
+    def from_dict(cls, d: dict[str, Any]) -> "WorkflowState":
         # Parse rollback history if present
         rollback_history = [
             RollbackEvent.from_dict(r) for r in d.get("rollback_history", [])
@@ -619,6 +685,8 @@ class WorkflowState:
             github_issue=d.get("github_issue"),
             github_repo=d.get("github_repo"),
             screenshots=d.get("screenshots"),
+            passed_stages=set(d.get("passed_stages", [])),
+            fast_track_skip=set(d.get("fast_track_skip", [])),
         )
 
     @classmethod

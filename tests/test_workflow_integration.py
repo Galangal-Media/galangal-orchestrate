@@ -101,7 +101,7 @@ class MockAIBackend:
         default_response: StageResult | None = None,
     ):
         self.responses = responses or {}
-        self.default_response = default_response or StageResult.success("Mock success")
+        self.default_response = default_response or StageResult.create_success("Mock success")
         self.calls: list[tuple[str, Stage | None, str | None]] = []
 
     def invoke(
@@ -256,7 +256,7 @@ class TestExecuteStageWithMockBackend:
         create_artifact(sample_task, "PLAN.md", "# Plan\n\nTest plan")
 
         mock_backend = MockAIBackend(
-            default_response=StageResult.success("DEV completed", output="Implementation done")
+            default_response=StageResult.create_success("DEV completed", output="Implementation done")
         )
 
         with patch("galangal.core.workflow.core.get_config", return_value=sample_config):
@@ -288,7 +288,7 @@ class TestExecuteStageWithMockBackend:
         mock_ui = MockStageUI()
 
         mock_backend = MockAIBackend(
-            default_response=StageResult.success("QA completed")
+            default_response=StageResult.create_success("QA completed")
         )
 
         with patch("galangal.core.workflow.core.get_config", return_value=sample_config):

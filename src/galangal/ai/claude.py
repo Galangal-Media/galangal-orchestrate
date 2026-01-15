@@ -167,7 +167,7 @@ class ClaudeBackend(AIBackend):
                     pass
 
             if process.returncode == 0:
-                return StageResult.success(
+                return StageResult.create_success(
                     message=result_text or "Stage completed",
                     output=full_output,
                 )

@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass
 
 from galangal.config.loader import get_config, get_project_root
-from galangal.config.schema import PreflightCheck, StageValidation, ValidationCommand
+from galangal.config.schema import PreflightCheck, SkipCondition, StageValidation, ValidationCommand
 from galangal.core.artifacts import (
     artifact_exists,
     read_artifact,
@@ -53,25 +53,27 @@ def read_decision_file(stage: str, task_name: str) -> str | None:
 
 
 # Decision configurations for each stage type
-# Maps decision values to (success, message, rollback_to)
-DECISION_CONFIGS: dict[str, dict[str, tuple[bool, str, str | None]]] = {
+# Maps decision values to (success, message, rollback_to, is_fast_track)
+# is_fast_track: if True, skip stages that already passed on this iteration
+DECISION_CONFIGS: dict[str, dict[str, tuple[bool, str, str | None, bool]]] = {
     "SECURITY": {
-        "APPROVED": (True, "Security review approved", None),
-        "REJECTED": (False, "Security review found blocking issues", "DEV"),
-        "BLOCKED": (False, "Security review found blocking issues", "DEV"),
+        "APPROVED": (True, "Security review approved", None, False),
+        "REJECTED": (False, "Security review found blocking issues", "DEV", False),
+        "BLOCKED": (False, "Security review found blocking issues", "DEV", False),
     },
     "QA": {
-        "PASS": (True, "QA passed", None),
-        "FAIL": (False, "QA failed", "DEV"),
+        "PASS": (True, "QA passed", None, False),
+        "FAIL": (False, "QA failed", "DEV", False),
     },
     "TEST": {
-        "PASS": (True, "Tests passed", None),
-        "FAIL": (False, "Tests failed due to implementation issues - needs DEV fix", "DEV"),
-        "BLOCKED": (False, "Tests blocked by implementation issues - needs DEV fix", "DEV"),
+        "PASS": (True, "Tests passed", None, False),
+        "FAIL": (False, "Tests failed due to implementation issues - needs DEV fix", "DEV", False),
+        "BLOCKED": (False, "Tests blocked by implementation issues - needs DEV fix", "DEV", False),
     },
     "REVIEW": {
-        "APPROVE": (True, "Review approved", None),
-        "REQUEST_CHANGES": (False, "Review requested changes", "DEV"),
+        "APPROVE": (True, "Review approved", None, False),
+        "REQUEST_CHANGES": (False, "Review requested changes", "DEV", False),
+        "REQUEST_MINOR_CHANGES": (False, "Review requested minor changes (fast-track)", "DEV", True),
     },
 }
 
@@ -87,6 +89,8 @@ class ValidationResult:
         output: Optional detailed output (e.g., test results, command stdout).
         rollback_to: If validation failed, the stage to roll back to (e.g., "DEV").
         skipped: True if the stage was skipped due to skip_if conditions.
+        is_fast_track: If True, this is a minor rollback that should skip
+            stages that already passed (REQUEST_MINOR_CHANGES).
     """
 
     success: bool
@@ -95,6 +99,7 @@ class ValidationResult:
     rollback_to: str | None = None  # Stage to rollback to on failure
     skipped: bool = False  # True if stage was skipped due to conditions
     needs_user_decision: bool = False  # True if decision file missing/unclear
+    is_fast_track: bool = False  # True for minor rollbacks (skip passed stages)
 
 
 def validate_stage_decision(
@@ -133,8 +138,10 @@ def validate_stage_decision(
     decision_config = DECISION_CONFIGS.get(stage_upper, {})
 
     if decision and decision in decision_config:
-        success, message, rollback_to = decision_config[decision]
-        return ValidationResult(success, message, rollback_to=rollback_to)
+        success, message, rollback_to, is_fast_track = decision_config[decision]
+        return ValidationResult(
+            success, message, rollback_to=rollback_to, is_fast_track=is_fast_track
+        )
 
     # Decision file missing or unclear - check if artifact exists
     if not artifact_exists(artifact_name, task_name):
@@ -166,7 +173,7 @@ class ValidationRunner:
     If no config exists for a stage, default validation logic is used.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.config = get_config()
         self.project_root = get_project_root()
 
@@ -272,7 +279,7 @@ class ValidationRunner:
 
         return ValidationResult(True, f"{stage} validation passed")
 
-    def _should_skip(self, skip_condition, task_name: str) -> bool:
+    def _should_skip(self, skip_condition: SkipCondition, task_name: str) -> bool:
         """
         Check if a stage's skip condition is met.
 
@@ -351,7 +358,7 @@ class ValidationRunner:
             ValidationResult with success=True if all required checks pass.
             Output contains the generated report content.
         """
-        results: dict[str, dict] = {}
+        results: dict[str, dict[str, str]] = {}
         all_ok = True
 
         for check in checks:
@@ -407,8 +414,8 @@ class ValidationRunner:
 
 ## Checks
 """
-        for name, result in results.items():
-            status_val = result.get("status", "Unknown")
+        for name, check_result in results.items():
+            status_val = check_result.get("status", "Unknown")
             if status_val == "OK":
                 status_icon = "✓"
             elif status_val == "Warning":
@@ -416,11 +423,11 @@ class ValidationRunner:
             else:
                 status_icon = "✗"
             report += f"\n### {status_icon} {name}\n"
-            report += f"- Status: {result.get('status', 'Unknown')}\n"
-            if result.get("output"):
-                report += f"- Output: {result['output']}\n"
-            if result.get("error"):
-                report += f"- Error: {result['error']}\n"
+            report += f"- Status: {check_result.get('status', 'Unknown')}\n"
+            if check_result.get("output"):
+                report += f"- Output: {check_result['output']}\n"
+            if check_result.get("error"):
+                report += f"- Error: {check_result['error']}\n"
 
         write_artifact("PREFLIGHT_REPORT.md", report, task_name)
 
@@ -598,8 +605,10 @@ class ValidationRunner:
             # Check for decision file first
             decision = read_decision_file("TEST", task_name)
             if decision and decision in DECISION_CONFIGS.get("TEST", {}):
-                success, message, rollback_to = DECISION_CONFIGS["TEST"][decision]
-                return ValidationResult(success, message, rollback_to=rollback_to)
+                success, message, rollback_to, is_fast_track = DECISION_CONFIGS["TEST"][decision]
+                return ValidationResult(
+                    success, message, rollback_to=rollback_to, is_fast_track=is_fast_track
+                )
 
             # No decision file - check TEST_PLAN.md content for markers
             report = read_artifact("TEST_PLAN.md", task_name) or ""
