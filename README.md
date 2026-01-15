@@ -61,7 +61,7 @@ galangal status
 | **PREFLIGHT** | Environment validation | PREFLIGHT_REPORT.md |
 | **DEV** | Implementation | Code changes |
 | **MIGRATION*** | Database migration checks | MIGRATION_REPORT.md |
-| **TEST** | Test implementation | TEST_PLAN.md |
+| **TEST** | Test implementation | TEST_PLAN.md, TEST_SUMMARY.md |
 | **CONTRACT*** | API contract validation | CONTRACT_REPORT.md |
 | **QA** | Quality assurance | QA_REPORT.md |
 | **BENCHMARK*** | Performance validation | BENCHMARK_REPORT.md |
@@ -70,6 +70,15 @@ galangal status
 | **DOCS** | Documentation | DOCS_REPORT.md |
 
 *Conditional stages - skipped automatically if not relevant
+
+### Validation Artifacts
+
+When validation commands run (tests, linters, etc.), Galangal creates debugging artifacts:
+
+- **VALIDATION_REPORT.md** - Full output from all validation commands, useful for debugging failures
+- **TEST_SUMMARY.md** - Concise test results (pass/fail counts, failed test names, coverage) included in downstream stage prompts
+
+These artifacts help you understand what failed without digging through logs, and give downstream stages (QA, REVIEW) context about test results without bloating prompts with verbose output.
 
 ## Task Types
 
@@ -130,6 +139,32 @@ After analyzing your task, the PM stage outputs a `STAGE_PLAN.md` recommending w
 ```
 
 The progress bar updates dynamically to show only relevant stages.
+
+### Workflow Preview
+
+After PM approval, you'll see a preview showing exactly which stages will run and why others are skipped:
+
+```
+Workflow Preview
+
+Stages to run:
+  PM → DESIGN → PREFLIGHT → DEV → TEST → QA → REVIEW → DOCS
+
+Skipping:
+  MIGRATION (no files match: **/migrations/*)
+  CONTRACT (no files match: **/api/*, **/openapi.*)
+  BENCHMARK (task type: bug_fix)
+  SECURITY (PM: simple UI change, no security impact)
+
+Controls during execution:
+  ^N Skip stage  ^B Back  ^E Pause for edit  ^I Interrupt
+```
+
+Skip reasons include:
+- **Task type** - Based on the workflow template (e.g., bug fixes skip DESIGN)
+- **Config** - Stages listed in `stages.skip` configuration
+- **PM recommendation** - From STAGE_PLAN.md analysis
+- **skip_if condition** - No changed files match the glob pattern
 
 ## Commands
 
@@ -367,6 +402,9 @@ validation:
       - name: "Integration tests"
         command: "pytest tests/integration"
         optional: true         # Don't fail if integration tests missing
+      # Use array form for paths with spaces or special characters
+      - name: "Task-specific tests"
+        command: ["pytest", "{task_dir}/tests"]  # {task_dir} is substituted
 
   # Contract stage (API compatibility)
   contract:
@@ -797,6 +835,8 @@ If the TEST stage keeps retrying instead of rolling back to DEV:
 1. Ensure your TEST_PLAN.md has a clear `**Status:** PASS` or `**Status:** FAIL` line
 2. If tests fail due to implementation bugs, the AI should report FAIL (not try to fix the code)
 3. Check that test commands exit with proper exit codes (0 for success, non-zero for failure)
+
+**Note:** As of v0.12.0, when artifact markers are unclear (missing PASS/FAIL), Galangal prompts you to manually approve or reject instead of retrying indefinitely. You'll see the artifact content and can make the decision yourself.
 
 ### "Galangal has not been initialized" Error
 
