@@ -116,9 +116,8 @@ def _should_skip_conditional_stage(
     if artifact_exists(skip_artifact, task_name):
         return True
 
-    # Check validation skip condition
-    result = runner.validate_stage(stage.value.upper(), task_name)
-    return result.skipped
+    # Check validation skip_if condition only (without running validation commands)
+    return runner.should_skip_stage(stage.value.upper(), task_name)
 
 
 def get_next_stage(
@@ -305,7 +304,7 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     ui = TUIAdapter(tui_app)
     invoke_result = backend.invoke(
         prompt=prompt,
-        timeout=14400,
+        timeout=config.stages.timeout,
         max_turns=200,
         ui=ui,
         pause_check=pause_check,

@@ -333,6 +333,35 @@ class ValidationRunner:
         """Write a skip marker artifact."""
         write_skip_artifact(stage, reason, task_name)
 
+    def should_skip_stage(self, stage: str, task_name: str) -> bool:
+        """
+        Check if a stage should be skipped based on skip_if conditions only.
+
+        This method checks ONLY the skip_if condition configured for a stage,
+        without running any validation commands. Use this when you need to
+        determine whether to skip a conditional stage before execution.
+
+        Args:
+            stage: The stage name (e.g., "MIGRATION", "CONTRACT", "BENCHMARK").
+            task_name: Name of the task (for future conditions).
+
+        Returns:
+            True if the stage should be skipped, False otherwise.
+        """
+        stage_lower = stage.lower()
+        validation_config = self.config.validation
+        stage_config: StageValidation | None = getattr(
+            validation_config, stage_lower, None
+        )
+
+        if stage_config is None:
+            return False
+
+        if stage_config.skip_if:
+            return self._should_skip(stage_config.skip_if, task_name)
+
+        return False
+
     def _run_preflight_checks(
         self, checks: list[PreflightCheck], task_name: str
     ) -> ValidationResult:

@@ -370,7 +370,13 @@ Please address the issues described above before proceeding.
                             if choice == "approve":
                                 # Write decision file and continue as success
                                 decision_file = f"{state.stage.value.upper()}_DECISION"
-                                decision_word = "APPROVED" if state.stage == Stage.SECURITY else "PASS" if state.stage == Stage.QA else "APPROVE"
+                                # Match DECISION_CONFIGS expected values per stage
+                                if state.stage == Stage.SECURITY:
+                                    decision_word = "APPROVED"
+                                elif state.stage in (Stage.QA, Stage.TEST):
+                                    decision_word = "PASS"
+                                else:
+                                    decision_word = "APPROVE"
                                 write_artifact(decision_file, decision_word, state.task_name)
                                 app.add_activity(f"User approved - wrote {decision_file}", "✓")
 
@@ -401,7 +407,13 @@ Please address the issues described above before proceeding.
                                 # Write decision file and rollback to DEV
                                 original_stage = state.stage.value
                                 decision_file = f"{original_stage.upper()}_DECISION"
-                                decision_word = "REJECTED" if state.stage == Stage.SECURITY else "FAIL" if state.stage == Stage.QA else "REQUEST_CHANGES"
+                                # Match DECISION_CONFIGS expected values per stage
+                                if state.stage == Stage.SECURITY:
+                                    decision_word = "REJECTED"
+                                elif state.stage in (Stage.QA, Stage.TEST):
+                                    decision_word = "FAIL"
+                                else:
+                                    decision_word = "REQUEST_CHANGES"
                                 write_artifact(decision_file, decision_word, state.task_name)
                                 app.add_activity(f"User rejected - wrote {decision_file}", "✗")
 

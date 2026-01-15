@@ -434,12 +434,6 @@ Only update documentation types marked as YES above.""")
             except Exception:
                 return ""
 
-        # Get list of changed files with stats (committed + uncommitted)
-        # Use --stat for a summary of changes per file
-        committed_stat = run_git("diff", "--stat", f"{base_branch}...HEAD")
-        staged_stat = run_git("diff", "--stat", "--cached")
-        unstaged_stat = run_git("diff", "--stat")
-
         # Get file names for the list
         committed_files = run_git("diff", "--name-only", f"{base_branch}...HEAD")
         staged_files = run_git("diff", "--name-only", "--cached")
@@ -454,9 +448,6 @@ Only update documentation types marked as YES above.""")
 
         files_list = "\n".join(f"- {f}" for f in sorted(all_files)) if all_files else "(No files changed)"
 
-        # Combine stats (prefer committed, fall back to staged/unstaged)
-        diff_stat = committed_stat or staged_stat or unstaged_stat or "(No changes detected)"
-
         # Build minimal context - instruct to READ files, not dump diff
         context = f"""# Independent Code Review
 
@@ -467,11 +458,6 @@ Only update documentation types marked as YES above.""")
 The following files have been modified and need review:
 
 {files_list}
-
-## Change Summary
-```
-{diff_stat}
-```
 
 ## Instructions
 1. Read each changed file listed above to understand the implementation
