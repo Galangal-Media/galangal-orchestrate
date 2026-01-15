@@ -738,7 +738,9 @@ def load_state(task_name: str | None = None) -> WorkflowState | None:
     try:
         with open(state_file) as f:
             return WorkflowState.from_dict(json.load(f))
-    except (json.JSONDecodeError, KeyError) as e:
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        # ValueError can occur from Stage.from_str or TaskType.from_str
+        # with invalid/unknown values in a corrupted or manually edited state.json
         print(f"Error loading state: {e}")
         return None
 

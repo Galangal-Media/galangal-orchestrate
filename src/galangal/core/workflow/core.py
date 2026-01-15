@@ -89,37 +89,6 @@ def _write_artifacts_from_codex_output(
             tui_app.add_activity(f"Warning: Invalid decision '{decision}' from Codex", "⚠️")
 
 
-def _should_skip_conditional_stage(
-    stage: Stage, task_name: str, runner: ValidationRunner
-) -> bool:
-    """
-    Check if a conditional stage should be skipped.
-
-    Conditional stages (MIGRATION, CONTRACT, BENCHMARK) can be skipped if:
-    1. A manual skip artifact exists (e.g., MIGRATION_SKIP.md)
-    2. The validation runner's skip_if condition is met (e.g., no matching files)
-
-    Args:
-        stage: The stage to check.
-        task_name: Name of the task for artifact lookup.
-        runner: ValidationRunner instance for checking skip conditions.
-
-    Returns:
-        True if the stage should be skipped, False otherwise.
-    """
-    if stage not in CONDITIONAL_STAGES:
-        return False
-
-    skip_artifact = CONDITIONAL_STAGES[stage]
-
-    # Check for manual skip artifact
-    if artifact_exists(skip_artifact, task_name):
-        return True
-
-    # Check validation skip_if condition only (without running validation commands)
-    return runner.should_skip_stage(stage.value.upper(), task_name)
-
-
 def get_next_stage(
     current: Stage, state: WorkflowState
 ) -> Stage | None:
@@ -172,16 +141,22 @@ def get_next_stage(
             return get_next_stage(next_stage, state)
 
     # Check conditional stages (MIGRATION, CONTRACT, BENCHMARK)
-    # Only check glob patterns if PM didn't explicitly say "run"
     if next_stage in CONDITIONAL_STAGES:
+        skip_artifact = CONDITIONAL_STAGES[next_stage]
+
+        # Manual skip artifacts ALWAYS win (user explicitly ran galangal skip-*)
+        if artifact_exists(skip_artifact, task_name):
+            return get_next_stage(next_stage, state)
+
         # If PM explicitly said "run", don't apply glob-based skipping
         if state.stage_plan and next_stage.value in state.stage_plan:
             plan_entry = state.stage_plan[next_stage.value]
             if plan_entry.get("action") == "run":
                 return next_stage  # PM says run, skip the glob check
 
+        # Check glob-based skip conditions
         runner = ValidationRunner()
-        if _should_skip_conditional_stage(next_stage, task_name, runner):
+        if runner.should_skip_stage(next_stage.value.upper(), task_name):
             return get_next_stage(next_stage, state)
 
     return next_stage

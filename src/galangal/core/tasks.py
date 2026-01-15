@@ -131,6 +131,40 @@ def generate_task_name(description: str) -> str:
     return generate_task_name_fallback(description)
 
 
+# Safe pattern for task names: alphanumeric, hyphens, underscores
+# Must start with letter/number, max 60 chars
+TASK_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,59}$")
+
+
+def is_valid_task_name(name: str) -> tuple[bool, str]:
+    """
+    Validate a task name for safety and format.
+
+    Task names must:
+    - Start with a letter or number
+    - Contain only alphanumeric characters, hyphens, and underscores
+    - Be 1-60 characters long
+
+    This prevents shell injection via task names used in validation commands.
+
+    Args:
+        name: The task name to validate.
+
+    Returns:
+        Tuple of (is_valid, error_message). Error message is empty if valid.
+    """
+    if not name:
+        return False, "Task name cannot be empty"
+
+    if len(name) > 60:
+        return False, "Task name must be 60 characters or less"
+
+    if not TASK_NAME_PATTERN.match(name):
+        return False, "Task name must start with letter/number and contain only alphanumeric, hyphens, underscores"
+
+    return True, ""
+
+
 def task_name_exists(name: str) -> bool:
     """Check if task name exists in active or done folders."""
     return (get_tasks_dir() / name).exists() or (get_done_dir() / name).exists()

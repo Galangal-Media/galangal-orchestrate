@@ -16,6 +16,7 @@ from galangal.core.tasks import (
     create_task_branch,
     generate_unique_task_name,
     is_on_base_branch,
+    is_valid_task_name,
     pull_base_branch,
     set_active_task,
     switch_to_base_branch,
@@ -348,7 +349,16 @@ def cmd_start(args: argparse.Namespace) -> int:
                 prefix = f"issue-{task_info['github_issue']}" if task_info["github_issue"] else None
                 task_info["name"] = generate_unique_task_name(task_info["description"], prefix)
             else:
-                # Validate provided name
+                # Validate provided name for safety (prevent shell injection)
+                valid, error_msg = is_valid_task_name(task_info["name"])
+                if not valid:
+                    app.show_message(f"Invalid task name: {error_msg}", "error")
+                    app._workflow_result = "cancelled"
+                    result_code["value"] = 1
+                    app.call_from_thread(app.set_timer, 0.5, app.exit)
+                    return
+
+                # Check if name already exists
                 if task_name_exists(task_info["name"]):
                     app.show_message(f"Task '{task_info['name']}' already exists", "error")
                     app._workflow_result = "cancelled"

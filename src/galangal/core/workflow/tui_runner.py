@@ -498,12 +498,13 @@ Please address the issues described above before proceeding.
                                 continue
                             elif choice == "fix_in_dev":
                                 # Force rollback to DEV by clearing rollback history for DEV
+                                original_stage = state.stage.value  # Capture before changing
                                 state.rollback_history = [
                                     r for r in state.rollback_history
                                     if r.to_stage != Stage.DEV.value
                                 ]
                                 state.stage = Stage.DEV
-                                state.last_failure = f"Manual rollback from {state.stage.value}: {result.message[:500]}"
+                                state.last_failure = f"Manual rollback from {original_stage}: {result.message[:500]}"
                                 state.reset_attempts(clear_failure=False)
                                 save_state(state)
                                 app.show_message("Rolling back to DEV (manual override)", "warning")

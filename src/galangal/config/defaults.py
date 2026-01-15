@@ -61,6 +61,30 @@ validation:
         - "**/*migration*"
         - "**/schema/**"
         - "**/db/migrate/**"
+    artifacts_required:
+      - "MIGRATION_REPORT.md"
+
+  # Contract - API contract validation (auto-skip if no API files changed)
+  contract:
+    skip_if:
+      no_files_match:
+        - "**/api/**"
+        - "**/openapi*"
+        - "**/swagger*"
+        - "**/*schema*.json"
+        - "**/*schema*.yaml"
+    artifacts_required:
+      - "CONTRACT_REPORT.md"
+
+  # Benchmark - performance benchmarks (auto-skip if no perf-critical files changed)
+  benchmark:
+    skip_if:
+      no_files_match:
+        - "**/benchmark/**"
+        - "**/perf/**"
+        - "**/*benchmark*"
+    artifacts_required:
+      - "BENCHMARK_REPORT.md"
 
   # QA - quality checks
   qa:

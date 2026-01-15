@@ -113,7 +113,9 @@ class CodexBackend(AIBackend):
                 schema_file = f.name
 
             # Create output file path (will be written by codex)
-            output_file = tempfile.mktemp(suffix=".json")
+            # Use mkstemp for secure temp file creation (avoids TOCTOU race condition)
+            fd, output_file = tempfile.mkstemp(suffix=".json")
+            os.close(fd)  # Close fd, codex will write to the path
 
             if ui:
                 ui.set_status("starting", "initializing Codex")
@@ -316,7 +318,9 @@ class CodexBackend(AIBackend):
                 f.write(prompt)
                 prompt_file = f.name
 
-            output_file = tempfile.mktemp(suffix=".txt")
+            # Use mkstemp for secure temp file creation (avoids TOCTOU race condition)
+            fd, output_file = tempfile.mkstemp(suffix=".txt")
+            os.close(fd)  # Close fd, codex will write to the path
 
             shell_cmd = f"cat '{prompt_file}' | codex exec -o '{output_file}'"
 
