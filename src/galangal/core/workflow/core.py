@@ -7,8 +7,8 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
+from galangal.ai import get_backend_for_stage
 from galangal.ai.base import PauseCheck
-from galangal.ai.claude import ClaudeBackend
 from galangal.config.loader import get_config
 from galangal.core.artifacts import artifact_exists, artifact_path, read_artifact, write_artifact
 from galangal.core.state import (
@@ -32,6 +32,61 @@ if TYPE_CHECKING:
 
 # Get conditional stages from metadata (cached at module load)
 CONDITIONAL_STAGES: dict[Stage, str] = get_conditional_stages()
+
+
+def _write_artifacts_from_codex_output(
+    stage: Stage,
+    output: str,
+    task_name: str,
+    tui_app: WorkflowTUIApp,
+) -> None:
+    """
+    Write stage artifacts from Codex's structured JSON output.
+
+    Codex runs in read-only mode and cannot write files directly.
+    Instead, it returns structured JSON which we post-process to
+    create the expected artifacts.
+
+    Args:
+        stage: The stage that was executed
+        output: JSON string from Codex containing structured output
+        task_name: Task name for artifact paths
+        tui_app: TUI app for activity logging
+    """
+    import json
+
+    try:
+        data = json.loads(output)
+    except json.JSONDecodeError:
+        tui_app.add_activity("Warning: Codex output is not valid JSON", "⚠️")
+        return
+
+    if stage == Stage.REVIEW:
+        # Write REVIEW_NOTES.md from review_notes field
+        review_notes = data.get("review_notes", "")
+        if review_notes:
+            # Format the review notes with issues if present
+            issues = data.get("issues", [])
+            if issues:
+                review_notes += "\n\n## Issues Found\n\n"
+                for issue in issues:
+                    severity = issue.get("severity", "unknown")
+                    desc = issue.get("description", "")
+                    file_ref = issue.get("file", "")
+                    line = issue.get("line")
+                    loc = f" ({file_ref}:{line})" if file_ref and line else ""
+                    review_notes += f"- **[{severity.upper()}]** {desc}{loc}\n"
+
+            write_artifact("REVIEW_NOTES.md", review_notes, task_name)
+            tui_app.add_activity("Wrote REVIEW_NOTES.md from Codex output", "📝")
+
+        # Write REVIEW_DECISION file
+        decision = data.get("decision", "")
+        if decision in ("APPROVE", "REQUEST_CHANGES"):
+            write_artifact("REVIEW_DECISION", decision, task_name)
+            tui_app.add_activity(f"Wrote REVIEW_DECISION: {decision}", "📝")
+        else:
+            tui_app.add_activity(f"Warning: Invalid decision '{decision}' from Codex", "⚠️")
 
 
 def _should_skip_conditional_stage(
@@ -206,9 +261,19 @@ def execute_stage(
                 details=result.output or "",
             )
 
+    # Get backend first (needed for backend-specific prompts)
+    backend = get_backend_for_stage(stage, config, use_fallback=True)
+
     # Build prompt
     builder = PromptBuilder()
-    prompt = builder.build_full_prompt(stage, state)
+
+    # For independent review backends (like Codex), use minimal context
+    # This gives an unbiased review without Claude's interpretations
+    if backend.name == "codex" and stage == Stage.REVIEW:
+        prompt = builder.build_minimal_review_prompt(state, backend_name=backend.name)
+        tui_app.add_activity("Using minimal context for independent review", "📋")
+    else:
+        prompt = builder.build_full_prompt(stage, state, backend_name=backend.name)
 
     # Add retry context
     if state.attempt > 1 and state.last_failure:
@@ -231,9 +296,8 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     log_file = logs_dir / f"{stage.value.lower()}_{state.attempt}.log"
     with open(log_file, "w") as f:
         f.write(f"=== Prompt ===\n{prompt}\n\n")
+    tui_app.add_activity(f"Using {backend.name} backend", "🤖")
 
-    # Run stage with TUI
-    backend = ClaudeBackend()
     ui = TUIAdapter(tui_app)
     invoke_result = backend.invoke(
         prompt=prompt,
@@ -245,11 +309,17 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
 
     # Log the output
     with open(log_file, "a") as f:
+        f.write(f"=== Backend: {backend.name} ===\n")
         f.write(f"=== Output ===\n{invoke_result.output or invoke_result.message}\n")
 
     # Return early if AI invocation failed
     if not invoke_result.success:
         return invoke_result
+
+    # Post-process for read-only backends (e.g., Codex)
+    # These backends return structured JSON instead of writing files directly
+    if backend.name == "codex" and invoke_result.output:
+        _write_artifacts_from_codex_output(stage, invoke_result.output, task_name, tui_app)
 
     # Validate stage
     tui_app.add_activity("Validating stage outputs...", "⚙")

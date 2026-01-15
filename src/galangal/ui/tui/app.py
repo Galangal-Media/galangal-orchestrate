@@ -884,9 +884,11 @@ class StageTUIApp(WorkflowTUIApp):
         self._worker_thread.start()
 
     def _execute_stage(self) -> None:
-        from galangal.ai.claude import ClaudeBackend
+        from galangal.ai import get_backend_with_fallback
+        from galangal.config.loader import get_config
 
-        backend = ClaudeBackend()
+        config = get_config()
+        backend = get_backend_with_fallback(config.ai.default)
         ui = TUIAdapter(self)
 
         self.result = backend.invoke(

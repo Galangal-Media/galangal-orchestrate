@@ -17,7 +17,6 @@ Usage:
     galangal skip-security                  - Skip security for non-code changes
     galangal reset                          - Delete active task
     galangal complete                       - Move task to done/, create PR
-    galangal stats                          - Show project metrics and insights
     galangal prompts export                 - Export default prompts for customization
 
 Debug mode:
@@ -238,16 +237,6 @@ Tip: Press Ctrl+C during execution to pause gracefully.
     )
     complete_parser.set_defaults(func=_cmd_complete)
 
-    # stats
-    stats_parser = subparsers.add_parser("stats", help="Show project metrics and insights")
-    stats_parser.add_argument(
-        "--stage", "-s", help="Show stats for a specific stage only"
-    )
-    stats_parser.add_argument(
-        "--detailed", "-d", action="store_true", help="Show detailed breakdown"
-    )
-    stats_parser.set_defaults(func=_cmd_stats)
-
     # prompts
     prompts_parser = subparsers.add_parser("prompts", help="Manage prompts")
     prompts_subparsers = prompts_parser.add_subparsers(dest="prompts_command")
@@ -394,11 +383,6 @@ def _cmd_reset(args):
 def _cmd_complete(args):
     from galangal.commands.complete import cmd_complete
     return cmd_complete(args)
-
-
-def _cmd_stats(args):
-    from galangal.commands.stats import cmd_stats
-    return cmd_stats(args)
 
 
 def _cmd_prompts_export(args):

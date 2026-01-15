@@ -77,7 +77,7 @@ class ClaudeBackend(AIBackend):
                 shell=True,
                 cwd=get_project_root(),
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Merge stderr into stdout to prevent deadlock
                 text=True,
             )
             _debug(f"Subprocess started with PID {process.pid}")

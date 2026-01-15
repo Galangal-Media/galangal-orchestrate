@@ -15,7 +15,9 @@ from galangal.core.state import (
 from galangal.core.tasks import (
     create_task_branch,
     generate_unique_task_name,
+    is_on_base_branch,
     set_active_task,
+    switch_to_base_branch,
     task_name_exists,
 )
 from galangal.core.utils import debug_exception, debug_log
@@ -102,6 +104,50 @@ def cmd_start(args: argparse.Namespace) -> int:
     def task_creation_thread():
         try:
             app.add_activity("[bold]Starting new task...[/bold]", "🆕")
+
+            # Check if on base branch before starting
+            on_base, current_branch, base_branch = is_on_base_branch()
+            if not on_base:
+                app.set_status("setup", "checking branch")
+                app.add_activity(
+                    f"Currently on branch '{current_branch}', expected '{base_branch}'",
+                    "⚠️",
+                )
+
+                branch_event = threading.Event()
+                branch_result = {"value": None}
+
+                def handle_branch_choice(choice):
+                    branch_result["value"] = choice
+                    branch_event.set()
+
+                app.show_prompt(
+                    PromptType.YES_NO,
+                    f"Switch to '{base_branch}' branch before creating task?",
+                    handle_branch_choice,
+                )
+                branch_event.wait()
+
+                if branch_result["value"] == "yes":
+                    success, message = switch_to_base_branch()
+                    if success:
+                        app.add_activity(f"Switched to '{base_branch}' branch", "✓")
+                    else:
+                        app.add_activity(f"Failed to switch branch: {message}", "✗")
+                        app.show_message(
+                            f"Could not switch to {base_branch}: {message}",
+                            "error",
+                        )
+                        app._workflow_result = "error"
+                        result_code["value"] = 1
+                        app.call_from_thread(app.set_timer, 0.5, app.exit)
+                        return
+                else:
+                    # User chose not to switch - continue on current branch
+                    app.add_activity(
+                        f"Continuing on '{current_branch}' branch",
+                        "ℹ️",
+                    )
 
             # Step 0: Choose task source (manual or GitHub) if no description/issue provided
             if not task_info["description"] and not task_info["github_issue"]:

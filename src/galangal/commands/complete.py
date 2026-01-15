@@ -10,7 +10,7 @@ from pathlib import Path
 
 from rich.prompt import Prompt
 
-from galangal.ai.claude import ClaudeBackend
+from galangal.ai import get_backend_with_fallback
 from galangal.config.loader import get_config, get_done_dir, get_project_root
 from galangal.core.artifacts import read_artifact, run_command
 from galangal.core.state import Stage, get_task_dir
@@ -20,7 +20,8 @@ from galangal.ui.console import console, print_error, print_success, print_warni
 
 def generate_pr_title(task_name: str, description: str, task_type: str) -> str:
     """Generate a concise PR title using AI."""
-    backend = ClaudeBackend()
+    config = get_config()
+    backend = get_backend_with_fallback(config.ai.default)
 
     prompt = f"""Generate a concise pull request title for this task.
 
@@ -52,15 +53,32 @@ Output ONLY the title, nothing else."""
     return description[:72] if len(description) > 72 else description
 
 
-def generate_commit_summary(task_name: str, description: str) -> str:
-    """Generate a commit message summary using AI."""
-    backend = ClaudeBackend()
+def generate_commit_summary(
+    task_name: str,
+    description: str,
+    spec: str | None = None,
+    plan: str | None = None,
+) -> str:
+    """Generate a commit message summary using AI.
 
-    spec = read_artifact("SPEC.md", task_name) or ""
-    plan = read_artifact("PLAN.md", task_name) or ""
+    Args:
+        task_name: Name of the task
+        description: Task description
+        spec: Pre-read SPEC.md content (optional, reads from disk if not provided)
+        plan: Pre-read PLAN.md content (optional, reads from disk if not provided)
+    """
+    config = get_config()
+    backend = get_backend_with_fallback(config.ai.default)
+    base_branch = config.pr.base_branch
 
-    code, diff_stat, _ = run_command(["git", "diff", "--stat", "main...HEAD"])
-    code, changed_files, _ = run_command(["git", "diff", "--name-only", "main...HEAD"])
+    # Use provided artifacts or read from disk
+    if spec is None:
+        spec = read_artifact("SPEC.md", task_name) or ""
+    if plan is None:
+        plan = read_artifact("PLAN.md", task_name) or ""
+
+    code, diff_stat, _ = run_command(["git", "diff", "--stat", f"{base_branch}...HEAD"])
+    code, changed_files, _ = run_command(["git", "diff", "--name-only", f"{base_branch}...HEAD"])
 
     prompt = f"""Generate a concise git commit message for this task. Follow conventional commit format.
 
@@ -196,8 +214,20 @@ def create_pull_request(
     return True, pr_url
 
 
-def commit_changes(task_name: str, description: str) -> tuple[bool, str]:
-    """Commit all changes for a task."""
+def commit_changes(
+    task_name: str,
+    description: str,
+    spec: str | None = None,
+    plan: str | None = None,
+) -> tuple[bool, str]:
+    """Commit all changes for a task.
+
+    Args:
+        task_name: Name of the task
+        description: Task description
+        spec: Pre-read SPEC.md content (optional)
+        plan: Pre-read PLAN.md content (optional)
+    """
     code, status_out, _ = run_command(["git", "status", "--porcelain"])
     if code != 0:
         return False, "Failed to check git status"
@@ -215,7 +245,7 @@ def commit_changes(task_name: str, description: str) -> tuple[bool, str]:
         return False, f"Failed to stage changes: {err}"
 
     console.print("[dim]Generating commit summary...[/dim]")
-    summary = generate_commit_summary(task_name, description)
+    summary = generate_commit_summary(task_name, description, spec=spec, plan=plan)
 
     commit_msg = f"""{summary}
 
@@ -259,6 +289,10 @@ def finalize_task(task_name: str, state, force: bool = False, progress_callback=
     project_root = get_project_root()
     done_dir = get_done_dir()
 
+    # Pre-read artifacts before moving task (for commit message generation)
+    spec = read_artifact("SPEC.md", task_name) or ""
+    plan = read_artifact("PLAN.md", task_name) or ""
+
     # 1. Move to done/
     task_dir = get_task_dir(task_name)
     done_dir.mkdir(parents=True, exist_ok=True)
@@ -271,9 +305,9 @@ def finalize_task(task_name: str, state, force: bool = False, progress_callback=
     shutil.move(str(task_dir), str(dest))
     clear_active_task()
 
-    # 2. Commit changes
+    # 2. Commit changes (pass pre-read artifacts since task dir was moved)
     report("Committing changes...")
-    success, msg = commit_changes(task_name, state.task_description)
+    success, msg = commit_changes(task_name, state.task_description, spec=spec, plan=plan)
     if success:
         report(msg, "success")
     else:
@@ -306,7 +340,7 @@ def finalize_task(task_name: str, state, force: bool = False, progress_callback=
 
     report(f"Task '{task_name}' completed and moved to {config.tasks_dir}/done/", "success")
 
-    # 4. Switch back to main
+    # 4. Switch back to base branch
     run_command(["git", "checkout", config.pr.base_branch])
     report(f"Switched back to {config.pr.base_branch} branch", "info")
 

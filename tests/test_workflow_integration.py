@@ -263,7 +263,7 @@ class TestExecuteStageWithMockBackend:
             with patch("galangal.core.workflow.core.get_task_dir", return_value=sample_task):
                 with patch("galangal.core.artifacts.get_task_dir", return_value=sample_task):
                     with patch(
-                        "galangal.core.workflow.core.ClaudeBackend",
+                        "galangal.core.workflow.core.get_backend_for_stage",
                         return_value=mock_backend,
                     ):
                         # Mock validation to pass
@@ -295,7 +295,7 @@ class TestExecuteStageWithMockBackend:
             with patch("galangal.core.workflow.core.get_task_dir", return_value=sample_task):
                 with patch("galangal.core.artifacts.get_task_dir", return_value=sample_task):
                     with patch(
-                        "galangal.core.workflow.core.ClaudeBackend",
+                        "galangal.core.workflow.core.get_backend_for_stage",
                         return_value=mock_backend,
                     ):
                         # Mock validation to fail with rollback
@@ -430,7 +430,7 @@ class TestRetryBehavior:
             with patch("galangal.core.workflow.core.get_task_dir", return_value=sample_task):
                 with patch("galangal.core.artifacts.get_task_dir", return_value=sample_task):
                     with patch(
-                        "galangal.core.workflow.core.ClaudeBackend",
+                        "galangal.core.workflow.core.get_backend_for_stage",
                         return_value=mock_backend,
                     ):
                         mock_runner = MagicMock()

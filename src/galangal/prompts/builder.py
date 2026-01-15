@@ -6,7 +6,6 @@ from pathlib import Path
 
 from galangal.config.loader import get_config, get_project_root, get_prompts_dir
 from galangal.core.artifacts import artifact_exists, read_artifact
-from galangal.core.metrics import get_common_failures_for_prompt
 from galangal.core.state import Stage, WorkflowState
 
 
@@ -164,49 +163,66 @@ class PromptBuilder:
             parts.append("")
         return "\n".join(parts)
 
-    def get_stage_prompt(self, stage: Stage) -> str:
+    def get_stage_prompt(self, stage: Stage, backend_name: str | None = None) -> str:
         """Get the prompt for a stage, with project override/supplement support.
 
         Project prompts in .galangal/prompts/ can either:
         - Supplement the base: Include '# BASE' marker where base prompt should be inserted
         - Override entirely: No marker = full replacement of base prompt
+
+        Backend-specific prompts are supported. If backend_name is provided,
+        the system will first look for {stage}_{backend}.md (e.g., review_codex.md)
+        before falling back to the generic {stage}.md prompt.
+
+        Args:
+            stage: The workflow stage
+            backend_name: Optional backend name for backend-specific prompts
         """
         stage_lower = stage.value.lower()
 
-        # Get base prompt
-        default_path = self.defaults_dir / f"{stage_lower}.md"
+        # For backend-specific prompts, try {stage}_{backend}.md first
+        prompt_names = [stage_lower]
+        if backend_name:
+            # Insert backend-specific name at the front
+            prompt_names.insert(0, f"{stage_lower}_{backend_name}")
+
         base_prompt = ""
-        if default_path.exists():
-            base_prompt = default_path.read_text()
+        for prompt_name in prompt_names:
+            default_path = self.defaults_dir / f"{prompt_name}.md"
+            if default_path.exists():
+                base_prompt = default_path.read_text()
+                break
 
-        # Check for project prompt
-        project_path = self.override_dir / f"{stage_lower}.md"
-        if not project_path.exists():
-            return base_prompt or f"Execute the {stage.value} stage for the task."
+        # Check for project prompts (also supports backend-specific)
+        for prompt_name in prompt_names:
+            project_path = self.override_dir / f"{prompt_name}.md"
+            if project_path.exists():
+                project_prompt = project_path.read_text()
 
-        project_prompt = project_path.read_text()
+                # Check for # BASE marker (supplement mode)
+                if "# BASE" in project_prompt:
+                    parts = project_prompt.split("# BASE", 1)
+                    header = parts[0].rstrip()
+                    footer = parts[1].lstrip() if len(parts) > 1 else ""
 
-        # Check for # BASE marker (supplement mode)
-        if "# BASE" in project_prompt:
-            # Split at marker and insert base prompt
-            parts = project_prompt.split("# BASE", 1)
-            header = parts[0].rstrip()
-            footer = parts[1].lstrip() if len(parts) > 1 else ""
+                    result_parts = []
+                    if header:
+                        result_parts.append(header)
+                    if base_prompt:
+                        result_parts.append(base_prompt)
+                    if footer:
+                        result_parts.append(footer)
 
-            result_parts = []
-            if header:
-                result_parts.append(header)
-            if base_prompt:
-                result_parts.append(base_prompt)
-            if footer:
-                result_parts.append(footer)
+                    return "\n\n".join(result_parts)
 
-            return "\n\n".join(result_parts)
+                # No marker = full override
+                return project_prompt
 
-        # No marker = full override
-        return project_prompt
+        return base_prompt or f"Execute the {stage.value} stage for the task."
 
-    def build_full_prompt(self, stage: Stage, state: WorkflowState) -> str:
+    def build_full_prompt(
+        self, stage: Stage, state: WorkflowState, backend_name: str | None = None
+    ) -> str:
         """
         Build the complete prompt for a stage execution.
 
@@ -224,11 +240,13 @@ class PromptBuilder:
         Args:
             stage: The workflow stage to build prompt for.
             state: Current workflow state with task info and history.
+            backend_name: Optional backend name for backend-specific prompts
+                (e.g., "codex" to use review_codex.md instead of review.md).
 
         Returns:
             Complete prompt string ready for AI invocation.
         """
-        base_prompt = self.get_stage_prompt(stage)
+        base_prompt = self.get_stage_prompt(stage, backend_name)
         task_name = state.task_name
 
         # Build context
@@ -260,11 +278,6 @@ class PromptBuilder:
         stage_context = self.config.stage_context.get(stage.value, "")
         if stage_context:
             context_parts.append(f"\n# Stage Context\n{stage_context}")
-
-        # Add common failures from metrics (learning from past issues)
-        common_failures = get_common_failures_for_prompt(stage)
-        if common_failures:
-            context_parts.append(f"\n{common_failures}")
 
         # Add documentation config for DOCS and SECURITY stages
         if stage in [Stage.DOCS, Stage.SECURITY]:
@@ -373,3 +386,100 @@ Only update documentation types marked as YES above.""")
                 )
 
         return parts
+
+    def build_minimal_review_prompt(self, state: WorkflowState, backend_name: str) -> str:
+        """
+        Build a minimal prompt for independent code review.
+
+        Used for secondary review backends (like Codex) that should give an
+        unbiased opinion without being influenced by Claude's interpretations.
+
+        Only includes:
+        - Original task description
+        - List of changed files with stats
+        - Instructions to read files as needed
+
+        Does NOT include:
+        - Full git diff (too large for big changes)
+        - SPEC.md (Claude's interpretation of requirements)
+        - QA_REPORT.md, SECURITY_CHECKLIST.md (previous findings)
+        - Any other artifacts from the workflow
+
+        Args:
+            state: Workflow state with task info
+            backend_name: Backend name for prompt selection (e.g., "codex")
+
+        Returns:
+            Minimal prompt for independent review
+        """
+        import subprocess
+
+        base_branch = self.config.pr.base_branch
+
+        # Get the review prompt (may be backend-specific like review_codex.md)
+        review_prompt = self.get_stage_prompt(Stage.REVIEW, backend_name)
+
+        def run_git(*args: str) -> str:
+            """Run a git command and return stdout."""
+            try:
+                result = subprocess.run(
+                    ["git", *args],
+                    cwd=self.project_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                return result.stdout.strip() if result.returncode == 0 else ""
+            except Exception:
+                return ""
+
+        # Get list of changed files with stats (committed + uncommitted)
+        # Use --stat for a summary of changes per file
+        committed_stat = run_git("diff", "--stat", f"{base_branch}...HEAD")
+        staged_stat = run_git("diff", "--stat", "--cached")
+        unstaged_stat = run_git("diff", "--stat")
+
+        # Get file names for the list
+        committed_files = run_git("diff", "--name-only", f"{base_branch}...HEAD")
+        staged_files = run_git("diff", "--name-only", "--cached")
+        unstaged_files = run_git("diff", "--name-only")
+
+        # Combine and deduplicate file names
+        all_files = set()
+        for files in [committed_files, staged_files, unstaged_files]:
+            if files:
+                all_files.update(files.split("\n"))
+        all_files.discard("")
+
+        files_list = "\n".join(f"- {f}" for f in sorted(all_files)) if all_files else "(No files changed)"
+
+        # Combine stats (prefer committed, fall back to staged/unstaged)
+        diff_stat = committed_stat or staged_stat or unstaged_stat or "(No changes detected)"
+
+        # Build minimal context - instruct to READ files, not dump diff
+        context = f"""# Independent Code Review
+
+## Task
+{state.task_description}
+
+## Changed Files
+The following files have been modified and need review:
+
+{files_list}
+
+## Change Summary
+```
+{diff_stat}
+```
+
+## Instructions
+1. Read each changed file listed above to understand the implementation
+2. Use `git diff {base_branch}...HEAD -- <file>` to see specific changes if needed
+3. Review for code quality, bugs, security issues, and best practices
+4. Provide your independent assessment
+
+---
+
+{review_prompt}"""
+
+        return context

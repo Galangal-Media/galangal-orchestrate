@@ -380,6 +380,7 @@ class TestValidationRunnerSkipConditions:
 
                 mock_result = MagicMock()
                 mock_result.stdout = "src/main.py\nsrc/utils.py"
+                mock_result.returncode = 0
 
                 with patch("galangal.validation.runner.subprocess.run", return_value=mock_result):
                     should_skip = runner._should_skip(skip_condition, "test-task")
@@ -395,6 +396,7 @@ class TestValidationRunnerSkipConditions:
 
                 mock_result = MagicMock()
                 mock_result.stdout = "src/main.py\nsrc/utils.py"
+                mock_result.returncode = 0
 
                 with patch("galangal.validation.runner.subprocess.run", return_value=mock_result):
                     should_skip = runner._should_skip(skip_condition, "test-task")
@@ -410,10 +412,27 @@ class TestValidationRunnerSkipConditions:
 
                 mock_result = MagicMock()
                 mock_result.stdout = "src/main.py"
+                mock_result.returncode = 0
 
                 with patch("galangal.validation.runner.subprocess.run", return_value=mock_result):
                     should_skip = runner._should_skip(skip_condition, "test-task")
                     assert should_skip is True
+
+    def test_no_skip_when_git_fails(self):
+        """Test no skip when git diff returns non-zero exit code."""
+        with patch("galangal.validation.runner.get_config", return_value=self.config):
+            with patch("galangal.validation.runner.get_project_root", return_value=Path("/tmp")):
+                runner = ValidationRunner()
+
+                skip_condition = SkipCondition(no_files_match="*.sql")
+
+                mock_result = MagicMock()
+                mock_result.stdout = ""
+                mock_result.returncode = 128  # Git error (e.g., branch not found)
+
+                with patch("galangal.validation.runner.subprocess.run", return_value=mock_result):
+                    should_skip = runner._should_skip(skip_condition, "test-task")
+                    assert should_skip is False  # On git error, don't skip
 
 
 class TestValidationRunnerPreflightChecks:

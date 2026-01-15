@@ -12,7 +12,6 @@ from rich.console import Console
 
 from galangal.config.loader import get_config
 from galangal.core.artifacts import artifact_exists, parse_stage_plan, read_artifact, write_artifact
-from galangal.core.metrics import record_stage_result
 from galangal.core.state import (
     STAGE_ORDER,
     Stage,
@@ -380,17 +379,10 @@ Please address the issues described above before proceeding.
                                     reason="decision file missing",
                                 )
 
-                                # Record success metrics
-                                record_stage_result(
-                                    stage=state.stage,
-                                    success=True,
-                                    attempts=state.attempt,
-                                    task_type=state.task_type.value,
-                                )
                                 app.show_stage_complete(state.stage.value, True)
 
                                 # Advance to next stage
-                                next_stage = get_next_stage(state)
+                                next_stage = get_next_stage(state.stage, state)
                                 if next_stage is None:
                                     app.show_workflow_complete()
                                     app._workflow_result = "complete"
@@ -404,22 +396,23 @@ Please address the issues described above before proceeding.
 
                             if choice == "reject":
                                 # Write decision file and rollback to DEV
-                                decision_file = f"{state.stage.value.upper()}_DECISION"
+                                original_stage = state.stage.value
+                                decision_file = f"{original_stage.upper()}_DECISION"
                                 decision_word = "REJECTED" if state.stage == Stage.SECURITY else "FAIL" if state.stage == Stage.QA else "REQUEST_CHANGES"
                                 write_artifact(decision_file, decision_word, state.task_name)
                                 app.add_activity(f"User rejected - wrote {decision_file}", "✗")
 
                                 # Audit log
                                 workflow_logger.user_decision(
-                                    stage=state.stage.value,
+                                    stage=original_stage,
                                     task_name=state.task_name,
                                     decision="reject",
                                     reason="decision file missing",
                                 )
 
                                 # Rollback to DEV
+                                state.last_failure = f"User rejected {original_stage} stage"
                                 state.stage = Stage.DEV
-                                state.last_failure = f"User rejected {state.stage.value} stage"
                                 state.reset_attempts(clear_failure=False)
                                 save_state(state)
                                 app.show_message("Rolling back to DEV per user decision", "warning")
@@ -517,15 +510,6 @@ Please address the issues described above before proceeding.
                     state.record_failure(error_message)
 
                     if not state.can_retry(max_retries):
-                        # Record failure metrics (max retries exhausted)
-                        record_stage_result(
-                            stage=state.stage,
-                            success=False,
-                            attempts=max_retries,
-                            failure_reason=error_message[:200] if error_message else None,
-                            task_type=state.task_type.value,
-                        )
-
                         # Max retries exceeded - prompt user
                         choice = await _handle_max_retries_exceeded(
                             app, state, error_message, max_retries
@@ -561,15 +545,6 @@ Please address the issues described above before proceeding.
                 # Update progress widget with stage durations
                 if state.stage_durations:
                     app.update_stage_durations(state.stage_durations)
-
-                # Record success metrics
-                record_stage_result(
-                    stage=state.stage,
-                    success=True,
-                    attempts=state.attempt,
-                    turns_used=getattr(result, 'turns_used', None),
-                    task_type=state.task_type.value,
-                )
 
                 # Plan approval gate
                 if state.stage == Stage.PM and not artifact_exists(
@@ -751,10 +726,12 @@ async def _generate_discovery_questions(
     Returns:
         List of questions, empty list if AI found no gaps, or None if failed.
     """
-    from galangal.ai.claude import ClaudeBackend
+    from galangal.ai import get_backend_with_fallback
+    from galangal.config.loader import get_config
     from galangal.ui.tui import TUIAdapter
 
     prompt = builder.build_discovery_prompt(state, qa_history)
+    config = get_config()
 
     # Log the prompt
     logs_dir = get_task_dir(state.task_name) / "logs"
@@ -764,8 +741,8 @@ async def _generate_discovery_questions(
     with open(log_file, "w") as f:
         f.write(f"=== Discovery Prompt (Round {round_num}) ===\n{prompt}\n\n")
 
-    # Run AI
-    backend = ClaudeBackend()
+    # Run AI with fallback support
+    backend = get_backend_with_fallback(config.ai.default)
     ui = TUIAdapter(app)
     result = await asyncio.to_thread(
         backend.invoke,

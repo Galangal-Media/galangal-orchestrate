@@ -247,11 +247,19 @@ class ValidationRunner:
             if not result.success:
                 return result
 
-        # QA stage: always check QA_REPORT.md for PASS/FAIL status
+        # QA stage: always check QA_DECISION file first
         if stage_lower == "qa":
             result = self._check_qa_report(task_name)
             if not result.success:
                 return result
+
+        # REVIEW stage: check REVIEW_DECISION file first (for Codex/independent reviews)
+        if stage_lower == "review":
+            result = validate_stage_decision("REVIEW", task_name, "REVIEW_NOTES.md")
+            if result.success or result.rollback_to:
+                # Either passed or has a clear rollback target - return this result
+                return result
+            # Fall through to artifact marker check if decision file missing/unclear
 
         # Check required artifacts
         for artifact_name in stage_config.artifacts_required:
@@ -269,8 +277,8 @@ class ValidationRunner:
         Check if a stage's skip condition is met.
 
         Currently supports `no_files_match` condition which checks if any files
-        in `git diff main...HEAD` match the given glob patterns. If no files
-        match, the stage should be skipped.
+        in `git diff <base_branch>...HEAD` match the given glob patterns. If no
+        files match, the stage should be skipped.
 
         Args:
             skip_condition: Config object with skip criteria (e.g., no_files_match).
@@ -282,13 +290,20 @@ class ValidationRunner:
         if skip_condition.no_files_match:
             # Check if any files match the glob pattern(s) in git diff
             try:
+                # Use configured base branch instead of hardcoded 'main'
+                base_branch = self.config.pr.base_branch
                 result = subprocess.run(
-                    ["git", "diff", "--name-only", "main...HEAD"],
+                    ["git", "diff", "--name-only", f"{base_branch}...HEAD"],
                     cwd=self.project_root,
                     capture_output=True,
                     text=True,
                     timeout=10,
                 )
+
+                # On git error (e.g., branch doesn't exist), don't skip
+                if result.returncode != 0:
+                    return False
+
                 changed_files = result.stdout.strip().split("\n")
 
                 # Support both single pattern and list of patterns

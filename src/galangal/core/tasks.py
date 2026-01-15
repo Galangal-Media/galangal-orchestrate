@@ -182,7 +182,11 @@ def create_task_branch(task_name: str) -> tuple[bool, str]:
     # Check if branch already exists
     code, out, _ = run_command(["git", "branch", "--list", branch_name])
     if out.strip():
-        return True, f"Branch {branch_name} already exists"
+        # Branch exists - check it out to ensure we're on it
+        code, out, err = run_command(["git", "checkout", branch_name])
+        if code != 0:
+            return False, f"Branch {branch_name} exists but checkout failed: {err}"
+        return True, f"Checked out existing branch: {branch_name}"
 
     # Create and checkout new branch
     code, out, err = run_command(["git", "checkout", "-b", branch_name])
@@ -205,6 +209,36 @@ def get_current_branch() -> str:
         return result.stdout.strip() or "unknown"
     except Exception:
         return "unknown"
+
+
+def is_on_base_branch() -> tuple[bool, str, str]:
+    """
+    Check if the repo is on the configured base branch.
+
+    Returns:
+        Tuple of (is_on_base, current_branch, base_branch)
+    """
+    config = get_config()
+    base_branch = config.pr.base_branch
+    current_branch = get_current_branch()
+    return current_branch == base_branch, current_branch, base_branch
+
+
+def switch_to_base_branch() -> tuple[bool, str]:
+    """
+    Switch to the configured base branch.
+
+    Returns:
+        Tuple of (success, message)
+    """
+    config = get_config()
+    base_branch = config.pr.base_branch
+
+    code, out, err = run_command(["git", "checkout", base_branch])
+    if code != 0:
+        return False, f"Failed to switch to {base_branch}: {err}"
+
+    return True, f"Switched to {base_branch}"
 
 
 def ensure_active_task_with_state(

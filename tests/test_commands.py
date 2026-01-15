@@ -2,7 +2,7 @@
 
 import argparse
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from galangal.core.state import Stage, TaskType, WorkflowState
 
@@ -232,3 +232,132 @@ class TestCmdSkipTo:
                         result = cmd_skip_to(args)
                         assert result == 0
                         assert "cancel" in mock_info.call_args[0][0].lower()
+
+
+class TestCreateTaskBranch:
+    """Tests for create_task_branch function."""
+
+    def test_creates_new_branch(self):
+        """Test creating a new branch when it doesn't exist."""
+        from galangal.core.tasks import create_task_branch
+        from galangal.config.schema import GalangalConfig
+
+        config = GalangalConfig()
+
+        with patch("galangal.core.tasks.get_config", return_value=config):
+            # Branch doesn't exist (empty output)
+            with patch("galangal.core.tasks.run_command") as mock_run:
+                mock_run.side_effect = [
+                    (0, "", ""),  # git branch --list returns empty
+                    (0, "", ""),  # git checkout -b succeeds
+                ]
+                success, msg = create_task_branch("test-task")
+
+                assert success is True
+                assert "Created branch" in msg
+                # Verify checkout -b was called
+                assert mock_run.call_count == 2
+                assert "-b" in str(mock_run.call_args_list[1])
+
+    def test_checks_out_existing_branch(self):
+        """Test that existing branch is checked out instead of just returning success."""
+        from galangal.core.tasks import create_task_branch
+        from galangal.config.schema import GalangalConfig
+
+        config = GalangalConfig()
+
+        with patch("galangal.core.tasks.get_config", return_value=config):
+            with patch("galangal.core.tasks.run_command") as mock_run:
+                mock_run.side_effect = [
+                    (0, "galangal/test-task", ""),  # Branch exists
+                    (0, "", ""),  # git checkout succeeds
+                ]
+                success, msg = create_task_branch("test-task")
+
+                assert success is True
+                assert "Checked out existing branch" in msg
+                # Verify checkout (not checkout -b) was called
+                assert mock_run.call_count == 2
+                checkout_call = mock_run.call_args_list[1]
+                assert "checkout" in str(checkout_call)
+                assert "-b" not in str(checkout_call)
+
+    def test_existing_branch_checkout_failure(self):
+        """Test error handling when existing branch checkout fails."""
+        from galangal.core.tasks import create_task_branch
+        from galangal.config.schema import GalangalConfig
+
+        config = GalangalConfig()
+
+        with patch("galangal.core.tasks.get_config", return_value=config):
+            with patch("galangal.core.tasks.run_command") as mock_run:
+                mock_run.side_effect = [
+                    (0, "galangal/test-task", ""),  # Branch exists
+                    (1, "", "error: cannot checkout"),  # checkout fails
+                ]
+                success, msg = create_task_branch("test-task")
+
+                assert success is False
+                assert "checkout failed" in msg
+
+
+class TestBaseBranchCheck:
+    """Tests for base branch checking functions."""
+
+    def test_is_on_base_branch_true(self):
+        """Test is_on_base_branch returns True when on base branch."""
+        from galangal.core.tasks import is_on_base_branch
+        from galangal.config.schema import GalangalConfig
+
+        config = GalangalConfig()  # default base_branch is "main"
+
+        with patch("galangal.core.tasks.get_config", return_value=config):
+            with patch("galangal.core.tasks.get_current_branch", return_value="main"):
+                is_on_base, current, base = is_on_base_branch()
+
+                assert is_on_base is True
+                assert current == "main"
+                assert base == "main"
+
+    def test_is_on_base_branch_false(self):
+        """Test is_on_base_branch returns False when on different branch."""
+        from galangal.core.tasks import is_on_base_branch
+        from galangal.config.schema import GalangalConfig
+
+        config = GalangalConfig()
+
+        with patch("galangal.core.tasks.get_config", return_value=config):
+            with patch("galangal.core.tasks.get_current_branch", return_value="feature-branch"):
+                is_on_base, current, base = is_on_base_branch()
+
+                assert is_on_base is False
+                assert current == "feature-branch"
+                assert base == "main"
+
+    def test_switch_to_base_branch_success(self):
+        """Test switch_to_base_branch succeeds."""
+        from galangal.core.tasks import switch_to_base_branch
+        from galangal.config.schema import GalangalConfig
+
+        config = GalangalConfig()
+
+        with patch("galangal.core.tasks.get_config", return_value=config):
+            with patch("galangal.core.tasks.run_command", return_value=(0, "", "")):
+                success, msg = switch_to_base_branch()
+
+                assert success is True
+                assert "Switched to main" in msg
+
+    def test_switch_to_base_branch_failure(self):
+        """Test switch_to_base_branch handles failure."""
+        from galangal.core.tasks import switch_to_base_branch
+        from galangal.config.schema import GalangalConfig
+
+        config = GalangalConfig()
+
+        with patch("galangal.core.tasks.get_config", return_value=config):
+            with patch("galangal.core.tasks.run_command", return_value=(1, "", "error: uncommitted changes")):
+                success, msg = switch_to_base_branch()
+
+                assert success is False
+                assert "Failed to switch" in msg

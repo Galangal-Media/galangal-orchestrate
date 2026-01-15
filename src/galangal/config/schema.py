@@ -107,6 +107,11 @@ class AIBackendConfig(BaseModel):
     command: str = Field(description="Command to invoke the AI")
     args: list[str] = Field(default_factory=list, description="Command arguments")
     max_turns: int = Field(default=200, description="Maximum conversation turns")
+    read_only: bool = Field(
+        default=False,
+        description="Backend runs in read-only mode (cannot write files). "
+        "Artifacts will be written from structured output via post-processing.",
+    )
 
 
 class AIConfig(BaseModel):
@@ -119,11 +124,18 @@ class AIConfig(BaseModel):
                 command="claude",
                 args=["-p", "{prompt}", "--output-format", "stream-json", "--verbose"],
                 max_turns=200,
-            )
+            ),
+            "codex": AIBackendConfig(
+                command="codex",
+                args=["exec", "{prompt}", "--output-schema", "{schema_file}"],
+                max_turns=50,
+                read_only=True,
+            ),
         }
     )
     stage_backends: dict[str, str] = Field(
-        default_factory=dict, description="Per-stage backend overrides"
+        default_factory=dict,
+        description="Per-stage backend overrides (e.g., {'REVIEW': 'codex'})",
     )
 
 

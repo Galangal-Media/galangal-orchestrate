@@ -236,3 +236,28 @@ class TestClaudeBackendTempFilePrompt:
         cmd = call_args[0][0]
         assert large_prompt not in cmd
         assert result == "Generated text"
+
+
+class TestClaudeBackendStderrHandling:
+    """Tests for stderr handling to prevent deadlock."""
+
+    def test_stderr_merged_into_stdout(self):
+        """Test that Popen is called with stderr=STDOUT to prevent deadlock."""
+        import subprocess
+        from galangal.ai.claude import ClaudeBackend
+
+        backend = ClaudeBackend()
+
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0]
+        mock_process.stdout.readline.return_value = ""
+        mock_process.communicate.return_value = ("", "")
+        mock_process.returncode = 0
+
+        with patch("galangal.ai.claude.subprocess.Popen", return_value=mock_process) as mock_popen:
+            with patch("galangal.ai.claude.select.select", return_value=([], [], [])):
+                backend.invoke("test prompt", timeout=1)
+
+        # Verify stderr=STDOUT was passed to prevent deadlock
+        call_kwargs = mock_popen.call_args[1]
+        assert call_kwargs.get("stderr") == subprocess.STDOUT
