@@ -888,7 +888,7 @@ class StageTUIApp(WorkflowTUIApp):
         from galangal.config.loader import get_config
 
         config = get_config()
-        backend = get_backend_with_fallback(config.ai.default)
+        backend = get_backend_with_fallback(config.ai.default, config=config)
         ui = TUIAdapter(self)
 
         self.result = backend.invoke(

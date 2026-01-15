@@ -11,10 +11,6 @@ Usage:
     galangal status                         - Show active task status
     galangal resume                         - Continue active task
     galangal pause                          - Pause task for break/shutdown
-    galangal approve                        - Record plan approval
-    galangal approve-design                 - Record design review
-    galangal skip-design                    - Skip design for trivial tasks
-    galangal skip-security                  - Skip security for non-code changes
     galangal reset                          - Delete active task
     galangal complete                       - Move task to done/, create PR
     galangal prompts export                 - Export default prompts for customization
@@ -77,9 +73,6 @@ Examples:
   galangal status
   galangal resume
   galangal pause
-  galangal approve
-  galangal approve-design
-  galangal skip-design
   galangal skip-to DEV
   galangal skip-to TEST --resume
   galangal complete
@@ -165,46 +158,6 @@ Tip: Press Ctrl+C during execution to pause gracefully.
     # status
     status_parser = subparsers.add_parser("status", help="Show active task status")
     status_parser.set_defaults(func=_cmd_status)
-
-    # approve
-    approve_parser = subparsers.add_parser("approve", help="Record plan approval")
-    approve_parser.set_defaults(func=_cmd_approve)
-
-    # approve-design
-    approve_design_parser = subparsers.add_parser(
-        "approve-design", help="Record design review approval"
-    )
-    approve_design_parser.set_defaults(func=_cmd_approve_design)
-
-    # skip-design
-    skip_design_parser = subparsers.add_parser(
-        "skip-design", help="Skip design stage for trivial tasks"
-    )
-    skip_design_parser.set_defaults(func=_cmd_skip_design)
-
-    # skip-security
-    skip_security_parser = subparsers.add_parser(
-        "skip-security", help="Skip security stage for non-code changes"
-    )
-    skip_security_parser.set_defaults(func=_cmd_skip_security)
-
-    # skip-migration
-    skip_migration_parser = subparsers.add_parser(
-        "skip-migration", help="Skip migration stage"
-    )
-    skip_migration_parser.set_defaults(func=_cmd_skip_migration)
-
-    # skip-contract
-    skip_contract_parser = subparsers.add_parser(
-        "skip-contract", help="Skip contract stage"
-    )
-    skip_contract_parser.set_defaults(func=_cmd_skip_contract)
-
-    # skip-benchmark
-    skip_benchmark_parser = subparsers.add_parser(
-        "skip-benchmark", help="Skip benchmark stage"
-    )
-    skip_benchmark_parser.set_defaults(func=_cmd_skip_benchmark)
 
     # skip-to
     skip_to_parser = subparsers.add_parser(
@@ -333,41 +286,6 @@ def _cmd_pause(args):
 def _cmd_status(args):
     from galangal.commands.status import cmd_status
     return cmd_status(args)
-
-
-def _cmd_approve(args):
-    from galangal.commands.approve import cmd_approve
-    return cmd_approve(args)
-
-
-def _cmd_approve_design(args):
-    from galangal.commands.approve import cmd_approve_design
-    return cmd_approve_design(args)
-
-
-def _cmd_skip_design(args):
-    from galangal.commands.skip import cmd_skip_design
-    return cmd_skip_design(args)
-
-
-def _cmd_skip_security(args):
-    from galangal.commands.skip import cmd_skip_security
-    return cmd_skip_security(args)
-
-
-def _cmd_skip_migration(args):
-    from galangal.commands.skip import cmd_skip_migration
-    return cmd_skip_migration(args)
-
-
-def _cmd_skip_contract(args):
-    from galangal.commands.skip import cmd_skip_contract
-    return cmd_skip_contract(args)
-
-
-def _cmd_skip_benchmark(args):
-    from galangal.commands.skip import cmd_skip_benchmark
-    return cmd_skip_benchmark(args)
 
 
 def _cmd_skip_to(args):

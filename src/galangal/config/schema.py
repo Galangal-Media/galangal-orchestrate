@@ -122,12 +122,22 @@ class AIConfig(BaseModel):
         default_factory=lambda: {
             "claude": AIBackendConfig(
                 command="claude",
-                args=["-p", "{prompt}", "--output-format", "stream-json", "--verbose"],
+                args=[
+                    "--output-format", "stream-json",
+                    "--verbose",
+                    "--max-turns", "{max_turns}",
+                    "--permission-mode", "acceptEdits",
+                ],
                 max_turns=200,
             ),
             "codex": AIBackendConfig(
                 command="codex",
-                args=["exec", "{prompt}", "--output-schema", "{schema_file}"],
+                args=[
+                    "exec",
+                    "--full-auto",
+                    "--output-schema", "{schema_file}",
+                    "-o", "{output_file}",
+                ],
                 max_turns=50,
                 read_only=True,
             ),

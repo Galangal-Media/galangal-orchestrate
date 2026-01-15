@@ -71,9 +71,57 @@ class CodexBackend(AIBackend):
     - Artifacts must be written by post-processing the output
     """
 
+    # Default command and args when no config provided
+    DEFAULT_COMMAND = "codex"
+    DEFAULT_ARGS = [
+        "exec",
+        "--full-auto",
+        "--output-schema", "{schema_file}",
+        "-o", "{output_file}",
+    ]
+
     @property
     def name(self) -> str:
         return "codex"
+
+    def _build_command(
+        self,
+        prompt_file: str,
+        schema_file: str,
+        output_file: str,
+    ) -> str:
+        """
+        Build the shell command to invoke Codex.
+
+        Uses config.command and config.args if available, otherwise falls back
+        to hard-coded defaults for backwards compatibility.
+
+        Args:
+            prompt_file: Path to temp file containing the prompt
+            schema_file: Path to JSON schema file
+            output_file: Path for structured output
+
+        Returns:
+            Shell command string ready for subprocess
+        """
+        if self._config:
+            command = self._config.command
+            args = self._substitute_placeholders(
+                self._config.args,
+                schema_file=schema_file,
+                output_file=output_file,
+            )
+        else:
+            # Backwards compatibility: use defaults
+            command = self.DEFAULT_COMMAND
+            args = self._substitute_placeholders(
+                self.DEFAULT_ARGS,
+                schema_file=schema_file,
+                output_file=output_file,
+            )
+
+        args_str = " ".join(f"'{a}'" if " " in a else a for a in args)
+        return f"cat '{prompt_file}' | {command} {args_str}"
 
     def invoke(
         self,
@@ -120,17 +168,8 @@ class CodexBackend(AIBackend):
             if ui:
                 ui.set_status("starting", "initializing Codex")
 
-            # Build the codex exec command
-            # --full-auto: Non-interactive execution with automatic approval
-            # --output-schema: Enforce structured JSON response
-            # -o: Write final message to output file
-            # Note: Codex reads task from stdin when `-` is used or content is piped
-            shell_cmd = (
-                f"cat '{prompt_file}' | codex exec "
-                f"--full-auto "
-                f"--output-schema '{schema_file}' "
-                f"-o '{output_file}'"
-            )
+            # Build command from config (or use defaults)
+            shell_cmd = self._build_command(prompt_file, schema_file, output_file)
 
             start_time = time.time()
 
@@ -322,7 +361,9 @@ class CodexBackend(AIBackend):
             fd, output_file = tempfile.mkstemp(suffix=".txt")
             os.close(fd)  # Close fd, codex will write to the path
 
-            shell_cmd = f"cat '{prompt_file}' | codex exec -o '{output_file}'"
+            # Use config command or default
+            command = self._config.command if self._config else self.DEFAULT_COMMAND
+            shell_cmd = f"cat '{prompt_file}' | {command} exec -o '{output_file}'"
 
             result = subprocess.run(
                 shell_cmd,

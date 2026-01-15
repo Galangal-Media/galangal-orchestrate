@@ -388,7 +388,12 @@ Please address the issues described above before proceeding.
                                     reason="decision file missing",
                                 )
 
-                                app.show_stage_complete(state.stage.value, True)
+                                # Record stage pass and duration (same as normal success path)
+                                duration = state.record_stage_duration()
+                                app.show_stage_complete(state.stage.value, True, duration)
+                                if state.stage_durations:
+                                    app.update_stage_durations(state.stage_durations)
+                                state.record_passed_stage(state.stage)
 
                                 # Advance to next stage
                                 next_stage = get_next_stage(state.stage, state)
@@ -562,15 +567,17 @@ Please address the issues described above before proceeding.
                 if state.stage_durations:
                     app.update_stage_durations(state.stage_durations)
 
-                # Plan approval gate
-                if state.stage == Stage.PM and not artifact_exists(
-                    "APPROVAL.md", state.task_name
-                ):
-                    should_continue = await _handle_plan_approval(app, state, config)
-                    if not should_continue:
-                        if app._workflow_result == "paused":
-                            break
-                        continue  # Rejected - loop back to PM
+                # Approval gate - check if stage requires approval
+                metadata = state.stage.metadata
+                if metadata.requires_approval and metadata.approval_artifact:
+                    if not artifact_exists(metadata.approval_artifact, state.task_name):
+                        should_continue = await _handle_stage_approval(
+                            app, state, config, metadata.approval_artifact
+                        )
+                        if not should_continue:
+                            if app._workflow_result == "paused":
+                                break
+                            continue  # Rejected - loop back to stage
 
                 # Archive rollback after successful DEV and clear passed_stages
                 if state.stage == Stage.DEV:
@@ -763,7 +770,7 @@ async def _generate_discovery_questions(
         f.write(f"=== Discovery Prompt (Round {round_num}) ===\n{prompt}\n\n")
 
     # Run AI with fallback support
-    backend = get_backend_with_fallback(config.ai.default)
+    backend = get_backend_with_fallback(config.ai.default, config=config)
     ui = TUIAdapter(app)
     result = await asyncio.to_thread(
         backend.invoke,
@@ -1000,18 +1007,32 @@ async def _handle_max_retries_exceeded(
     return choice
 
 
-async def _handle_plan_approval(
-    app: WorkflowTUIApp, state: WorkflowState, config: GalangalConfig
+async def _handle_stage_approval(
+    app: WorkflowTUIApp,
+    state: WorkflowState,
+    config: GalangalConfig,
+    approval_artifact: str,
 ) -> bool:
     """
-    Handle plan approval gate after PM stage.
+    Handle approval gate after a stage that requires approval.
 
-    Returns True if workflow should continue, False if rejected/quit.
+    Args:
+        app: TUI application for user interaction.
+        state: Current workflow state.
+        config: Galangal configuration.
+        approval_artifact: Name of the approval artifact to create (e.g., "APPROVAL.md").
+
+    Returns:
+        True if workflow should continue, False if rejected/quit.
     """
     default_approver = config.project.approver_name or ""
+    stage_name = state.stage.value
+
+    # Determine prompt type based on stage
+    prompt_type = PromptType.PLAN_APPROVAL  # Default, works for most stages
 
     choice = await app.prompt_async(
-        PromptType.PLAN_APPROVAL, "Approve plan to continue?"
+        prompt_type, f"Approve {stage_name} to continue?"
     )
 
     if choice == "yes":
@@ -1019,52 +1040,52 @@ async def _handle_plan_approval(
         if name:
             from galangal.core.utils import now_formatted
 
-            approval_content = f"""# Plan Approval
+            approval_content = f"""# {stage_name} Approval
 
 - **Status:** Approved
 - **Approved By:** {name}
 - **Date:** {now_formatted()}
 """
-            write_artifact("APPROVAL.md", approval_content, state.task_name)
-            app.show_message(f"Plan approved by {name}", "success")
+            write_artifact(approval_artifact, approval_content, state.task_name)
+            app.show_message(f"{stage_name} approved by {name}", "success")
 
-            # Parse and store stage plan from PM output
-            stage_plan = parse_stage_plan(state.task_name)
-            if stage_plan:
-                state.stage_plan = stage_plan
-                save_state(state)
-                # Update progress bar to hide PM-skipped stages
-                skipped = [s for s, v in stage_plan.items() if v["action"] == "skip"]
-                if skipped:
-                    new_hidden = set(app._hidden_stages) | set(skipped)
-                    app.update_hidden_stages(frozenset(new_hidden))
+            # PM-specific: Parse and store stage plan
+            if state.stage == Stage.PM:
+                stage_plan = parse_stage_plan(state.task_name)
+                if stage_plan:
+                    state.stage_plan = stage_plan
+                    save_state(state)
+                    # Update progress bar to hide PM-skipped stages
+                    skipped = [s for s, v in stage_plan.items() if v["action"] == "skip"]
+                    if skipped:
+                        new_hidden = set(app._hidden_stages) | set(skipped)
+                        app.update_hidden_stages(frozenset(new_hidden))
 
-            # Show stage preview
-            preview_result = await _show_stage_preview(app, state, config)
-            if preview_result == "quit":
-                app._workflow_result = "paused"
-                return False
+                # Show stage preview after PM approval
+                preview_result = await _show_stage_preview(app, state, config)
+                if preview_result == "quit":
+                    app._workflow_result = "paused"
+                    return False
 
             return True
         else:
             # Cancelled - ask again
-            return await _handle_plan_approval(app, state, config)
+            return await _handle_stage_approval(app, state, config, approval_artifact)
 
     elif choice == "no":
         reason = await app.multiline_input_async(
             "Enter rejection reason (Ctrl+S to submit):", "Needs revision"
         )
         if reason:
-            state.stage = Stage.PM
-            state.last_failure = f"Plan rejected: {reason}"
+            state.last_failure = f"{stage_name} rejected: {reason}"
             state.reset_attempts(clear_failure=False)
             save_state(state)
-            app.show_message(f"Plan rejected: {reason}", "warning")
-            app.show_message("Restarting PM stage with feedback...", "info")
+            app.show_message(f"{stage_name} rejected: {reason}", "warning")
+            app.show_message(f"Restarting {stage_name} stage with feedback...", "info")
             return False
         else:
             # Cancelled - ask again
-            return await _handle_plan_approval(app, state, config)
+            return await _handle_stage_approval(app, state, config, approval_artifact)
 
     else:  # quit
         app._workflow_result = "paused"

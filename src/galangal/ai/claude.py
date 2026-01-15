@@ -21,9 +21,49 @@ if TYPE_CHECKING:
 class ClaudeBackend(AIBackend):
     """Claude CLI backend."""
 
+    # Default command and args when no config provided
+    DEFAULT_COMMAND = "claude"
+    DEFAULT_ARGS = [
+        "--output-format", "stream-json",
+        "--verbose",
+        "--max-turns", "{max_turns}",
+        "--permission-mode", "acceptEdits",
+    ]
+
     @property
     def name(self) -> str:
         return "claude"
+
+    def _build_command(self, prompt_file: str, max_turns: int) -> str:
+        """
+        Build the shell command to invoke Claude.
+
+        Uses config.command and config.args if available, otherwise falls back
+        to hard-coded defaults for backwards compatibility.
+
+        Args:
+            prompt_file: Path to temp file containing the prompt
+            max_turns: Maximum conversation turns
+
+        Returns:
+            Shell command string ready for subprocess
+        """
+        if self._config:
+            command = self._config.command
+            args = self._substitute_placeholders(
+                self._config.args,
+                max_turns=max_turns,
+            )
+        else:
+            # Backwards compatibility: use defaults
+            command = self.DEFAULT_COMMAND
+            args = self._substitute_placeholders(
+                self.DEFAULT_ARGS,
+                max_turns=max_turns,
+            )
+
+        args_str = " ".join(args)
+        return f"cat '{prompt_file}' | {command} {args_str}"
 
     def invoke(
         self,
@@ -63,13 +103,8 @@ class ClaudeBackend(AIBackend):
                 prompt_file = f.name
             _debug(f"Temp file created: {prompt_file}")
 
-            # Use shell to pipe file content to claude stdin
-            # Claude CLI reads from stdin when content is piped to it
-            shell_cmd = (
-                f"cat '{prompt_file}' | claude "
-                f"--output-format stream-json --verbose "
-                f"--max-turns {max_turns} --permission-mode acceptEdits"
-            )
+            # Build command from config (or use defaults)
+            shell_cmd = self._build_command(prompt_file, max_turns)
             _debug(f"Starting subprocess: {shell_cmd[:100]}...")
 
             process = subprocess.Popen(
@@ -311,8 +346,11 @@ class ClaudeBackend(AIBackend):
                 f.write(prompt)
                 prompt_file = f.name
 
-            # Pipe file content to claude via stdin
-            shell_cmd = f"cat '{prompt_file}' | claude --output-format text"
+            # Use config command or default
+            command = self._config.command if self._config else self.DEFAULT_COMMAND
+
+            # Pipe file content to claude via stdin (simple text output mode)
+            shell_cmd = f"cat '{prompt_file}' | {command} --output-format text"
             result = subprocess.run(
                 shell_cmd,
                 shell=True,

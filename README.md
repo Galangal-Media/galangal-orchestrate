@@ -422,21 +422,37 @@ ai:
   # Default backend to use
   default: claude
 
-  # Available backends
+  # Available backends with customizable CLI flags
   backends:
     claude:
-      command: claude
-      args:
-        - "-p"
-        - "{prompt}"
+      command: claude          # CLI command to invoke
+      args:                    # Arguments with {placeholder} substitution
         - "--output-format"
         - "stream-json"
         - "--verbose"
+        - "--max-turns"
+        - "{max_turns}"        # Replaced with max_turns value
+        - "--permission-mode"
+        - "acceptEdits"
       max_turns: 200           # Maximum conversation turns per stage
+      read_only: false         # If true, backend cannot write files
+
+    codex:
+      command: codex
+      args:
+        - "exec"
+        - "--full-auto"
+        - "--output-schema"
+        - "{schema_file}"      # Replaced with schema file path
+        - "-o"
+        - "{output_file}"      # Replaced with output file path
+      max_turns: 50
+      read_only: true          # Codex runs in read-only sandbox
 
   # Use different backends for specific stages
   stage_backends:
-    # qa: gemini              # Use Gemini for QA stage (when supported)
+    REVIEW: codex              # Use Codex for code review
+    # QA: gemini               # Use Gemini for QA (when supported)
 
 # =============================================================================
 # DOCUMENTATION CONFIGURATION
@@ -531,6 +547,112 @@ stage_context:
     - All user input must be validated
     - Use parameterized queries (no raw SQL)
     - Secrets must use environment variables
+```
+
+## AI Backend Customization
+
+Galangal invokes AI backends (like Claude Code CLI) using configurable commands and arguments. This allows you to customize CLI flags without modifying code.
+
+### Default Behavior
+
+By default, Galangal invokes Claude with:
+```bash
+cat prompt.txt | claude --output-format stream-json --verbose --max-turns 200 --permission-mode acceptEdits
+```
+
+### Customizing CLI Flags
+
+Override any flags in `.galangal/config.yaml`:
+
+```yaml
+ai:
+  backends:
+    claude:
+      command: claude
+      args:
+        - "--output-format"
+        - "stream-json"
+        - "--verbose"
+        - "--max-turns"
+        - "{max_turns}"
+        - "--permission-mode"
+        - "acceptEdits"
+        - "--model"              # Add custom flags
+        - "opus"
+      max_turns: 300             # Increase max turns
+```
+
+### Placeholder Reference
+
+Arguments can include placeholders that are substituted at runtime:
+
+| Placeholder | Backend | Description |
+|-------------|---------|-------------|
+| `{max_turns}` | claude | Maximum conversation turns |
+| `{schema_file}` | codex | Path to JSON schema file |
+| `{output_file}` | codex | Path for structured output |
+
+### Common Customizations
+
+**Use a specific model:**
+```yaml
+ai:
+  backends:
+    claude:
+      args:
+        - "--output-format"
+        - "stream-json"
+        - "--model"
+        - "sonnet"           # Use Sonnet instead of default
+        - "--max-turns"
+        - "{max_turns}"
+```
+
+**Increase turn limit for complex tasks:**
+```yaml
+ai:
+  backends:
+    claude:
+      max_turns: 500         # Default is 200
+      args:
+        - "--output-format"
+        - "stream-json"
+        - "--max-turns"
+        - "{max_turns}"      # Will use 500
+```
+
+**Use different backends per stage:**
+```yaml
+ai:
+  default: claude
+  stage_backends:
+    REVIEW: codex            # Use Codex for code review
+```
+
+### Adding a Custom Backend
+
+Define any CLI tool as a backend:
+
+```yaml
+ai:
+  backends:
+    my-backend:
+      command: my-ai-tool
+      args:
+        - "--prompt-file"
+        - "-"                # Read from stdin
+        - "--json-output"
+      max_turns: 100
+      read_only: true        # Cannot write files directly
+```
+
+Then use it:
+```yaml
+ai:
+  default: my-backend
+  # Or per-stage:
+  stage_backends:
+    QA: my-backend
 ```
 
 ## Customizing Prompts

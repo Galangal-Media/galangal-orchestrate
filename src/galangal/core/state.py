@@ -92,6 +92,7 @@ class StageMetadata:
     produces_artifacts: tuple[str, ...] = ()
     requires_artifacts: tuple[str, ...] = ()
     skip_artifact: str | None = None  # e.g., "MIGRATION_SKIP.md"
+    approval_artifact: str | None = None  # e.g., "APPROVAL.md" - checked when requires_approval=True
 
 
 class Stage(str, Enum):
@@ -153,12 +154,14 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         display_name="PM",
         description="Define requirements and generate spec",
         requires_approval=True,
+        approval_artifact="APPROVAL.md",
         produces_artifacts=("SPEC.md", "PLAN.md", "DISCOVERY_LOG.md"),
     ),
     Stage.DESIGN: StageMetadata(
         display_name="Design",
         description="Create implementation plan and architecture",
-        requires_approval=True,
+        requires_approval=False,
+        approval_artifact="DESIGN_REVIEW.md",
         is_skippable=True,
         requires_artifacts=("SPEC.md",),
         produces_artifacts=("DESIGN.md",),

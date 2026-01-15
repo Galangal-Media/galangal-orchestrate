@@ -1,133 +1,15 @@
 """
-galangal skip-* commands - Skip various stages.
+galangal skip-to - Jump to a specific stage for debugging.
 """
 
 import argparse
 
 from rich.prompt import Prompt
 
-from galangal.core.artifacts import artifact_exists, write_artifact, write_skip_artifact
-from galangal.core.state import (
-    STAGE_ORDER,
-    TASK_TYPE_SKIP_STAGES,
-    Stage,
-    save_state,
-)
+from galangal.core.state import STAGE_ORDER, Stage, save_state
 from galangal.core.tasks import ensure_active_task_with_state
 from galangal.core.workflow import run_workflow
-from galangal.ui.console import console, print_error, print_info, print_success
-
-
-def _skip_stage(
-    stage: Stage,
-    skip_artifact: str,
-    prompt_text: str,
-    default_reason: str,
-) -> int:
-    """Generic skip stage handler."""
-    active, state = ensure_active_task_with_state()
-    if not active or not state:
-        return 1
-
-    if artifact_exists(skip_artifact, active):
-        print_info(f"{stage.value} already marked as skipped.")
-        return 0
-
-    # Check if task type already skips this stage
-    if stage in TASK_TYPE_SKIP_STAGES.get(state.task_type, set()):
-        print_info(f"{stage.value} already skipped by task type '{state.task_type.value}'.")
-        return 0
-
-    reason = Prompt.ask(prompt_text, default=default_reason).strip()
-
-    write_skip_artifact(stage.value, reason, active)
-
-    print_success(f"{stage.value} stage marked as skipped: {reason}")
-
-    if state.stage == stage:
-        console.print("Resuming workflow...")
-        run_workflow(state)
-
-    return 0
-
-
-def cmd_skip_design(args: argparse.Namespace) -> int:
-    """Skip design stage for trivial tasks."""
-    active, state = ensure_active_task_with_state()
-    if not active or not state:
-        return 1
-
-    if state.stage not in [Stage.PM, Stage.DESIGN]:
-        print_error(
-            f"Can only skip design before or during DESIGN stage. Current: {state.stage.value}"
-        )
-        return 1
-
-    if artifact_exists("DESIGN_SKIP.md", active):
-        print_info("Design already marked as skipped.")
-        return 0
-
-    # Check if task type already skips this stage
-    if Stage.DESIGN in TASK_TYPE_SKIP_STAGES.get(state.task_type, set()):
-        print_info(f"Design already skipped by task type '{state.task_type.value}'.")
-        return 0
-
-    reason = Prompt.ask(
-        "Reason for skipping design", default="Trivial task, no design needed"
-    ).strip()
-
-    write_skip_artifact("DESIGN", reason, active)
-    write_artifact(
-        "APPROVAL.md", f"# Auto-Approval\n\nDesign skipped: {reason}\n", active
-    )
-
-    print_success(f"Design stage marked as skipped: {reason}")
-
-    if state.stage == Stage.DESIGN:
-        console.print("Resuming workflow...")
-        run_workflow(state)
-
-    return 0
-
-
-def cmd_skip_security(args: argparse.Namespace) -> int:
-    """Skip security stage for non-code changes."""
-    return _skip_stage(
-        Stage.SECURITY,
-        "SECURITY_SKIP.md",
-        "Reason for skipping security",
-        "No code changes",
-    )
-
-
-def cmd_skip_migration(args: argparse.Namespace) -> int:
-    """Skip migration stage."""
-    return _skip_stage(
-        Stage.MIGRATION,
-        "MIGRATION_SKIP.md",
-        "Reason for skipping migration",
-        "No database changes",
-    )
-
-
-def cmd_skip_contract(args: argparse.Namespace) -> int:
-    """Skip contract stage."""
-    return _skip_stage(
-        Stage.CONTRACT,
-        "CONTRACT_SKIP.md",
-        "Reason for skipping contract",
-        "No API changes",
-    )
-
-
-def cmd_skip_benchmark(args: argparse.Namespace) -> int:
-    """Skip benchmark stage."""
-    return _skip_stage(
-        Stage.BENCHMARK,
-        "BENCHMARK_SKIP.md",
-        "Reason for skipping benchmark",
-        "No performance requirements",
-    )
+from galangal.ui.console import console, print_info, print_success
 
 
 def cmd_skip_to(args: argparse.Namespace) -> int:
@@ -141,12 +23,16 @@ def cmd_skip_to(args: argparse.Namespace) -> int:
     try:
         target_stage = Stage.from_str(target_stage_str)
     except ValueError:
+        from galangal.ui.console import print_error
+
         print_error(f"Invalid stage: '{args.stage}'")
         valid_stages = ", ".join(s.value for s in Stage)
         console.print(f"[dim]Valid stages: {valid_stages}[/dim]")
         return 1
 
     if target_stage == Stage.COMPLETE:
+        from galangal.ui.console import print_error
+
         print_error("Cannot skip to COMPLETE. Use 'complete' command instead.")
         return 1
 

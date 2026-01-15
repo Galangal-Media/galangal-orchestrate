@@ -10,7 +10,7 @@ from galangal.ai.claude import ClaudeBackend
 from galangal.ai.codex import CodexBackend
 
 if TYPE_CHECKING:
-    from galangal.config.schema import GalangalConfig
+    from galangal.config.schema import AIBackendConfig, GalangalConfig
     from galangal.core.state import Stage
 
 # Registry of available backends
@@ -26,15 +26,19 @@ DEFAULT_FALLBACKS: dict[str, str] = {
 }
 
 
-def get_backend(name: str) -> AIBackend:
+def get_backend(
+    name: str,
+    config: GalangalConfig | None = None,
+) -> AIBackend:
     """
     Factory function to instantiate backends by name.
 
     Args:
         name: Backend name (e.g., "claude", "codex")
+        config: Optional project config to get backend-specific settings
 
     Returns:
-        Instantiated backend
+        Instantiated backend with configuration
 
     Raises:
         ValueError: If backend name is unknown
@@ -43,37 +47,58 @@ def get_backend(name: str) -> AIBackend:
     if not backend_class:
         available = list(BACKEND_REGISTRY.keys())
         raise ValueError(f"Unknown backend: {name}. Available: {available}")
-    return backend_class()
+
+    # Get backend-specific config if available
+    backend_config: AIBackendConfig | None = None
+    if config:
+        backend_config = config.ai.backends.get(name.lower())
+
+    return backend_class(backend_config)
 
 
-def is_backend_available(name: str) -> bool:
+def is_backend_available(
+    name: str,
+    config: GalangalConfig | None = None,
+) -> bool:
     """
     Check if a backend's CLI tool is available on the system.
 
     Args:
         name: Backend name (e.g., "claude", "codex")
+        config: Optional project config to get custom command names
 
     Returns:
         True if the backend's CLI is installed and accessible
     """
-    cli_commands = {
-        "claude": "claude",
-        "codex": "codex",
-        "gemini": "gemini",  # Future
-    }
-    cmd = cli_commands.get(name.lower())
+    # Check config for custom command name
+    if config and name.lower() in config.ai.backends:
+        cmd = config.ai.backends[name.lower()].command
+    else:
+        # Fallback to default command names
+        cli_commands = {
+            "claude": "claude",
+            "codex": "codex",
+            "gemini": "gemini",  # Future
+        }
+        cmd = cli_commands.get(name.lower())
+
     if not cmd:
         return False
     return shutil.which(cmd) is not None
 
 
-def get_backend_with_fallback(name: str, fallbacks: dict[str, str] | None = None) -> AIBackend:
+def get_backend_with_fallback(
+    name: str,
+    fallbacks: dict[str, str] | None = None,
+    config: GalangalConfig | None = None,
+) -> AIBackend:
     """
     Get a backend, falling back to alternatives if unavailable.
 
     Args:
         name: Primary backend name
         fallbacks: Optional custom fallback mapping. Defaults to DEFAULT_FALLBACKS.
+        config: Optional project config for backend settings
 
     Returns:
         The requested backend if available, otherwise the fallback backend
@@ -83,17 +108,17 @@ def get_backend_with_fallback(name: str, fallbacks: dict[str, str] | None = None
     """
     fallbacks = fallbacks or DEFAULT_FALLBACKS
 
-    if is_backend_available(name):
-        return get_backend(name)
+    if is_backend_available(name, config):
+        return get_backend(name, config)
 
     # Try fallback
     fallback_name = fallbacks.get(name.lower())
-    if fallback_name and is_backend_available(fallback_name):
-        return get_backend(fallback_name)
+    if fallback_name and is_backend_available(fallback_name, config):
+        return get_backend(fallback_name, config)
 
     # Last resort: try claude if it exists
-    if name.lower() != "claude" and is_backend_available("claude"):
-        return get_backend("claude")
+    if name.lower() != "claude" and is_backend_available("claude", config):
+        return get_backend("claude", config)
 
     raise ValueError(f"Backend '{name}' not available and no fallback found")
 
@@ -125,8 +150,8 @@ def get_backend_for_stage(
         backend_name = config.ai.default
 
     if use_fallback:
-        return get_backend_with_fallback(backend_name)
-    return get_backend(backend_name)
+        return get_backend_with_fallback(backend_name, config=config)
+    return get_backend(backend_name, config)
 
 
 __all__ = [

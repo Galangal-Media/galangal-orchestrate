@@ -105,61 +105,6 @@ class TestCmdStatus:
                         assert call_kwargs["stage"] == Stage.DEV
 
 
-class TestCmdSkipDesign:
-    """Tests for the skip-design command."""
-
-    def test_skip_design_no_active_task(self):
-        """Test skip-design with no active task."""
-        from galangal.commands.skip import cmd_skip_design
-
-        args = argparse.Namespace()
-
-        with patch("galangal.commands.skip.ensure_active_task_with_state", return_value=(None, None)):
-            with patch("galangal.commands.skip.print_error"):
-                result = cmd_skip_design(args)
-                assert result == 1
-
-    def test_skip_design_already_skipped(self):
-        """Test skip-design when already skipped."""
-        from galangal.commands.skip import cmd_skip_design
-
-        args = argparse.Namespace()
-        state = make_state(stage=Stage.PM)
-
-        with patch("galangal.commands.skip.ensure_active_task_with_state", return_value=("test-task", state)):
-            with patch("galangal.commands.skip.artifact_exists", return_value=True):
-                with patch("galangal.commands.skip.print_info") as mock_info:
-                    result = cmd_skip_design(args)
-                    assert result == 0
-                    assert "already" in mock_info.call_args[0][0].lower()
-
-    def test_skip_design_wrong_stage(self):
-        """Test skip-design when not at PM or DESIGN stage."""
-        from galangal.commands.skip import cmd_skip_design
-
-        args = argparse.Namespace()
-        state = make_state(stage=Stage.DEV)  # Past DESIGN
-
-        with patch("galangal.commands.skip.ensure_active_task_with_state", return_value=("test-task", state)):
-            with patch("galangal.commands.skip.print_error"):
-                result = cmd_skip_design(args)
-                assert result == 1
-
-    def test_skip_design_task_type_already_skips(self):
-        """Test skip-design when task type already skips DESIGN."""
-        from galangal.commands.skip import cmd_skip_design
-
-        args = argparse.Namespace()
-        state = make_state(stage=Stage.PM, task_type=TaskType.BUG_FIX)  # BUG_FIX skips DESIGN
-
-        with patch("galangal.commands.skip.ensure_active_task_with_state", return_value=("test-task", state)):
-            with patch("galangal.commands.skip.artifact_exists", return_value=False):
-                with patch("galangal.commands.skip.print_info") as mock_info:
-                    result = cmd_skip_design(args)
-                    assert result == 0
-                    assert "task type" in mock_info.call_args[0][0].lower()
-
-
 class TestCmdSkipTo:
     """Tests for the skip-to command."""
 
@@ -170,9 +115,8 @@ class TestCmdSkipTo:
         args = argparse.Namespace(stage="DEV", force=False, resume=False)
 
         with patch("galangal.commands.skip.ensure_active_task_with_state", return_value=(None, None)):
-            with patch("galangal.commands.skip.print_error"):
-                result = cmd_skip_to(args)
-                assert result == 1
+            result = cmd_skip_to(args)
+            assert result == 1
 
     def test_skip_to_invalid_stage(self):
         """Test skip-to with invalid stage name."""
@@ -182,10 +126,11 @@ class TestCmdSkipTo:
         state = make_state(stage=Stage.DEV)
 
         with patch("galangal.commands.skip.ensure_active_task_with_state", return_value=("test-task", state)):
-            with patch("galangal.commands.skip.print_error") as mock_error:
-                result = cmd_skip_to(args)
-                assert result == 1
-                assert "invalid" in mock_error.call_args[0][0].lower()
+            with patch("galangal.ui.console.print_error") as mock_error:
+                with patch("galangal.commands.skip.console.print"):
+                    result = cmd_skip_to(args)
+                    assert result == 1
+                    assert "invalid" in mock_error.call_args[0][0].lower()
 
     def test_skip_to_complete_not_allowed(self):
         """Test skip-to COMPLETE is not allowed."""
@@ -195,7 +140,7 @@ class TestCmdSkipTo:
         state = make_state(stage=Stage.DEV)
 
         with patch("galangal.commands.skip.ensure_active_task_with_state", return_value=("test-task", state)):
-            with patch("galangal.commands.skip.print_error") as mock_error:
+            with patch("galangal.ui.console.print_error") as mock_error:
                 result = cmd_skip_to(args)
                 assert result == 1
                 assert "complete" in mock_error.call_args[0][0].lower()

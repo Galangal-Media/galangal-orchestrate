@@ -21,7 +21,7 @@ from galangal.ui.console import console, print_error, print_success, print_warni
 def generate_pr_title(task_name: str, description: str, task_type: str) -> str:
     """Generate a concise PR title using AI."""
     config = get_config()
-    backend = get_backend_with_fallback(config.ai.default)
+    backend = get_backend_with_fallback(config.ai.default, config=config)
 
     prompt = f"""Generate a concise pull request title for this task.
 
@@ -68,7 +68,7 @@ def generate_commit_summary(
         plan: Pre-read PLAN.md content (optional, reads from disk if not provided)
     """
     config = get_config()
-    backend = get_backend_with_fallback(config.ai.default)
+    backend = get_backend_with_fallback(config.ai.default, config=config)
     base_branch = config.pr.base_branch
 
     # Use provided artifacts or read from disk
