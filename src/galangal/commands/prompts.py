@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 from galangal.config.loader import get_prompts_dir
-from galangal.core.state import Stage
+from galangal.core.state import parse_stage_arg
 from galangal.prompts.builder import PromptBuilder
 from galangal.ui.console import console, print_error, print_info, print_success
 
@@ -52,18 +52,9 @@ def cmd_prompts_export(args: argparse.Namespace) -> int:
 
 def cmd_prompts_show(args: argparse.Namespace) -> int:
     """Show the effective prompt for a stage."""
-    stage_name = args.stage.upper()
-
-    try:
-        stage = Stage.from_str(stage_name)
-    except ValueError:
-        print_error(f"Invalid stage: '{args.stage}'")
-        valid = ", ".join(s.value.lower() for s in Stage if s != Stage.COMPLETE)
-        console.print(f"[dim]Valid stages: {valid}[/dim]")
-        return 1
-
-    if stage == Stage.COMPLETE:
-        print_error("COMPLETE stage has no prompt.")
+    # Parse stage (COMPLETE excluded - it has no prompt)
+    stage = parse_stage_arg(args.stage, exclude_complete=True)
+    if stage is None:
         return 1
 
     builder = PromptBuilder()
@@ -71,7 +62,7 @@ def cmd_prompts_show(args: argparse.Namespace) -> int:
 
     # Determine source
     prompts_dir = get_prompts_dir()
-    override_path = prompts_dir / f"{stage_name.lower()}.md"
+    override_path = prompts_dir / f"{stage.value.lower()}.md"
     source = "project override" if override_path.exists() else "package default"
 
     console.print(f"\n[bold]Stage:[/bold] {stage.value}")

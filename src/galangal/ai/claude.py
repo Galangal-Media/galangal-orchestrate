@@ -6,7 +6,6 @@ import json
 import os
 import select
 import subprocess
-import tempfile
 import time
 from typing import TYPE_CHECKING, Optional
 
@@ -92,124 +91,118 @@ class ClaudeBackend(AIBackend):
 
         # Write prompt to a temporary file and pipe it to claude via stdin
         # This avoids "Argument list too long" errors when prompts exceed ~128KB
-        prompt_file = None
+        _debug(f"Creating temp file for prompt ({len(prompt)} chars)")
         try:
-            _debug(f"Creating temp file for prompt ({len(prompt)} chars)")
-            # Create temp file with prompt content
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".txt", delete=False, encoding="utf-8"
-            ) as f:
-                f.write(prompt)
-                prompt_file = f.name
-            _debug(f"Temp file created: {prompt_file}")
+            with self._temp_file(prompt, suffix=".txt") as prompt_file:
+                _debug(f"Temp file created: {prompt_file}")
 
-            # Build command from config (or use defaults)
-            shell_cmd = self._build_command(prompt_file, max_turns)
-            _debug(f"Starting subprocess: {shell_cmd[:100]}...")
+                # Build command from config (or use defaults)
+                shell_cmd = self._build_command(prompt_file, max_turns)
+                _debug(f"Starting subprocess: {shell_cmd[:100]}...")
 
-            process = subprocess.Popen(
-                shell_cmd,
-                shell=True,
-                cwd=get_project_root(),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Merge stderr into stdout to prevent deadlock
-                text=True,
-            )
-            _debug(f"Subprocess started with PID {process.pid}")
+                process = subprocess.Popen(
+                    shell_cmd,
+                    shell=True,
+                    cwd=get_project_root(),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,  # Merge stderr into stdout to prevent deadlock
+                    text=True,
+                )
+                _debug(f"Subprocess started with PID {process.pid}")
 
-            output_lines: list[str] = []
-            last_status_time = time.time()
-            start_time = time.time()
-            pending_tools: list[tuple[str, str]] = []
+                output_lines: list[str] = []
+                last_status_time = time.time()
+                start_time = time.time()
+                pending_tools: list[tuple[str, str]] = []
 
-            _debug("Setting initial UI status")
-            if ui:
-                ui.set_status("starting", "initializing Claude")
-            _debug("Entering main read loop")
-
-            while True:
-                retcode = process.poll()
-
-                if process.stdout:
-                    try:
-                        ready, _, _ = select.select([process.stdout], [], [], 0.5)
-
-                        if ready:
-                            line = process.stdout.readline()
-                            if line:
-                                output_lines.append(line)
-                                if ui:
-                                    ui.add_raw_line(line)
-                                self._process_stream_line(line, ui, pending_tools)
-                        else:
-                            idle_time = time.time() - last_status_time
-                            if idle_time > 3 and ui:
-                                if pending_tools:
-                                    tool_name = pending_tools[-1][1]
-                                    ui.set_status("waiting", f"{tool_name}...")
-                                else:
-                                    ui.set_status("waiting", "API response")
-                                last_status_time = time.time()
-                    except (OSError, ValueError):
-                        # stdout closed or invalid, break out of loop
-                        break
-
-                if retcode is not None:
-                    break
-
-                # Check for pause request via callback
-                if pause_check and pause_check():
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                    if ui:
-                        ui.add_activity("Paused by user request", "⏸️")
-                        ui.finish(success=False)
-                    return StageResult.paused()
-
-                if time.time() - start_time > timeout:
-                    process.kill()
-                    if ui:
-                        ui.add_activity(f"Timeout after {timeout}s", "❌")
-                    return StageResult.timeout(timeout)
-
-            try:
-                remaining_out, _ = process.communicate(timeout=10)
-                if remaining_out:
-                    output_lines.append(remaining_out)
-            except (OSError, ValueError):
-                pass  # Process already terminated or pipe closed
-
-            full_output = "".join(output_lines)
-
-            if "max turns" in full_output.lower() or "reached max" in full_output.lower():
+                _debug("Setting initial UI status")
                 if ui:
-                    ui.add_activity("Max turns reached", "❌")
-                return StageResult.max_turns(full_output)
+                    ui.set_status("starting", "initializing Claude")
+                _debug("Entering main read loop")
 
-            result_text = ""
-            for line in output_lines:
-                try:
-                    data = json.loads(line.strip())
-                    if data.get("type") == "result":
-                        result_text = data.get("result", "")
-                        if ui:
-                            ui.set_turns(data.get("num_turns", 0))
+                while True:
+                    retcode = process.poll()
+
+                    if process.stdout:
+                        try:
+                            ready, _, _ = select.select([process.stdout], [], [], 0.5)
+
+                            if ready:
+                                line = process.stdout.readline()
+                                if line:
+                                    output_lines.append(line)
+                                    if ui:
+                                        ui.add_raw_line(line)
+                                    self._process_stream_line(line, ui, pending_tools)
+                            else:
+                                idle_time = time.time() - last_status_time
+                                if idle_time > 3 and ui:
+                                    if pending_tools:
+                                        tool_name = pending_tools[-1][1]
+                                        ui.set_status("waiting", f"{tool_name}...")
+                                    else:
+                                        ui.set_status("waiting", "API response")
+                                    last_status_time = time.time()
+                        except (OSError, ValueError):
+                            # stdout closed or invalid, break out of loop
+                            break
+
+                    if retcode is not None:
                         break
-                except (json.JSONDecodeError, KeyError):
-                    pass
 
-            if process.returncode == 0:
-                return StageResult.create_success(
-                    message=result_text or "Stage completed",
+                    # Check for pause request via callback
+                    if pause_check and pause_check():
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                        if ui:
+                            ui.add_activity("Paused by user request", "⏸️")
+                            ui.finish(success=False)
+                        return StageResult.paused()
+
+                    if time.time() - start_time > timeout:
+                        process.kill()
+                        if ui:
+                            ui.add_activity(f"Timeout after {timeout}s", "❌")
+                        return StageResult.timeout(timeout)
+
+                try:
+                    remaining_out, _ = process.communicate(timeout=10)
+                    if remaining_out:
+                        output_lines.append(remaining_out)
+                except (OSError, ValueError):
+                    pass  # Process already terminated or pipe closed
+
+                full_output = "".join(output_lines)
+
+                if "max turns" in full_output.lower() or "reached max" in full_output.lower():
+                    if ui:
+                        ui.add_activity("Max turns reached", "❌")
+                    return StageResult.max_turns(full_output)
+
+                result_text = ""
+                for line in output_lines:
+                    try:
+                        data = json.loads(line.strip())
+                        if data.get("type") == "result":
+                            result_text = data.get("result", "")
+                            if ui:
+                                ui.set_turns(data.get("num_turns", 0))
+                            break
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+
+                if process.returncode == 0:
+                    return StageResult.create_success(
+                        message=result_text or "Stage completed",
+                        output=full_output,
+                    )
+                return StageResult.error(
+                    message=f"Claude failed (exit {process.returncode})",
                     output=full_output,
                 )
-            return StageResult.error(
-                message=f"Claude failed (exit {process.returncode})",
-                output=full_output,
-            )
 
         except subprocess.TimeoutExpired:
             process.kill()
@@ -219,13 +212,6 @@ class ClaudeBackend(AIBackend):
             _debug(f"Exception caught: {type(e).__name__}: {e}")
             _debug(f"Traceback:\n{traceback.format_exc()}")
             return StageResult.error(f"Claude invocation error: {e}")
-        finally:
-            # Clean up temp file
-            if prompt_file and os.path.exists(prompt_file):
-                try:
-                    os.unlink(prompt_file)
-                except OSError:
-                    pass
 
     def _process_stream_line(
         self,
@@ -337,36 +323,23 @@ class ClaudeBackend(AIBackend):
 
     def generate_text(self, prompt: str, timeout: int = 30) -> str:
         """Simple text generation."""
-        prompt_file = None
         try:
-            # Write prompt to temp file to avoid "Argument list too long" errors
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".txt", delete=False, encoding="utf-8"
-            ) as f:
-                f.write(prompt)
-                prompt_file = f.name
+            with self._temp_file(prompt, suffix=".txt") as prompt_file:
+                # Use config command or default
+                command = self._config.command if self._config else self.DEFAULT_COMMAND
 
-            # Use config command or default
-            command = self._config.command if self._config else self.DEFAULT_COMMAND
-
-            # Pipe file content to claude via stdin (simple text output mode)
-            shell_cmd = f"cat '{prompt_file}' | {command} --output-format text"
-            result = subprocess.run(
-                shell_cmd,
-                shell=True,
-                cwd=get_project_root(),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
+                # Pipe file content to claude via stdin (simple text output mode)
+                shell_cmd = f"cat '{prompt_file}' | {command} --output-format text"
+                result = subprocess.run(
+                    shell_cmd,
+                    shell=True,
+                    cwd=get_project_root(),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()
         except (subprocess.TimeoutExpired, Exception):
             pass
-        finally:
-            if prompt_file and os.path.exists(prompt_file):
-                try:
-                    os.unlink(prompt_file)
-                except OSError:
-                    pass
         return ""

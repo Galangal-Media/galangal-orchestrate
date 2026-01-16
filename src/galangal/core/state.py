@@ -80,8 +80,10 @@ class StageMetadata:
     - Display properties (name, description)
     - Behavioral flags (conditional, requires approval, skippable)
     - Artifact dependencies (produces, requires)
+    - Decision file configuration for validation
+    - Context artifacts for prompt building
 
-    This metadata is used by the TUI, validation, and workflow logic.
+    This metadata is used by the TUI, validation, prompt builder, and workflow logic.
     """
 
     display_name: str
@@ -93,6 +95,12 @@ class StageMetadata:
     requires_artifacts: tuple[str, ...] = ()
     skip_artifact: str | None = None  # e.g., "MIGRATION_SKIP.md"
     approval_artifact: str | None = None  # e.g., "APPROVAL.md" - checked when requires_approval=True
+    # Decision file for validation (e.g., "SECURITY_DECISION")
+    decision_file: str | None = None
+    # Valid decision values and their outcomes: (value, success, message, rollback_to, is_fast_track)
+    decision_outcomes: tuple[tuple[str, bool, str, str | None, bool], ...] = ()
+    # Artifacts to include in prompt context for this stage
+    context_artifacts: tuple[str, ...] = ()
 
 
 class Stage(str, Enum):
@@ -156,6 +164,7 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         requires_approval=True,
         approval_artifact="APPROVAL.md",
         produces_artifacts=("SPEC.md", "PLAN.md", "DISCOVERY_LOG.md"),
+        context_artifacts=("DISCOVERY_LOG.md",),
     ),
     Stage.DESIGN: StageMetadata(
         display_name="Design",
@@ -166,17 +175,20 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         requires_artifacts=("SPEC.md",),
         produces_artifacts=("DESIGN.md",),
         skip_artifact="DESIGN_SKIP.md",
+        context_artifacts=("SPEC.md",),
     ),
     Stage.PREFLIGHT: StageMetadata(
         display_name="Preflight",
         description="Verify environment and dependencies",
         produces_artifacts=("PREFLIGHT_REPORT.md",),
+        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md"),
     ),
     Stage.DEV: StageMetadata(
         display_name="Development",
         description="Implement the feature or fix",
         requires_artifacts=("SPEC.md", "PLAN.md"),
         produces_artifacts=("DEVELOPMENT.md",),
+        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "DEVELOPMENT.md", "ROLLBACK.md"),
     ),
     Stage.MIGRATION: StageMetadata(
         display_name="Migration",
@@ -185,11 +197,19 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         is_skippable=True,
         produces_artifacts=("MIGRATION_REPORT.md",),
         skip_artifact="MIGRATION_SKIP.md",
+        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md"),
     ),
     Stage.TEST: StageMetadata(
         display_name="Test",
         description="Write and run tests",
         produces_artifacts=("TEST_PLAN.md",),
+        decision_file="TEST_DECISION",
+        decision_outcomes=(
+            ("PASS", True, "Tests passed", None, False),
+            ("FAIL", False, "Tests failed due to implementation issues - needs DEV fix", "DEV", False),
+            ("BLOCKED", False, "Tests blocked by implementation issues - needs DEV fix", "DEV", False),
+        ),
+        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "TEST_PLAN.md", "ROLLBACK.md"),
     ),
     Stage.CONTRACT: StageMetadata(
         display_name="Contract",
@@ -198,11 +218,18 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         is_skippable=True,
         produces_artifacts=("CONTRACT_REPORT.md",),
         skip_artifact="CONTRACT_SKIP.md",
+        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "TEST_PLAN.md"),
     ),
     Stage.QA: StageMetadata(
         display_name="QA",
         description="Quality assurance review",
         produces_artifacts=("QA_REPORT.md",),
+        decision_file="QA_DECISION",
+        decision_outcomes=(
+            ("PASS", True, "QA passed", None, False),
+            ("FAIL", False, "QA failed", "DEV", False),
+        ),
+        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "TEST_SUMMARY.md"),
     ),
     Stage.BENCHMARK: StageMetadata(
         display_name="Benchmark",
@@ -211,22 +238,39 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         is_skippable=True,
         produces_artifacts=("BENCHMARK_REPORT.md",),
         skip_artifact="BENCHMARK_SKIP.md",
+        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md"),
     ),
     Stage.SECURITY: StageMetadata(
         display_name="Security",
         description="Security review and audit",
         is_skippable=True,
         produces_artifacts=("SECURITY_CHECKLIST.md",),
+        skip_artifact="SECURITY_SKIP.md",
+        decision_file="SECURITY_DECISION",
+        decision_outcomes=(
+            ("APPROVED", True, "Security review approved", None, False),
+            ("REJECTED", False, "Security review found blocking issues", "DEV", False),
+            ("BLOCKED", False, "Security review found blocking issues", "DEV", False),
+        ),
+        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "TEST_SUMMARY.md"),
     ),
     Stage.REVIEW: StageMetadata(
         display_name="Review",
         description="Code review and final checks",
         produces_artifacts=("REVIEW_NOTES.md",),
+        decision_file="REVIEW_DECISION",
+        decision_outcomes=(
+            ("APPROVE", True, "Review approved", None, False),
+            ("REQUEST_CHANGES", False, "Review requested changes", "DEV", False),
+            ("REQUEST_MINOR_CHANGES", False, "Review requested minor changes (fast-track)", "DEV", True),
+        ),
+        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "TEST_SUMMARY.md", "QA_REPORT.md", "SECURITY_CHECKLIST.md"),
     ),
     Stage.DOCS: StageMetadata(
         display_name="Docs",
         description="Update documentation",
         produces_artifacts=("DOCS_REPORT.md",),
+        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "TEST_SUMMARY.md"),
     ),
     Stage.COMPLETE: StageMetadata(
         display_name="Complete",
@@ -315,6 +359,99 @@ def get_conditional_stages() -> dict[Stage, str]:
         for stage, metadata in STAGE_METADATA.items()
         if metadata.is_conditional and metadata.skip_artifact
     }
+
+
+def get_all_artifact_names() -> list[str]:
+    """
+    Get all artifact names for status display.
+
+    Derives the complete list from STAGE_METADATA to ensure it stays in sync.
+    Includes: produces, skip, approval, and decision artifacts.
+
+    Returns:
+        Sorted list of all artifact names.
+    """
+    artifacts: set[str] = set()
+
+    for metadata in STAGE_METADATA.values():
+        # Add produced artifacts
+        artifacts.update(metadata.produces_artifacts)
+
+        # Add skip artifact if defined
+        if metadata.skip_artifact:
+            artifacts.add(metadata.skip_artifact)
+
+        # Add approval artifact if defined
+        if metadata.approval_artifact:
+            artifacts.add(metadata.approval_artifact)
+
+        # Add decision file if defined (no .md extension)
+        if metadata.decision_file:
+            artifacts.add(metadata.decision_file)
+
+    # Add system-generated artifacts not tied to specific stages
+    artifacts.add("ROLLBACK.md")
+    artifacts.add("TEST_SUMMARY.md")
+    artifacts.add("VALIDATION_REPORT.md")
+    artifacts.add("STAGE_PLAN.md")
+
+    return sorted(artifacts)
+
+
+def get_decision_config(stage: Stage) -> dict[str, tuple[bool, str, str | None, bool]] | None:
+    """
+    Get decision file configuration for a stage.
+
+    Returns a dict mapping decision values to their outcomes:
+    {value: (success, message, rollback_to, is_fast_track)}
+
+    Args:
+        stage: The stage to get decision config for.
+
+    Returns:
+        Decision config dict or None if stage has no decision file.
+    """
+    metadata = stage.metadata
+    if not metadata.decision_file or not metadata.decision_outcomes:
+        return None
+
+    return {
+        value: (success, message, rollback_to, is_fast_track)
+        for value, success, message, rollback_to, is_fast_track in metadata.decision_outcomes
+    }
+
+
+def parse_stage_arg(
+    stage_arg: str,
+    exclude_complete: bool = False,
+) -> Stage | None:
+    """Parse a stage argument string and return the Stage enum.
+
+    Handles invalid stage errors with consistent messaging.
+
+    Args:
+        stage_arg: The stage argument from CLI (e.g., "pm", "DEV")
+        exclude_complete: If True, COMPLETE is not allowed and excluded from valid list
+
+    Returns:
+        Stage enum if valid, None if invalid (error already printed)
+    """
+    from galangal.ui.console import console, print_error
+
+    stage_str = stage_arg.upper()
+    try:
+        stage = Stage.from_str(stage_str)
+    except ValueError:
+        print_error(f"Invalid stage: '{stage_arg}'")
+        valid = [s.value.lower() for s in Stage if not (exclude_complete and s == Stage.COMPLETE)]
+        console.print(f"[dim]Valid stages: {', '.join(valid)}[/dim]")
+        return None
+
+    if exclude_complete and stage == Stage.COMPLETE:
+        print_error(f"COMPLETE stage is not allowed here.")
+        return None
+
+    return stage
 
 
 def get_hidden_stages_for_task_type(task_type: TaskType, config_skip: list[str] | None = None) -> set[str]:

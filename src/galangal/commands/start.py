@@ -77,13 +77,9 @@ def create_task(
 
 def cmd_start(args: argparse.Namespace) -> int:
     """Start a new task."""
-    from galangal.config.loader import is_initialized
-    from galangal.ui.console import print_error, print_info
+    from galangal.config.loader import require_initialized
 
-    # Check if project is initialized
-    if not is_initialized():
-        print_error("Galangal has not been initialized in this project.")
-        print_info("Run 'galangal init' first to set up your project.")
+    if not require_initialized():
         return 1
 
     description = " ".join(args.description) if args.description else ""

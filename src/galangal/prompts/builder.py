@@ -306,19 +306,19 @@ Only update documentation types marked as YES above.""")
         """
         Get relevant artifact content for inclusion in the stage prompt.
 
-        Artifacts are included based on what each stage actually needs:
+        The artifacts each stage needs are documented in STAGE_METADATA.context_artifacts.
+        This method implements the actual inclusion logic with conditional handling:
+        - DESIGN.md supersedes PLAN.md when present
+        - If DESIGN was skipped, PLAN.md is included instead
+        - Only includes artifacts that exist
+
+        Key inclusion rules:
         - PM: DISCOVERY_LOG.md (Q&A to incorporate into SPEC)
         - DESIGN: SPEC.md only (creates the authoritative implementation plan)
         - DEV+: SPEC.md + DESIGN.md (or PLAN.md if design was skipped)
         - DEV: + DEVELOPMENT.md (resume), ROLLBACK.md (issues to fix)
         - TEST: + TEST_PLAN.md, ROLLBACK.md
         - REVIEW: + QA_REPORT.md, SECURITY_CHECKLIST.md (verify addressed)
-
-        Key design decisions:
-        - DESIGN.md supersedes PLAN.md when present
-        - If DESIGN was skipped (bug_fix, refactor, etc.), PLAN.md is included instead
-        - DISCOVERY_LOG only for PM (captured in SPEC.md afterward)
-        - Previous reports not in DEV/TEST (ROLLBACK.md summarizes issues)
 
         Args:
             stage: Current stage to get context for.

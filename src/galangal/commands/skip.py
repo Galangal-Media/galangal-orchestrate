@@ -6,7 +6,7 @@ import argparse
 
 from rich.prompt import Prompt
 
-from galangal.core.state import STAGE_ORDER, Stage, save_state
+from galangal.core.state import STAGE_ORDER, parse_stage_arg, save_state
 from galangal.core.tasks import ensure_active_task_with_state
 from galangal.core.workflow import run_workflow
 from galangal.ui.console import console, print_info, print_success
@@ -18,22 +18,9 @@ def cmd_skip_to(args: argparse.Namespace) -> int:
     if not active or not state:
         return 1
 
-    # Parse target stage
-    target_stage_str = args.stage.upper()
-    try:
-        target_stage = Stage.from_str(target_stage_str)
-    except ValueError:
-        from galangal.ui.console import print_error
-
-        print_error(f"Invalid stage: '{args.stage}'")
-        valid_stages = ", ".join(s.value for s in Stage)
-        console.print(f"[dim]Valid stages: {valid_stages}[/dim]")
-        return 1
-
-    if target_stage == Stage.COMPLETE:
-        from galangal.ui.console import print_error
-
-        print_error("Cannot skip to COMPLETE. Use 'complete' command instead.")
+    # Parse target stage (COMPLETE not allowed - use 'complete' command instead)
+    target_stage = parse_stage_arg(args.stage, exclude_complete=True)
+    if target_stage is None:
         return 1
 
     current_stage = state.stage

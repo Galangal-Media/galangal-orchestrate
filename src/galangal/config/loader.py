@@ -143,3 +143,21 @@ def is_initialized() -> bool:
     """
     config_path = get_project_root() / ".galangal" / "config.yaml"
     return config_path.exists()
+
+
+def require_initialized() -> bool:
+    """Check if initialized and print error if not.
+
+    Use this at the start of commands that require initialization.
+
+    Returns:
+        True if initialized, False if not (error already printed).
+    """
+    if is_initialized():
+        return True
+
+    from galangal.ui.console import print_error, print_info
+
+    print_error("Galangal has not been initialized in this project.")
+    print_info("Run 'galangal init' first to set up your project.")
+    return False

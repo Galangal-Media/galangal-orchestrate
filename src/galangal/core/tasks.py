@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -324,3 +325,128 @@ def ensure_active_task_with_state(
         return None, None
 
     return active, state
+
+
+@dataclass
+class TaskFromIssueResult:
+    """Result of creating a task from a GitHub issue."""
+
+    success: bool
+    message: str
+    task_name: str | None = None
+    screenshots: list[str] | None = None
+
+
+def create_task_from_issue(
+    issue: GitHubIssue,
+    repo_name: str | None = None,
+    task_name_override: str | None = None,
+    mark_in_progress: bool = True,
+) -> TaskFromIssueResult:
+    """
+    Create a task from a GitHub issue with all associated setup.
+
+    This consolidates the task creation flow that was duplicated across
+    start.py, tui_runner.py, and github.py. Handles:
+    - Task name generation and validation
+    - Task creation with GitHub metadata
+    - Screenshot download (after task creation)
+    - Marking issue as in-progress
+
+    Args:
+        issue: The GitHubIssue to create a task from
+        repo_name: Optional repo name (owner/repo), fetched if not provided
+        task_name_override: Optional override for task name (will be validated)
+        mark_in_progress: Whether to mark the issue as in-progress
+
+    Returns:
+        TaskFromIssueResult with success status, message, and task details
+    """
+    from galangal.commands.start import create_task
+    from galangal.core.state import TaskType, get_task_dir, load_state, save_state
+    from galangal.github.issues import (
+        download_issue_screenshots,
+        mark_issue_in_progress,
+        prepare_issue_for_task,
+    )
+
+    # Step 1: Extract issue data using existing helper
+    issue_data = prepare_issue_for_task(issue, repo_name)
+
+    # Step 2: Infer task type from labels
+    task_type = (
+        TaskType.from_str(issue_data.task_type_hint)
+        if issue_data.task_type_hint
+        else TaskType.FEATURE
+    )
+
+    # Step 3: Generate or validate task name
+    if task_name_override:
+        # Validate provided name
+        valid, error_msg = is_valid_task_name(task_name_override)
+        if not valid:
+            return TaskFromIssueResult(
+                success=False,
+                message=f"Invalid task name: {error_msg}",
+            )
+        if task_name_exists(task_name_override):
+            return TaskFromIssueResult(
+                success=False,
+                message=f"Task '{task_name_override}' already exists",
+            )
+        task_name = task_name_override
+    else:
+        # Generate unique name with issue prefix
+        prefix = f"issue-{issue.number}"
+        task_name = generate_unique_task_name(issue_data.description, prefix)
+
+    # Step 4: Create the task
+    success, message = create_task(
+        task_name,
+        issue_data.description,
+        task_type,
+        github_issue=issue.number,
+        github_repo=issue_data.github_repo,
+    )
+
+    if not success:
+        return TaskFromIssueResult(
+            success=False,
+            message=message,
+        )
+
+    # Step 5: Download screenshots AFTER task creation
+    screenshots = []
+    if issue_data.issue_body:
+        try:
+            task_dir = get_task_dir(task_name)
+            screenshots = download_issue_screenshots(issue_data.issue_body, task_dir)
+            if screenshots:
+                # Update state with screenshot paths
+                state = load_state(task_name)
+                if state:
+                    state.screenshots = screenshots
+                    save_state(state)
+        except Exception:
+            # Non-critical - continue without screenshots
+            pass
+
+    # Step 6: Mark issue as in-progress
+    if mark_in_progress:
+        try:
+            mark_issue_in_progress(issue.number)
+        except Exception:
+            # Non-critical - continue anyway
+            pass
+
+    return TaskFromIssueResult(
+        success=True,
+        message=message,
+        task_name=task_name,
+        screenshots=screenshots,
+    )
+
+
+# Type hint import for type checking only
+if TYPE_CHECKING:
+    from galangal.github.issues import GitHubIssue

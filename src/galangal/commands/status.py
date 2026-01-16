@@ -11,12 +11,10 @@ from galangal.ui.console import display_status, print_error, print_info
 
 def cmd_status(args: argparse.Namespace) -> int:
     """Show status of active task."""
-    from galangal.config.loader import is_initialized
-    from galangal.core.state import load_state
+    from galangal.config.loader import require_initialized
+    from galangal.core.state import get_all_artifact_names, load_state
 
-    if not is_initialized():
-        print_error("Galangal has not been initialized in this project.")
-        print_info("Run 'galangal init' first to set up your project.")
+    if not require_initialized():
         return 1
 
     active = get_active_task()
@@ -29,31 +27,11 @@ def cmd_status(args: argparse.Namespace) -> int:
         print_error(f"Could not load state for '{active}'.")
         return 1
 
-    # Collect artifact status
-    artifacts = []
-    for name in [
-        "SPEC.md",
-        "PLAN.md",
-        "APPROVAL.md",
-        "DESIGN.md",
-        "DESIGN_REVIEW.md",
-        "DESIGN_SKIP.md",
-        "PREFLIGHT_REPORT.md",
-        "MIGRATION_REPORT.md",
-        "MIGRATION_SKIP.md",
-        "TEST_PLAN.md",
-        "CONTRACT_REPORT.md",
-        "CONTRACT_SKIP.md",
-        "QA_REPORT.md",
-        "BENCHMARK_REPORT.md",
-        "BENCHMARK_SKIP.md",
-        "SECURITY_CHECKLIST.md",
-        "SECURITY_SKIP.md",
-        "REVIEW_NOTES.md",
-        "DOCS_REPORT.md",
-        "ROLLBACK.md",
-    ]:
-        artifacts.append((name, artifact_exists(name, active)))
+    # Collect artifact status - derived from STAGE_METADATA
+    artifacts = [
+        (name, artifact_exists(name, active))
+        for name in get_all_artifact_names()
+    ]
 
     display_status(
         task_name=active,

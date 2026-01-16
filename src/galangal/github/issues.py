@@ -216,6 +216,7 @@ class IssueTaskData:
     github_repo: str | None
     screenshots: list[str]
     issue_body: str  # Raw body for later screenshot download
+    task_name: str | None = None  # Generated task name (set after creation)
 
 
 def prepare_issue_for_task(

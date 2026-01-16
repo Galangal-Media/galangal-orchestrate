@@ -49,6 +49,22 @@ def _get_platform_install_hint() -> str:
     return "See https://cli.github.com"
 
 
+def require_github_ready():
+    """
+    Check GitHub readiness and print error if not ready.
+
+    Returns:
+        GitHubReadyCheck if ready, None if not ready (error already printed).
+    """
+    from galangal.github.client import ensure_github_ready
+
+    check = ensure_github_ready()
+    if not check:
+        print_error("GitHub integration not ready. Run 'galangal github check' for details.")
+        return None
+    return check
+
+
 def cmd_github_setup(args: argparse.Namespace) -> int:
     """Set up GitHub integration by creating required labels."""
     from galangal.config.loader import get_config
@@ -203,13 +219,11 @@ def cmd_github_issues(args: argparse.Namespace) -> int:
     """List GitHub issues with the galangal label."""
     from rich.table import Table
 
-    from galangal.github.client import GitHubError, ensure_github_ready
+    from galangal.github.client import GitHubError
     from galangal.github.issues import GALANGAL_LABEL, list_issues
 
     # First check setup
-    check = ensure_github_ready()
-    if not check:
-        print_error("GitHub integration not ready. Run 'galangal github check' for details.")
+    if not require_github_ready():
         return 1
 
     label = getattr(args, "label", GALANGAL_LABEL) or GALANGAL_LABEL
@@ -253,19 +267,17 @@ def cmd_github_issues(args: argparse.Namespace) -> int:
 
 def cmd_github_run(args: argparse.Namespace) -> int:
     """Process all galangal-labeled GitHub issues headlessly."""
-    from galangal.commands.start import create_task
-    from galangal.core.state import TaskType, load_state
-    from galangal.core.tasks import generate_unique_task_name
+    from galangal.core.state import load_state
+    from galangal.core.tasks import create_task_from_issue
     from galangal.core.workflow import run_workflow
-    from galangal.github.client import GitHubError, ensure_github_ready
-    from galangal.github.issues import GALANGAL_LABEL, list_issues, mark_issue_in_progress
+    from galangal.github.client import GitHubError
+    from galangal.github.issues import GALANGAL_LABEL, list_issues
 
     console.print("\n[bold]GitHub Issues Batch Processor[/bold]\n")
 
     # Check setup
-    check = ensure_github_ready()
+    check = require_github_ready()
     if not check:
-        print_error("GitHub integration not ready. Run 'galangal github check' for details.")
         return 1
 
     # List issues
@@ -298,55 +310,21 @@ def cmd_github_run(args: argparse.Namespace) -> int:
     for issue in issues:
         console.print(f"\n[bold]Processing issue #{issue.number}:[/bold] {issue.title[:50]}")
 
-        # Generate unique task name with issue prefix
-        description = f"{issue.title}\n\n{issue.body}"
-        task_name = generate_unique_task_name(description, prefix=f"issue-{issue.number}")
+        # Create task from issue (handles name generation, screenshots, marking in-progress)
+        task_result = create_task_from_issue(issue, repo_name=check.repo_name)
 
-        # Infer task type from labels
-        type_hint = issue.get_task_type_hint()
-        task_type = TaskType.from_str(type_hint) if type_hint else TaskType.FEATURE
-
-        # Download screenshots from issue body
-        screenshots = None
-        try:
-            from galangal.core.state import get_task_dir
-            from galangal.github.issues import download_issue_screenshots
-
-            if issue.body:
-                task_dir = get_task_dir(task_name)
-                screenshots = download_issue_screenshots(issue.body, task_dir)
-                if screenshots:
-                    print_info(f"Downloaded {len(screenshots)} screenshot(s)")
-        except Exception as e:
-            print_warning(f"Screenshot download failed: {e}")
-
-        # Create task
-        description = f"{issue.title}\n\n{issue.body}"
-        success, msg = create_task(
-            task_name,
-            description,
-            task_type,
-            github_issue=issue.number,
-            github_repo=check.repo_name,
-            screenshots=screenshots,
-        )
-
-        if not success:
-            print_error(f"Failed to create task: {msg}")
+        if not task_result.success:
+            print_error(f"Failed to create task: {task_result.message}")
             failed += 1
             break  # Stop on first failure
 
-        print_success(f"Created task: {task_name}")
-
-        # Mark issue as in-progress
-        try:
-            mark_issue_in_progress(issue.number)
-            print_info("Marked issue as in-progress")
-        except Exception:
-            pass
+        print_success(f"Created task: {task_result.task_name}")
+        if task_result.screenshots:
+            print_info(f"Downloaded {len(task_result.screenshots)} screenshot(s)")
+        print_info("Marked issue as in-progress")
 
         # Run workflow
-        state = load_state(task_name)
+        state = load_state(task_result.task_name)
         if state:
             console.print("[dim]Running workflow...[/dim]")
             result = run_workflow(state)

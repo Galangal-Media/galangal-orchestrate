@@ -52,35 +52,8 @@ def read_decision_file(stage: str, task_name: str) -> str | None:
     return decision
 
 
-# Decision configurations for each stage type
-# Maps decision values to (success, message, rollback_to, is_fast_track)
-# is_fast_track: if True, skip stages that already passed on this iteration
-DECISION_CONFIGS: dict[str, dict[str, tuple[bool, str, str | None, bool]]] = {
-    "SECURITY": {
-        "APPROVED": (True, "Security review approved", None, False),
-        "REJECTED": (False, "Security review found blocking issues", "DEV", False),
-        "BLOCKED": (False, "Security review found blocking issues", "DEV", False),
-    },
-    "QA": {
-        "PASS": (True, "QA passed", None, False),
-        "FAIL": (False, "QA failed", "DEV", False),
-    },
-    "TEST": {
-        "PASS": (True, "Tests passed", None, False),
-        "FAIL": (False, "Tests failed due to implementation issues - needs DEV fix", "DEV", False),
-        "BLOCKED": (False, "Tests blocked by implementation issues - needs DEV fix", "DEV", False),
-    },
-    "REVIEW": {
-        "APPROVE": (True, "Review approved", None, False),
-        "REQUEST_CHANGES": (False, "Review requested changes", "DEV", False),
-        "REQUEST_MINOR_CHANGES": (
-            False,
-            "Review requested minor changes (fast-track)",
-            "DEV",
-            True,
-        ),
-    },
-}
+# Decision configurations are now centralized in STAGE_METADATA (state.py)
+# Use get_decision_config(stage) to get decision values for a stage
 
 
 @dataclass
@@ -132,15 +105,21 @@ def validate_stage_decision(
     Returns:
         ValidationResult based on decision file or artifact status.
     """
+    from galangal.core.state import Stage, get_decision_config
+
     stage_upper = stage.upper()
 
     # Check for skip artifact first
     if skip_artifact and artifact_exists(skip_artifact, task_name):
         return ValidationResult(True, f"{stage_upper} skipped")
 
-    # Check for decision file
+    # Check for decision file using centralized config from STAGE_METADATA
     decision = read_decision_file(stage_upper, task_name)
-    decision_config = DECISION_CONFIGS.get(stage_upper, {})
+    try:
+        stage_enum = Stage.from_str(stage_upper)
+        decision_config = get_decision_config(stage_enum) or {}
+    except ValueError:
+        decision_config = {}
 
     if decision and decision in decision_config:
         success, message, rollback_to, is_fast_track = decision_config[decision]
@@ -1013,13 +992,16 @@ class ValidationRunner:
 
         # TEST stage - check TEST_DECISION file for pass/fail/blocked
         if stage_upper == "TEST":
+            from galangal.core.state import Stage, get_decision_config
+
             if not artifact_exists("TEST_PLAN.md", task_name):
                 return ValidationResult(False, "TEST_PLAN.md not found")
 
-            # Check for decision file first
+            # Check for decision file first using centralized config
             decision = read_decision_file("TEST", task_name)
-            if decision and decision in DECISION_CONFIGS.get("TEST", {}):
-                success, message, rollback_to, is_fast_track = DECISION_CONFIGS["TEST"][decision]
+            test_decision_config = get_decision_config(Stage.TEST) or {}
+            if decision and decision in test_decision_config:
+                success, message, rollback_to, is_fast_track = test_decision_config[decision]
                 return ValidationResult(
                     success, message, rollback_to=rollback_to, is_fast_track=is_fast_track
                 )
