@@ -260,86 +260,87 @@ def main() -> int:
     if args.debug:
         _setup_debug_mode()
 
-    return args.func(args)
+    result: int = args.func(args)
+    return result
 
 
 # Command wrappers that import lazily to speed up CLI startup
-def _cmd_init(args):
+def _cmd_init(args: argparse.Namespace) -> int:
     from galangal.commands.init import cmd_init
     return cmd_init(args)
 
 
-def _cmd_start(args):
+def _cmd_start(args: argparse.Namespace) -> int:
     from galangal.commands.start import cmd_start
     return cmd_start(args)
 
 
-def _cmd_list(args):
+def _cmd_list(args: argparse.Namespace) -> int:
     from galangal.commands.list import cmd_list
     return cmd_list(args)
 
 
-def _cmd_switch(args):
+def _cmd_switch(args: argparse.Namespace) -> int:
     from galangal.commands.switch import cmd_switch
     return cmd_switch(args)
 
 
-def _cmd_resume(args):
+def _cmd_resume(args: argparse.Namespace) -> int:
     from galangal.commands.resume import cmd_resume
     return cmd_resume(args)
 
 
-def _cmd_pause(args):
+def _cmd_pause(args: argparse.Namespace) -> int:
     from galangal.commands.pause import cmd_pause
     return cmd_pause(args)
 
 
-def _cmd_status(args):
+def _cmd_status(args: argparse.Namespace) -> int:
     from galangal.commands.status import cmd_status
     return cmd_status(args)
 
 
-def _cmd_skip_to(args):
+def _cmd_skip_to(args: argparse.Namespace) -> int:
     from galangal.commands.skip import cmd_skip_to
     return cmd_skip_to(args)
 
 
-def _cmd_reset(args):
+def _cmd_reset(args: argparse.Namespace) -> int:
     from galangal.commands.reset import cmd_reset
     return cmd_reset(args)
 
 
-def _cmd_complete(args):
+def _cmd_complete(args: argparse.Namespace) -> int:
     from galangal.commands.complete import cmd_complete
     return cmd_complete(args)
 
 
-def _cmd_prompts_export(args):
+def _cmd_prompts_export(args: argparse.Namespace) -> int:
     from galangal.commands.prompts import cmd_prompts_export
     return cmd_prompts_export(args)
 
 
-def _cmd_prompts_show(args):
+def _cmd_prompts_show(args: argparse.Namespace) -> int:
     from galangal.commands.prompts import cmd_prompts_show
     return cmd_prompts_show(args)
 
 
-def _cmd_github_setup(args):
+def _cmd_github_setup(args: argparse.Namespace) -> int:
     from galangal.commands.github import cmd_github_setup
     return cmd_github_setup(args)
 
 
-def _cmd_github_check(args):
+def _cmd_github_check(args: argparse.Namespace) -> int:
     from galangal.commands.github import cmd_github_check
     return cmd_github_check(args)
 
 
-def _cmd_github_issues(args):
+def _cmd_github_issues(args: argparse.Namespace) -> int:
     from galangal.commands.github import cmd_github_issues
     return cmd_github_issues(args)
 
 
-def _cmd_github_run(args):
+def _cmd_github_run(args: argparse.Namespace) -> int:
     from galangal.commands.github import cmd_github_run
     return cmd_github_run(args)
 

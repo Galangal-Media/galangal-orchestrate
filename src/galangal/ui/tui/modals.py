@@ -22,7 +22,7 @@ class PromptOption:
     color: str
 
 
-class PromptModal(ModalScreen):
+class PromptModal(ModalScreen[str]):
     """Modal prompt for multi-choice selections."""
 
     CSS_PATH = "styles/modals.tcss"
@@ -91,7 +91,7 @@ class PromptModal(ModalScreen):
         self.dismiss("quit")
 
 
-class TextInputModal(ModalScreen):
+class TextInputModal(ModalScreen[str | None]):
     """Modal for collecting short text input."""
 
     CSS_PATH = "styles/modals.tcss"
@@ -125,7 +125,7 @@ class TextInputModal(ModalScreen):
         self.dismiss(None)
 
 
-class QuestionAnswerModal(ModalScreen):
+class QuestionAnswerModal(ModalScreen[list[str] | None]):
     """Modal for Q&A sessions - displays questions and collects answers sequentially."""
 
     CSS_PATH = "styles/modals.tcss"
@@ -194,7 +194,7 @@ class QuestionAnswerModal(ModalScreen):
         self.dismiss(None)
 
 
-class UserQuestionsModal(ModalScreen):
+class UserQuestionsModal(ModalScreen[list[str] | None]):
     """Modal for user to enter their own questions."""
 
     CSS_PATH = "styles/modals.tcss"
@@ -204,7 +204,7 @@ class UserQuestionsModal(ModalScreen):
         Binding("ctrl+s", "submit", "Submit", show=True, priority=True),
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def compose(self) -> ComposeResult:
@@ -238,7 +238,7 @@ class UserQuestionsModal(ModalScreen):
         self.dismiss(None)
 
 
-class MultilineInputModal(ModalScreen):
+class MultilineInputModal(ModalScreen[str | None]):
     """Modal for collecting multi-line text input (task descriptions, briefs)."""
 
     CSS_PATH = "styles/modals.tcss"
@@ -282,7 +282,7 @@ class GitHubIssueOption:
     title: str
 
 
-class GitHubIssueSelectModal(ModalScreen):
+class GitHubIssueSelectModal(ModalScreen[int | None]):
     """Modal for selecting a GitHub issue from a list."""
 
     CSS_PATH = "styles/modals.tcss"

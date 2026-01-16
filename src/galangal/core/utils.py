@@ -26,7 +26,7 @@ def reset_debug_state() -> None:
     _debug_file = None
 
 
-def debug_log(message: str, **context) -> None:
+def debug_log(message: str, **context: object) -> None:
     """Log a debug message if debug mode is enabled.
 
     Writes to logs/galangal_debug.log with timestamp.

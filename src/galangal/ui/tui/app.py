@@ -57,7 +57,7 @@ from galangal.ui.tui.widgets import (
 )
 
 
-class WorkflowTUIApp(WidgetAccessMixin, App):
+class WorkflowTUIApp(WidgetAccessMixin, App[None]):
     """
     Textual TUI application for workflow execution.
 
@@ -105,9 +105,9 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         task_name: str,
         initial_stage: str,
         max_retries: int = 5,
-        hidden_stages: frozenset = None,
+        hidden_stages: frozenset[str] | None = None,
         stage_durations: dict[str, int] | None = None,
-    ):
+    ) -> None:
         super().__init__()
         self.task_name = task_name
         self.current_stage = initial_stage
@@ -130,12 +130,12 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         self._back_stage_requested = False
         self._manual_edit_requested = False
         self._prompt_type = PromptType.NONE
-        self._prompt_callback: Callable | None = None
+        self._prompt_callback: Callable[..., None] | None = None
         self._active_prompt_screen: PromptModal | None = None
         self._workflow_result: str | None = None
 
         # Text input state
-        self._input_callback: Callable | None = None
+        self._input_callback: Callable[..., None] | None = None
         self._active_input_screen: TextInputModal | None = None
         self._files_visible = True
 
@@ -203,7 +203,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         self.current_stage = stage
         self._attempt = attempt
 
-        def _update():
+        def _update() -> None:
             header = self._safe_query("#header", HeaderWidget)
             if header:
                 header.stage = stage
@@ -215,11 +215,11 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
 
         self._safe_update(_update)
 
-    def update_hidden_stages(self, hidden_stages: frozenset) -> None:
+    def update_hidden_stages(self, hidden_stages: frozenset[str]) -> None:
         """Update which stages are hidden in the progress bar."""
         self._hidden_stages = hidden_stages
 
-        def _update():
+        def _update() -> None:
             progress = self._safe_query("#progress", StageProgressWidget)
             if progress:
                 progress.hidden_stages = hidden_stages
@@ -229,7 +229,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
     def set_status(self, status: str, detail: str = "") -> None:
         """Update current action display."""
 
-        def _update():
+        def _update() -> None:
             action = self._safe_query("#current-action", CurrentActionWidget)
             if action:
                 action.action = status
@@ -241,7 +241,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         """Update turn count."""
         self._turns = turns
 
-        def _update():
+        def _update() -> None:
             header = self._safe_query("#header", HeaderWidget)
             if header:
                 header.turns = turns
@@ -275,7 +275,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         )
         self._activity_entries.append(entry)
 
-        def _add():
+        def _add() -> None:
             # Only show activity in compact (non-verbose) mode
             if not self.verbose:
                 log = self._safe_query("#activity-log", RichLog)
@@ -287,7 +287,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
     def add_file(self, action: str, path: str) -> None:
         """Add file to files panel."""
 
-        def _add():
+        def _add() -> None:
             files = self._safe_query("#files-container", FilesPanelWidget)
             if files:
                 files.add_file(action, path)
@@ -352,7 +352,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
     def update_stage_durations(self, durations: dict[str, int]) -> None:
         """Update stage durations display in progress widget."""
 
-        def _update():
+        def _update() -> None:
             progress = self._safe_query("#progress", StageProgressWidget)
             if progress:
                 progress.stage_durations = durations
@@ -379,7 +379,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
             details: Optional detailed error information (truncated if too long).
         """
 
-        def _update():
+        def _update() -> None:
             panel = self._safe_query("#error-panel", ErrorPanelWidget)
             if panel:
                 panel.error = message
@@ -400,7 +400,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
     def clear_error(self) -> None:
         """Clear the error panel display."""
 
-        def _update():
+        def _update() -> None:
             panel = self._safe_query("#error-panel", ErrorPanelWidget)
             if panel:
                 panel.error = None
@@ -409,7 +409,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
 
         self._safe_update(_update)
 
-    def show_prompt(self, prompt_type: PromptType, message: str, callback: Callable) -> None:
+    def show_prompt(self, prompt_type: PromptType, message: str, callback: Callable[..., None]) -> None:
         """
         Show a modal prompt for user choice.
 
@@ -429,7 +429,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
 
         options = get_prompt_options(prompt_type)
 
-        def _show():
+        def _show() -> None:
             def _handle(result: str | None) -> None:
                 self._active_prompt_screen = None
                 self._prompt_callback = None
@@ -448,14 +448,14 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         self._prompt_type = PromptType.NONE
         self._prompt_callback = None
 
-        def _hide():
+        def _hide() -> None:
             if self._active_prompt_screen:
                 self._active_prompt_screen.dismiss(None)
                 self._active_prompt_screen = None
 
         self._safe_update(_hide)
 
-    def show_text_input(self, label: str, default: str, callback: Callable) -> None:
+    def show_text_input(self, label: str, default: str, callback: Callable[..., None]) -> None:
         """
         Show a single-line text input modal.
 
@@ -471,7 +471,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         """
         self._input_callback = callback
 
-        def _show():
+        def _show() -> None:
             def _handle(result: str | None) -> None:
                 self._active_input_screen = None
                 self._input_callback = None
@@ -487,7 +487,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         """Reset text input prompt."""
         self._input_callback = None
 
-        def _hide():
+        def _hide() -> None:
             if self._active_input_screen:
                 self._active_input_screen.dismiss(None)
                 self._active_input_screen = None
@@ -590,7 +590,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         """
         future: asyncio.Future[list[str] | None] = asyncio.Future()
 
-        def _show():
+        def _show() -> None:
             def _handle(result: list[str] | None) -> None:
                 if not future.done():
                     future.set_result(result)
@@ -623,7 +623,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         """
         future: asyncio.Future[list[str] | None] = asyncio.Future()
 
-        def _show():
+        def _show() -> None:
             def _handle(result: list[str] | None) -> None:
                 if not future.done():
                     future.set_result(result)
@@ -648,7 +648,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         """
         future: asyncio.Future[int | None] = asyncio.Future()
 
-        def _show():
+        def _show() -> None:
             def _handle(result: int | None) -> None:
                 if not future.done():
                     future.set_result(result)
@@ -660,7 +660,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         self._safe_update(_show)
         return await future
 
-    def show_multiline_input(self, label: str, default: str, callback: Callable) -> None:
+    def show_multiline_input(self, label: str, default: str, callback: Callable[..., None]) -> None:
         """
         Show a multi-line text input modal.
 
@@ -677,7 +677,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         """
         self._input_callback = callback
 
-        def _show():
+        def _show() -> None:
             def _handle(result: str | None) -> None:
                 self._active_input_screen = None
                 self._input_callback = None
@@ -702,7 +702,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
             callback: Function called with selected issue number or None if cancelled.
         """
 
-        def _show():
+        def _show() -> None:
             def _handle(result: int | None) -> None:
                 callback(result)
 
@@ -787,7 +787,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App):
         if len(self._raw_lines) > 500:
             self._raw_lines = self._raw_lines[-500:]
 
-        def _add():
+        def _add() -> None:
             if self.verbose:
                 log = self._safe_query("#activity-log", RichLog)
                 if log:

@@ -5,6 +5,7 @@ Config-driven validation runner.
 import fnmatch
 import subprocess
 from dataclasses import dataclass
+from typing import Any
 
 from galangal.config.loader import get_config, get_project_root
 from galangal.config.schema import PreflightCheck, SkipCondition, StageValidation, ValidationCommand
@@ -638,7 +639,7 @@ class ValidationRunner:
                 rollback_to="DEV",
             )
 
-    def _run_all_commands(self, stage_config: StageValidation, task_name: str) -> dict:
+    def _run_all_commands(self, stage_config: StageValidation, task_name: str) -> dict[str, Any]:
         """
         Run all validation commands and aggregate their outputs.
 
@@ -690,7 +691,7 @@ class ValidationRunner:
             "results": results,
         }
 
-    def _write_validation_report(self, stage: str, task_name: str, command_results: dict) -> None:
+    def _write_validation_report(self, stage: str, task_name: str, command_results: dict[str, Any]) -> None:
         """
         Write VALIDATION_REPORT.md with aggregated command outputs.
 
@@ -744,7 +745,7 @@ class ValidationRunner:
         if stage.upper() == "TEST":
             self._write_test_summary(task_name, command_results)
 
-    def _write_test_summary(self, task_name: str, command_results: dict) -> None:
+    def _write_test_summary(self, task_name: str, command_results: dict[str, Any]) -> None:
         """
         Write TEST_SUMMARY.md with concise test results for downstream prompts.
 
@@ -825,7 +826,7 @@ class ValidationRunner:
 
         write_artifact("TEST_SUMMARY.md", "\n".join(lines), task_name)
 
-    def _parse_test_output(self, output: str) -> dict:
+    def _parse_test_output(self, output: str) -> dict[str, Any]:
         """
         Parse test output to extract summary information.
 
@@ -839,7 +840,7 @@ class ValidationRunner:
         """
         import re
 
-        result = {
+        result: dict[str, Any] = {
             "counts": "",
             "duration": "",
             "failed_tests": [],

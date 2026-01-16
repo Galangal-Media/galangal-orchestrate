@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import structlog
 from structlog.types import Processor
@@ -33,8 +33,8 @@ LogLevel = Literal["debug", "info", "warning", "error"]
 
 
 def _add_log_level(
-    logger: logging.Logger, method_name: str, event_dict: dict
-) -> dict:
+    logger: logging.Logger, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
     """Add log level to event dict for JSON output."""
     if method_name == "warn":
         method_name = "warning"
@@ -144,7 +144,7 @@ def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
         >>> logger = get_logger(__name__)
         >>> logger.info("stage_completed", stage="DEV", duration=45.2)
     """
-    return structlog.get_logger(name)
+    return cast(structlog.stdlib.BoundLogger, structlog.get_logger(name))
 
 
 # Convenience function to bind context for a task

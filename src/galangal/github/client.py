@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass
+from typing import Any
 
 from galangal.exceptions import GalangalError
 
@@ -44,7 +45,7 @@ class GitHubClient:
     existing authentication rather than managing tokens directly.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._gh_path: str | None = None
         self._repo_name: str | None = None
 
@@ -231,7 +232,7 @@ class GitHubClient:
             errors=errors,
         )
 
-    def run_json_command(self, args: list[str], timeout: int = 30) -> dict | list | None:
+    def run_json_command(self, args: list[str], timeout: int = 30) -> dict[str, Any] | list[Any] | None:
         """
         Run a gh command that returns JSON.
 
@@ -244,7 +245,8 @@ class GitHubClient:
         """
         _, out, _ = self._run_gh(args, timeout=timeout)
         if out.strip():
-            return json.loads(out)
+            result: dict[str, Any] | list[Any] = json.loads(out)
+            return result
         return None
 
     def add_issue_comment(self, issue_number: int, body: str) -> bool:
@@ -312,13 +314,14 @@ class GitHubClient:
             data = self.run_json_command(
                 ["issue", "view", str(issue_number), "--json", "state"]
             )
-            if data and "state" in data:
-                return data["state"].lower()
+            if isinstance(data, dict) and "state" in data:
+                state = data["state"]
+                return str(state).lower() if state else None
         except GitHubError:
             pass
         return None
 
-    def list_labels(self) -> list[dict] | None:
+    def list_labels(self) -> list[dict[str, Any]] | None:
         """
         List all labels in the repository.
 
@@ -327,9 +330,12 @@ class GitHubClient:
             or None on error
         """
         try:
-            return self.run_json_command(
+            result = self.run_json_command(
                 ["label", "list", "--json", "name,color,description"]
             )
+            if isinstance(result, list):
+                return result
+            return None
         except GitHubError:
             return None
 
