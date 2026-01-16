@@ -471,7 +471,7 @@ ai:
         - "--max-turns"
         - "{max_turns}"        # Replaced with max_turns value
         - "--permission-mode"
-        - "acceptEdits"
+        - "bypassPermissions"
       max_turns: 200           # Maximum conversation turns per stage
       read_only: false         # If true, backend cannot write files
 
@@ -595,7 +595,7 @@ Galangal invokes AI backends (like Claude Code CLI) using configurable commands 
 
 By default, Galangal invokes Claude with:
 ```bash
-cat prompt.txt | claude --output-format stream-json --verbose --max-turns 200 --permission-mode acceptEdits
+cat prompt.txt | claude --output-format stream-json --verbose --max-turns 200 --permission-mode bypassPermissions
 ```
 
 ### Customizing CLI Flags
@@ -614,7 +614,7 @@ ai:
         - "--max-turns"
         - "{max_turns}"
         - "--permission-mode"
-        - "acceptEdits"
+        - "bypassPermissions"
         - "--model"              # Add custom flags
         - "opus"
       max_turns: 300             # Increase max turns

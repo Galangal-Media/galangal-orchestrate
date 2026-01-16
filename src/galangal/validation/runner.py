@@ -207,11 +207,9 @@ class ValidationRunner:
             # No config for this stage - use defaults
             return self._validate_with_defaults(stage, task_name)
 
-        # Check skip conditions
-        if stage_config.skip_if:
-            if self._should_skip(stage_config.skip_if, task_name):
-                self._write_skip_artifact(stage, task_name, "Condition met")
-                return ValidationResult(True, f"{stage} skipped (condition met)", skipped=True)
+        # NOTE: Skip conditions are checked in get_next_stage() which is the single
+        # source of truth for skip logic. By the time we reach validate_stage(),
+        # the stage has already been determined to not be skipped.
 
         # SECURITY stage: use generic decision validation
         if stage_lower == "security":

@@ -148,7 +148,7 @@ class AIConfig(BaseModel):
                     "--output-format", "stream-json",
                     "--verbose",
                     "--max-turns", "{max_turns}",
-                    "--permission-mode", "acceptEdits",
+                    "--permission-mode", "bypassPermissions",
                 ],
                 max_turns=200,
             ),

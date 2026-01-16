@@ -165,11 +165,17 @@ def get_next_stage(current: Stage, state: WorkflowState) -> Stage | None:
     Determine the next stage in the workflow pipeline.
 
     Walks the STAGE_ORDER list starting from the current stage, skipping
-    stages that should be bypassed based on:
+    stages that should be bypassed based on (in order):
     1. Config-level skipping (config.stages.skip)
     2. Task type skipping (e.g., DOCS tasks skip TEST, BENCHMARK)
-    3. Conditional stages with skip_if conditions (MIGRATION, CONTRACT, BENCHMARK)
-    4. Manual skip artifacts (e.g., MIGRATION_SKIP.md)
+    3. Fast-track skipping (minor rollback - skip stages that already passed)
+    4. PM-driven stage plan (STAGE_PLAN.md recommendations)
+    5. Manual skip artifacts (e.g., MIGRATION_SKIP.md from galangal skip-*)
+    6. skip_if conditions from validation config (glob-based skipping for all stages)
+
+    This is the single source of truth for skip logic. All skip decisions
+    happen here during planning, ensuring the progress bar accurately
+    reflects which stages will run.
 
     This function is recursive - if the next stage should be skipped, it
     calls itself to find the next non-skipped stage.
@@ -209,24 +215,24 @@ def get_next_stage(current: Stage, state: WorkflowState) -> Stage | None:
         if plan_entry.get("action") == "skip":
             return get_next_stage(next_stage, state)
 
-    # Check conditional stages (MIGRATION, CONTRACT, BENCHMARK)
+    # Check manual skip artifacts (e.g., MIGRATION_SKIP.md from galangal skip-*)
+    # Uses metadata as source of truth for which stages have skip artifacts
+    stage_metadata = next_stage.metadata
+    if stage_metadata.skip_artifact and artifact_exists(stage_metadata.skip_artifact, task_name):
+        return get_next_stage(next_stage, state)
+
+    # For conditional stages, if PM explicitly said "run", skip the glob check
     if next_stage in CONDITIONAL_STAGES:
-        skip_artifact = CONDITIONAL_STAGES[next_stage]
-
-        # Manual skip artifacts ALWAYS win (user explicitly ran galangal skip-*)
-        if artifact_exists(skip_artifact, task_name):
-            return get_next_stage(next_stage, state)
-
-        # If PM explicitly said "run", don't apply glob-based skipping
         if state.stage_plan and next_stage.value in state.stage_plan:
             plan_entry = state.stage_plan[next_stage.value]
             if plan_entry.get("action") == "run":
                 return next_stage  # PM says run, skip the glob check
 
-        # Check glob-based skip conditions
-        runner = ValidationRunner()
-        if runner.should_skip_stage(next_stage.value.upper(), task_name):
-            return get_next_stage(next_stage, state)
+    # Check skip_if conditions for ALL stages (glob-based skipping)
+    # This is the single place where skip_if is evaluated
+    runner = ValidationRunner()
+    if runner.should_skip_stage(next_stage.value.upper(), task_name):
+        return get_next_stage(next_stage, state)
 
     return next_stage
 
@@ -284,21 +290,9 @@ def execute_stage(
     if stage == Stage.COMPLETE:
         return StageResult.create_success("Workflow complete")
 
-    # Check skip conditions BEFORE building prompts or invoking AI
-    # This avoids wasted execution when a stage should be skipped
-    runner = ValidationRunner()
-    if runner.should_skip_stage(stage.value.upper(), task_name):
-        from galangal.core.artifacts import write_skip_artifact
-
-        write_skip_artifact(stage.value, "skip_if condition met", task_name)
-        tui_app.add_activity(f"{stage.value} skipped (condition met)", "⏭")
-        workflow_logger.stage_completed(
-            stage=stage.value,
-            task_name=task_name,
-            success=True,
-            skipped=True,
-        )
-        return StageResult.skipped(f"{stage.value} skipped (condition met)")
+    # NOTE: Skip conditions are checked in get_next_stage() which is the single
+    # source of truth for skip logic. By the time we reach execute_stage(),
+    # the stage has already been determined to not be skipped.
 
     # Check for clarification
     if artifact_exists("QUESTIONS.md", task_name) and not artifact_exists("ANSWERS.md", task_name):

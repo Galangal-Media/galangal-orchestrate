@@ -157,9 +157,7 @@ class TestWorkflowStageProgression:
         with patch("galangal.core.workflow.core.get_config", return_value=config):
             with patch("galangal.core.workflow.core.artifact_exists", return_value=False):
                 mock_runner = MagicMock()
-                mock_runner.validate_stage.return_value = ValidationResult(
-                    True, "passed", skipped=False
-                )
+                mock_runner.should_skip_stage.return_value = False
                 with patch(
                     "galangal.core.workflow.core.ValidationRunner",
                     return_value=mock_runner,
@@ -192,9 +190,7 @@ class TestWorkflowStageProgression:
         with patch("galangal.core.workflow.core.get_config", return_value=config):
             with patch("galangal.core.workflow.core.artifact_exists", return_value=False):
                 mock_runner = MagicMock()
-                mock_runner.validate_stage.return_value = ValidationResult(
-                    True, "passed", skipped=False
-                )
+                mock_runner.should_skip_stage.return_value = False
                 with patch(
                     "galangal.core.workflow.core.ValidationRunner",
                     return_value=mock_runner,
@@ -231,9 +227,7 @@ class TestWorkflowStageProgression:
         with patch("galangal.core.workflow.core.get_config", return_value=config):
             with patch("galangal.core.workflow.core.artifact_exists", return_value=False):
                 mock_runner = MagicMock()
-                mock_runner.validate_stage.return_value = ValidationResult(
-                    True, "passed", skipped=False
-                )
+                mock_runner.should_skip_stage.return_value = False
                 with patch(
                     "galangal.core.workflow.core.ValidationRunner",
                     return_value=mock_runner,
@@ -542,9 +536,7 @@ class TestConditionalStageSkipping:
                 side_effect=artifact_exists_side_effect,
             ):
                 mock_runner = MagicMock()
-                mock_runner.validate_stage.return_value = ValidationResult(
-                    True, "passed", skipped=False
-                )
+                mock_runner.should_skip_stage.return_value = False
                 with patch(
                     "galangal.core.workflow.core.ValidationRunner",
                     return_value=mock_runner,
@@ -555,24 +547,23 @@ class TestConditionalStageSkipping:
         assert next_stage == Stage.TEST
 
     def test_migration_skipped_when_no_sql_files(self):
-        """Test MIGRATION is skipped when validation says skipped=True."""
+        """Test MIGRATION is skipped when should_skip_stage returns True."""
         state = make_state(task_type=TaskType.FEATURE, stage=Stage.DEV)
         config = GalangalConfig()
 
         with patch("galangal.core.workflow.core.get_config", return_value=config):
             with patch("galangal.core.workflow.core.artifact_exists", return_value=False):
                 mock_runner = MagicMock()
-                # MIGRATION validation returns skipped=True (no SQL files)
-                mock_runner.validate_stage.return_value = ValidationResult(
-                    True, "No migration needed", skipped=True
-                )
+                # should_skip_stage returns True (no matching files)
+                mock_runner.should_skip_stage.return_value = True
                 with patch(
                     "galangal.core.workflow.core.ValidationRunner",
                     return_value=mock_runner,
                 ):
                     next_stage = get_next_stage(Stage.DEV, state)
 
-        assert next_stage == Stage.TEST
+        # All stages skipped, returns None
+        assert next_stage is None
 
 
 class TestStatePersistence:

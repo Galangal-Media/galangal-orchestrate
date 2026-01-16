@@ -91,7 +91,7 @@ cat '<prompt_file>' | claude \
   --output-format stream-json \
   --verbose \
   --max-turns 200 \
-  --permission-mode acceptEdits
+  --permission-mode bypassPermissions
 ```
 
 The backend:
