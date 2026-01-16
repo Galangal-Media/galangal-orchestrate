@@ -5,7 +5,7 @@ Core workflow utilities - stage execution, rollback handling.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from galangal.ai import get_backend_for_stage
 from galangal.ai.base import PauseCheck
@@ -32,34 +32,37 @@ if TYPE_CHECKING:
 
 # Stage→artifact schema for read-only backends
 # Maps each stage to its expected artifact files and JSON field sources
-# Note: decision_file is derived from STAGE_METADATA to stay in sync
+# All values derived from STAGE_METADATA to stay in sync
 def _get_stage_artifact_schema() -> dict[Stage, dict[str, str | None]]:
-    """Build artifact schema, deriving decision_file from STAGE_METADATA."""
+    """Build artifact schema, deriving all values from STAGE_METADATA."""
     from galangal.core.state import get_decision_file_name
 
-    return {
-        Stage.REVIEW: {
-            "notes_file": "REVIEW_NOTES.md",
-            "notes_field": "review_notes",
-            "decision_file": get_decision_file_name(Stage.REVIEW),
+    schema = {}
+    # Stages that support read-only backend structured output
+    for stage in [Stage.REVIEW, Stage.SECURITY, Stage.QA]:
+        metadata = stage.metadata
+        if not metadata:
+            continue
+
+        # Derive notes_file from produces_artifacts (first artifact)
+        notes_file = None
+        if metadata.produces_artifacts:
+            notes_file = metadata.produces_artifacts[0]
+
+        # Derive notes_field from artifact name (e.g., QA_REPORT.md -> qa_report)
+        notes_field = None
+        if notes_file:
+            notes_field = notes_file.lower().replace(".md", "")
+
+        schema[stage] = {
+            "notes_file": notes_file,
+            "notes_field": notes_field,
+            "decision_file": get_decision_file_name(stage),
             "decision_field": "decision",
             "issues_field": "issues",
-        },
-        Stage.SECURITY: {
-            "notes_file": "SECURITY_NOTES.md",
-            "notes_field": "security_notes",
-            "decision_file": get_decision_file_name(Stage.SECURITY),
-            "decision_field": "decision",
-            "issues_field": "issues",
-        },
-        Stage.QA: {
-            "notes_file": "QA_NOTES.md",
-            "notes_field": "qa_notes",
-            "decision_file": get_decision_file_name(Stage.QA),
-            "decision_field": "decision",
-            "issues_field": "issues",
-        },
-    }
+        }
+
+    return schema
 
 
 # Lazy-loaded schema cache
@@ -77,7 +80,7 @@ def get_stage_artifact_schema() -> dict[Stage, dict[str, str | None]]:
 CONDITIONAL_STAGES: dict[Stage, str] = get_conditional_stages()
 
 
-def _format_issues(issues: list[dict]) -> str:
+def _format_issues(issues: list[dict[str, Any]]) -> str:
     """Format issues list into markdown."""
     if not issues:
         return ""
@@ -128,7 +131,7 @@ def _write_artifacts_from_readonly_output(
     schema_dict = get_stage_artifact_schema()
     if stage in schema_dict:
         schema = schema_dict[stage]
-        _write_schema_artifacts(data, schema, task_name, tui_app)
+        _write_schema_artifacts(data, schema, stage, task_name, tui_app)
         return
 
     # Fall back to generic artifacts array
@@ -140,12 +143,15 @@ def _write_artifacts_from_readonly_output(
 
 
 def _write_schema_artifacts(
-    data: dict,
-    schema: dict[str, str],
+    data: dict[str, Any],
+    schema: dict[str, str | None],
+    stage: Stage,
     task_name: str,
     tui_app: WorkflowTUIApp,
 ) -> None:
     """Write artifacts based on stage schema mapping."""
+    from galangal.core.state import get_decision_values
+
     notes_file = schema.get("notes_file")
     notes_field = schema.get("notes_field")
     decision_file = schema.get("decision_file")
@@ -164,19 +170,24 @@ def _write_schema_artifacts(
             write_artifact(notes_file, notes, task_name)
             tui_app.add_activity(f"Wrote {notes_file} from backend output", "📝")
 
-    # Write decision file
+    # Write decision file using stage-specific valid values
     if decision_file and decision_field:
         decision = data.get(decision_field, "")
-        valid_decisions = ("APPROVE", "REQUEST_CHANGES", "REQUEST_MINOR_CHANGES")
+        # Get valid decisions from STAGE_METADATA
+        valid_decisions = get_decision_values(stage)
         if decision in valid_decisions:
             write_artifact(decision_file, decision, task_name)
             tui_app.add_activity(f"Wrote {decision_file}: {decision}", "📝")
         elif decision:
-            tui_app.add_activity(f"Warning: Invalid decision '{decision}'", "⚠️")
+            tui_app.add_activity(
+                f"Warning: Invalid decision '{decision}' for {stage.value} "
+                f"(expected: {', '.join(valid_decisions)})",
+                "⚠️",
+            )
 
 
 def _write_generic_artifacts(
-    artifacts: list[dict],
+    artifacts: list[dict[str, Any]],
     task_name: str,
     tui_app: WorkflowTUIApp,
 ) -> None:
@@ -403,6 +414,7 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         max_turns=200,
         ui=ui,
         pause_check=pause_check,
+        stage=stage.value,
     )
 
     # Log the output

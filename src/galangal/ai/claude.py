@@ -72,6 +72,7 @@ class ClaudeBackend(AIBackend):
         max_turns: int = 200,
         ui: Optional["StageUI"] = None,
         pause_check: PauseCheck | None = None,
+        stage: Optional[str] = None,
     ) -> StageResult:
         """Invoke Claude Code with a prompt."""
         # State for output processing

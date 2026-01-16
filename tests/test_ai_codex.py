@@ -307,42 +307,80 @@ class TestGetBackendForStage:
 class TestCodexOutputSchema:
     """Tests for Codex output schema."""
 
-    def test_schema_has_required_fields(self):
-        """Test that the output schema has all required fields."""
-        from galangal.ai.codex import REVIEW_OUTPUT_SCHEMA
+    def test_default_schema_has_review_notes(self):
+        """Test that default schema (no stage) has review_notes field."""
+        from galangal.ai.codex import _build_output_schema
 
-        assert "properties" in REVIEW_OUTPUT_SCHEMA
-        props = REVIEW_OUTPUT_SCHEMA["properties"]
+        schema = _build_output_schema(None)
+        assert "properties" in schema
+        props = schema["properties"]
 
         assert "review_notes" in props
         assert "decision" in props
         assert "issues" in props
 
         # OpenAI requires ALL properties to be in required array
-        assert set(REVIEW_OUTPUT_SCHEMA["required"]) == {"review_notes", "decision", "issues"}
+        assert set(schema["required"]) == {"review_notes", "decision", "issues"}
 
         # Check nested issue items also have all properties required
         issue_items = props["issues"]["items"]
         assert set(issue_items["required"]) == {"severity", "file", "line", "description"}
 
-    def test_decision_enum_values(self):
-        """Test that decision has correct enum values."""
-        from galangal.ai.codex import REVIEW_OUTPUT_SCHEMA
+    def test_review_stage_schema(self):
+        """Test that REVIEW stage gets correct decision values."""
+        from galangal.ai.codex import _build_output_schema
 
-        decision_schema = REVIEW_OUTPUT_SCHEMA["properties"]["decision"]
+        schema = _build_output_schema("REVIEW")
+        decision_schema = schema["properties"]["decision"]
         assert "enum" in decision_schema
         assert "APPROVE" in decision_schema["enum"]
         assert "REQUEST_CHANGES" in decision_schema["enum"]
+        assert "REQUEST_MINOR_CHANGES" in decision_schema["enum"]
+
+    def test_qa_stage_schema(self):
+        """Test that QA stage gets qa_report field and PASS/FAIL decisions."""
+        from galangal.ai.codex import _build_output_schema
+
+        schema = _build_output_schema("QA")
+        props = schema["properties"]
+
+        # Should have qa_report, not review_notes
+        assert "qa_report" in props
+        assert "review_notes" not in props
+        assert "qa_report" in schema["required"]
+
+        # Decision should be PASS/FAIL
+        decision_schema = props["decision"]
+        assert "PASS" in decision_schema["enum"]
+        assert "FAIL" in decision_schema["enum"]
+
+    def test_security_stage_schema(self):
+        """Test that SECURITY stage gets security_checklist field and APPROVED/REJECTED."""
+        from galangal.ai.codex import _build_output_schema
+
+        schema = _build_output_schema("SECURITY")
+        props = schema["properties"]
+
+        # Should have security_checklist
+        assert "security_checklist" in props
+        assert "security_checklist" in schema["required"]
+
+        # Decision should be APPROVED/REJECTED
+        decision_schema = props["decision"]
+        assert "APPROVED" in decision_schema["enum"]
+        assert "REJECTED" in decision_schema["enum"]
 
     def test_schema_has_additional_properties_false(self):
         """Test that schema has additionalProperties: false (required by OpenAI)."""
-        from galangal.ai.codex import REVIEW_OUTPUT_SCHEMA
+        from galangal.ai.codex import _build_output_schema
+
+        schema = _build_output_schema("REVIEW")
 
         # Root level
-        assert REVIEW_OUTPUT_SCHEMA.get("additionalProperties") is False
+        assert schema.get("additionalProperties") is False
 
         # Nested issue items
-        issue_items = REVIEW_OUTPUT_SCHEMA["properties"]["issues"]["items"]
+        issue_items = schema["properties"]["issues"]["items"]
         assert issue_items.get("additionalProperties") is False
 
 

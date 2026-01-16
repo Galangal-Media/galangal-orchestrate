@@ -115,6 +115,7 @@ class MockAIBackend:
         max_turns: int = 200,
         ui=None,
         pause_check=None,
+        stage: str | None = None,
     ) -> StageResult:
         """Record the call and return configured response."""
         stage = None

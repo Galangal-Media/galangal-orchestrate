@@ -62,6 +62,7 @@ class MockAIBackend(AIBackend):
         max_turns: int = 200,
         ui: StageUI | None = None,
         pause_check: PauseCheck | None = None,
+        stage: str | None = None,
     ) -> StageResult:
         """Record the call and return configured response."""
         # Try to extract stage from prompt for tracking

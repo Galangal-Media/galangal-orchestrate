@@ -116,6 +116,7 @@ class AIBackend(ABC):
         max_turns: int = 200,
         ui: Optional["StageUI"] = None,
         pause_check: PauseCheck | None = None,
+        stage: Optional[str] = None,
     ) -> StageResult:
         """
         Invoke the AI with a prompt for a full stage execution.
@@ -126,6 +127,7 @@ class AIBackend(ABC):
             max_turns: Maximum conversation turns
             ui: Optional TUI for progress display
             pause_check: Optional callback that returns True if pause requested
+            stage: Optional stage name for backends that customize behavior per stage
 
         Returns:
             StageResult with success/failure and structured outcome type

@@ -20,44 +20,81 @@ if TYPE_CHECKING:
     from galangal.ui.tui import StageUI
 
 
-# JSON Schema for structured review output
-# Note: OpenAI API requires:
-# - additionalProperties: false at all levels
-# - ALL properties must be in the required array
-REVIEW_OUTPUT_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "review_notes": {
-            "type": "string",
-            "description": "Full review findings in markdown format",
-        },
-        "decision": {
-            "type": "string",
-            "enum": ["APPROVE", "REQUEST_CHANGES"],
-            "description": "Review decision",
-        },
-        "issues": {
-            "type": "array",
-            "description": "List of specific issues found",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "severity": {
-                        "type": "string",
-                        "enum": ["critical", "major", "minor", "suggestion"],
+def _build_output_schema(stage: str | None) -> dict[str, Any]:
+    """
+    Build stage-specific JSON output schema.
+
+    Derives artifact field names and decision values from STAGE_METADATA.
+    Falls back to generic review schema if stage not found.
+
+    Args:
+        stage: Stage name (e.g., "QA", "SECURITY", "REVIEW")
+
+    Returns:
+        JSON schema dict for structured output
+    """
+    from galangal.core.state import Stage, get_decision_values
+
+    # Defaults for unknown or unspecified stages
+    notes_field = "review_notes"
+    notes_description = "Full review findings in markdown format"
+    decision_values = ["APPROVE", "REQUEST_CHANGES"]
+
+    if stage:
+        try:
+            stage_enum = Stage.from_str(stage)
+            metadata = stage_enum.metadata
+
+            # Derive notes field from produces_artifacts
+            if metadata.produces_artifacts:
+                artifact_name = metadata.produces_artifacts[0]
+                # Convert "QA_REPORT.md" -> "qa_report"
+                notes_field = artifact_name.lower().replace(".md", "")
+                notes_description = f"{metadata.display_name} findings in markdown format"
+
+            # Get decision values from metadata
+            values = get_decision_values(stage_enum)
+            if values:
+                decision_values = values
+
+        except (ValueError, AttributeError):
+            # Stage not found or invalid, use defaults
+            pass
+
+    return {
+        "type": "object",
+        "properties": {
+            notes_field: {
+                "type": "string",
+                "description": notes_description,
+            },
+            "decision": {
+                "type": "string",
+                "enum": decision_values,
+                "description": "Stage decision",
+            },
+            "issues": {
+                "type": "array",
+                "description": "List of specific issues found",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "severity": {
+                            "type": "string",
+                            "enum": ["critical", "major", "minor", "suggestion"],
+                        },
+                        "file": {"type": "string"},
+                        "line": {"type": "integer"},
+                        "description": {"type": "string"},
                     },
-                    "file": {"type": "string"},
-                    "line": {"type": "integer"},
-                    "description": {"type": "string"},
+                    "required": ["severity", "file", "line", "description"],
+                    "additionalProperties": False,
                 },
-                "required": ["severity", "file", "line", "description"],
-                "additionalProperties": False,
             },
         },
-    },
-    "required": ["review_notes", "decision", "issues"],
-    "additionalProperties": False,
-}
+        "required": [notes_field, "decision", "issues"],
+        "additionalProperties": False,
+    }
 
 
 class CodexBackend(AIBackend):
@@ -131,14 +168,23 @@ class CodexBackend(AIBackend):
         max_turns: int = 200,
         ui: Optional["StageUI"] = None,
         pause_check: PauseCheck | None = None,
+        stage: Optional[str] = None,
     ) -> StageResult:
         """
         Invoke Codex in non-interactive read-only mode.
 
         Uses --output-schema to enforce structured JSON output with:
-        - review_notes: Full review findings (markdown)
-        - decision: APPROVE or REQUEST_CHANGES
+        - Stage-specific notes field (qa_report, security_checklist, review_notes)
+        - decision: Stage-appropriate values (PASS/FAIL, APPROVED/REJECTED, etc.)
         - issues: Array of specific problems found
+
+        Args:
+            prompt: The full prompt to send
+            timeout: Maximum time in seconds
+            max_turns: Maximum conversation turns (unused for Codex)
+            ui: Optional TUI for progress display
+            pause_check: Optional callback for pause detection
+            stage: Stage name for schema customization (e.g., "QA", "SECURITY")
 
         Returns:
             StageResult with structured JSON in the output field
@@ -180,7 +226,8 @@ class CodexBackend(AIBackend):
 
         try:
             # Create temp files for prompt, schema, and output
-            schema_content = json.dumps(REVIEW_OUTPUT_SCHEMA)
+            output_schema = _build_output_schema(stage)
+            schema_content = json.dumps(output_schema)
             with (
                 self._temp_file(prompt, suffix=".txt") as prompt_file,
                 self._temp_file(schema_content, suffix=".json") as schema_file,

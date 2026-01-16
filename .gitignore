@@ -70,3 +70,4 @@ galangal-tasks/
 # Ideas (local brainstorming)
 ideas/
 .test_venv
+/GEMINI.md
