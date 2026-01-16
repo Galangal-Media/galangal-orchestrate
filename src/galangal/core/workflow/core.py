@@ -30,52 +30,6 @@ if TYPE_CHECKING:
     from galangal.ui.tui import WorkflowTUIApp
 
 
-# Stage→artifact schema for read-only backends
-# Maps each stage to its expected artifact files and JSON field sources
-# All values derived from STAGE_METADATA to stay in sync
-def _get_stage_artifact_schema() -> dict[Stage, dict[str, str | None]]:
-    """Build artifact schema, deriving all values from STAGE_METADATA."""
-    from galangal.core.state import get_decision_file_name
-
-    schema = {}
-    # Stages that support read-only backend structured output
-    for stage in [Stage.REVIEW, Stage.SECURITY, Stage.QA]:
-        metadata = stage.metadata
-        if not metadata:
-            continue
-
-        # Derive notes_file from produces_artifacts (first artifact)
-        notes_file = None
-        if metadata.produces_artifacts:
-            notes_file = metadata.produces_artifacts[0]
-
-        # Derive notes_field from artifact name (e.g., QA_REPORT.md -> qa_report)
-        notes_field = None
-        if notes_file:
-            notes_field = notes_file.lower().replace(".md", "")
-
-        schema[stage] = {
-            "notes_file": notes_file,
-            "notes_field": notes_field,
-            "decision_file": get_decision_file_name(stage),
-            "decision_field": "decision",
-            "issues_field": "issues",
-        }
-
-    return schema
-
-
-# Lazy-loaded schema cache
-_STAGE_ARTIFACT_SCHEMA: dict[Stage, dict[str, str | None]] | None = None
-
-
-def get_stage_artifact_schema() -> dict[Stage, dict[str, str | None]]:
-    """Get the stage artifact schema (lazily loaded)."""
-    global _STAGE_ARTIFACT_SCHEMA
-    if _STAGE_ARTIFACT_SCHEMA is None:
-        _STAGE_ARTIFACT_SCHEMA = _get_stage_artifact_schema()
-    return _STAGE_ARTIFACT_SCHEMA
-
 # Get conditional stages from metadata (cached at module load)
 CONDITIONAL_STAGES: dict[Stage, str] = get_conditional_stages()
 
@@ -110,7 +64,7 @@ def _write_artifacts_from_readonly_output(
     artifacts based on STAGE_ARTIFACT_SCHEMA.
 
     Supports two modes:
-    1. Schema-based: Uses STAGE_ARTIFACT_SCHEMA mapping for known stages
+    1. Schema-based: Uses STAGE_METADATA artifact_schema mapping
     2. Generic fallback: Looks for 'artifacts' array in JSON output
 
     Args:
@@ -128,9 +82,8 @@ def _write_artifacts_from_readonly_output(
         return
 
     # Try schema-based artifact writing first
-    schema_dict = get_stage_artifact_schema()
-    if stage in schema_dict:
-        schema = schema_dict[stage]
+    schema = stage.metadata.artifact_schema
+    if schema:
         _write_schema_artifacts(data, schema, stage, task_name, tui_app)
         return
 

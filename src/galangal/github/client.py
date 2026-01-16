@@ -3,6 +3,7 @@ GitHub CLI (gh) wrapper with authentication and repository verification.
 """
 
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -77,12 +78,17 @@ class GitHubClient:
         if not self.gh_path:
             raise GitHubError("GitHub CLI (gh) is not installed")
 
+        # Disable gh prompts to prevent hanging (since stdin is captured)
+        env = os.environ.copy()
+        env["GH_PROMPT_DISABLED"] = "1"
+
         try:
             result = subprocess.run(
                 [self.gh_path] + args,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                env=env,
             )
             if check and result.returncode != 0:
                 raise GitHubError(f"gh command failed: {result.stderr or result.stdout}")

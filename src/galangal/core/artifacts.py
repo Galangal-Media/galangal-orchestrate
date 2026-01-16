@@ -2,6 +2,7 @@
 Artifact management - reading and writing task artifacts.
 """
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -110,7 +111,15 @@ def parse_stage_plan(task_name: str | None = None) -> dict[str, dict] | None:
 def run_command(
     cmd: list[str], cwd: Path | None = None, timeout: int = 300
 ) -> tuple[int, str, str]:
-    """Run a command and return (exit_code, stdout, stderr)."""
+    """Run a command and return (exit_code, stdout, stderr).
+
+    Sets GIT_TERMINAL_PROMPT=0 to prevent git from hanging when
+    credentials are needed (since stdin is not available).
+    """
+    # Disable git credential prompts to prevent hanging
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+
     try:
         result = subprocess.run(
             cmd,
@@ -118,6 +127,7 @@ def run_command(
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
         )
         return result.returncode, result.stdout, result.stderr
     except subprocess.TimeoutExpired:

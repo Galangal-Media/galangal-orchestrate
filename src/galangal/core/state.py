@@ -108,6 +108,15 @@ class StageMetadata:
     decision_file: str | None = None
     # Valid decision values and their outcomes: (value, success, message, rollback_to, is_fast_track)
     decision_outcomes: tuple[tuple[str, bool, str, str | None, bool], ...] = ()
+    # Schema for read-only backend structured output parsing
+    # {
+    #   "notes_file": "ARTIFACT.md",
+    #   "notes_field": "json_field_name",
+    #   "decision_file": "DECISION_FILE",
+    #   "decision_field": "decision",
+    #   "issues_field": "issues"
+    # }
+    artifact_schema: dict[str, str | None] | None = None
 
 
 class Stage(str, Enum):
@@ -225,6 +234,13 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
             ("PASS", True, "QA passed", None, False),
             ("FAIL", False, "QA failed", "DEV", False),
         ),
+        artifact_schema={
+            "notes_file": "QA_REPORT.md",
+            "notes_field": "qa_report",
+            "decision_file": "QA_DECISION",
+            "decision_field": "decision",
+            "issues_field": "issues",
+        },
     ),
     Stage.BENCHMARK: StageMetadata(
         display_name="Benchmark",
@@ -246,6 +262,13 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
             ("REJECTED", False, "Security review found blocking issues", "DEV", False),
             ("BLOCKED", False, "Security review found blocking issues", "DEV", False),
         ),
+        artifact_schema={
+            "notes_file": "SECURITY_CHECKLIST.md",
+            "notes_field": "security_checklist",
+            "decision_file": "SECURITY_DECISION",
+            "decision_field": "decision",
+            "issues_field": "issues",
+        },
     ),
     Stage.REVIEW: StageMetadata(
         display_name="Review",
@@ -257,6 +280,13 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
             ("REQUEST_CHANGES", False, "Review requested changes", "DEV", False),
             ("REQUEST_MINOR_CHANGES", False, "Review requested minor changes (fast-track)", "DEV", True),
         ),
+        artifact_schema={
+            "notes_file": "REVIEW_NOTES.md",
+            "notes_field": "review_notes",
+            "decision_file": "REVIEW_DECISION",
+            "decision_field": "decision",
+            "issues_field": "issues",
+        },
     ),
     Stage.DOCS: StageMetadata(
         display_name="Docs",
@@ -537,7 +567,7 @@ def get_decision_info_for_prompt(stage: Stage) -> str | None:
     lines = [
         "## CRITICAL: Decision File",
         "",
-        f"After completing this stage, you MUST create a decision file:",
+        "After completing this stage, you MUST create a decision file:",
         "",
         f"**File:** `{decision_file}` (no extension)",
         f"**Contents:** Exactly one of: `{'`, `'.join(values)}`",
@@ -581,7 +611,7 @@ def parse_stage_arg(
         return None
 
     if exclude_complete and stage == Stage.COMPLETE:
-        print_error(f"COMPLETE stage is not allowed here.")
+        print_error("COMPLETE stage is not allowed here.")
         return None
 
     return stage
