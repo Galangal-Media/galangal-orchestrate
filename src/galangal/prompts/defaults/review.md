@@ -84,3 +84,7 @@ Choose your decision based on these criteria:
 - APPROVE if changes are acceptable
 - Use REQUEST_MINOR_CHANGES for trivial fixes (typos, naming, formatting)
 - Use REQUEST_CHANGES only for significant issues that affect functionality
+
+## Git Status Note
+
+**Untracked/uncommitted files are expected.** The galangal workflow does not commit changes until all stages pass. New files created during DEV will appear as untracked in `git status` - this is normal and NOT a problem. Do not flag "files need to be committed" or "untracked files" as issues.

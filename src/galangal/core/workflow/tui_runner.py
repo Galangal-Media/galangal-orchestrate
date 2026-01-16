@@ -4,6 +4,12 @@ TUI-based workflow runner using persistent Textual app with async/await.
 This module uses Textual's async capabilities for cleaner coordination
 between UI events and workflow logic, eliminating manual threading.Event
 coordination in favor of asyncio.Future-based prompts.
+
+The workflow logic is delegated to WorkflowEngine, which handles all state
+transitions. This module is responsible for:
+- UI orchestration (displaying events, collecting input)
+- Translating engine events to visual updates
+- Collecting user input and passing actions to the engine
 """
 
 import asyncio
@@ -13,7 +19,7 @@ from rich.console import Console
 
 from galangal.config.loader import get_config
 from galangal.config.schema import GalangalConfig
-from galangal.core.artifacts import artifact_exists, parse_stage_plan, read_artifact, write_artifact
+from galangal.core.artifacts import parse_stage_plan, write_artifact
 from galangal.core.state import (
     STAGE_ORDER,
     TASK_TYPE_SKIP_STAGES,
@@ -25,17 +31,15 @@ from galangal.core.state import (
     get_task_dir,
     save_state,
 )
-from galangal.core.workflow.core import (
-    append_rollback_entry,
-    archive_rollback_if_exists,
-    execute_stage,
-    get_next_stage,
-    handle_rollback,
+from galangal.core.workflow.engine import (
+    ActionType,
+    EventType,
+    WorkflowEngine,
+    WorkflowEvent,
+    action,
 )
 from galangal.core.workflow.pause import _handle_pause
-from galangal.logging import workflow_logger
 from galangal.prompts.builder import PromptBuilder
-from galangal.results import StageResult, StageResultType
 from galangal.ui.tui import PromptType, WorkflowTUIApp
 from galangal.validation.runner import ValidationRunner
 
@@ -49,6 +53,11 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
     This is the main entry point for running workflows interactively. It creates
     a WorkflowTUIApp and runs the stage pipeline using async/await for clean
     coordination between UI and workflow logic.
+
+    The workflow logic is delegated to WorkflowEngine. This function handles:
+    - UI orchestration
+    - Translating engine events to visual updates
+    - Collecting user input for interactive prompts
 
     Threading Model (Async):
         - Main thread: Runs the Textual TUI event loop
@@ -79,523 +88,66 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
         stage_durations=state.stage_durations,
     )
 
+    # Create workflow engine
+    engine = WorkflowEngine(state, config)
+
     async def workflow_loop() -> None:
         """Async workflow loop running within Textual's event loop."""
-        max_retries = config.stages.max_retries
-
         try:
-            while state.stage != Stage.COMPLETE and not app._paused:
-                # Check if linked GitHub issue is still open
-                if state.github_issue:
-                    try:
-                        from galangal.github.issues import is_issue_open
+            while not engine.is_complete and not app._paused:
+                # Check GitHub issue status
+                github_event = await asyncio.to_thread(engine.check_github_issue)
+                if github_event:
+                    app.show_message(github_event.message, "warning")
+                    app.add_activity(
+                        f"Issue #{state.github_issue} closed externally - pausing", "⚠"
+                    )
+                    app._workflow_result = "paused"
+                    break
 
-                        issue_open = await asyncio.to_thread(is_issue_open, state.github_issue)
-                        if issue_open is False:
-                            app.show_message(
-                                f"GitHub issue #{state.github_issue} has been closed", "warning"
-                            )
-                            app.add_activity(
-                                f"Issue #{state.github_issue} closed externally - pausing", "⚠"
-                            )
-                            app._workflow_result = "paused"
-                            break
-                    except Exception:
-                        pass  # Non-critical - continue if check fails
+                app.update_stage(engine.current_stage.value, state.attempt)
+                app.set_status("running", f"executing {engine.current_stage.value}")
 
-                app.update_stage(state.stage.value, state.attempt)
-                app.set_status("running", f"executing {state.stage.value}")
-
-                # Start stage timer if not already running
-                if not state.stage_start_time:
-                    state.start_stage_timer()
-                    save_state(state)
+                # Start stage timer
+                engine.start_stage_timer()
 
                 # Run PM discovery Q&A before PM stage execution
-                if state.stage == Stage.PM and not state.qa_complete:
-                    # Check for skip flag (passed via state or config)
+                if engine.current_stage == Stage.PM and not state.qa_complete:
                     skip_discovery = getattr(state, "_skip_discovery", False)
                     discovery_ok = await _run_pm_discovery(app, state, skip_discovery)
                     if not discovery_ok:
                         app._workflow_result = "paused"
                         break
-                    app.set_status("running", f"executing {state.stage.value}")
+                    app.set_status("running", f"executing {engine.current_stage.value}")
 
-                # Execute stage in thread executor (blocking operation)
-                result = await asyncio.to_thread(
-                    execute_stage,
-                    state,
-                    tui_app=app,
-                    pause_check=lambda: app._paused,
+                # Execute stage in thread executor
+                workflow_event = await asyncio.to_thread(
+                    engine.execute_current_stage,
+                    app,
+                    lambda: app._paused,
                 )
 
-                # Handle interrupt with feedback (Ctrl+I)
-                if app._interrupt_requested:
-                    app.add_activity("Interrupted by user", "⏸️")
-
-                    interrupted_stage = state.stage
-                    interrupted_stage_name = interrupted_stage.value
-
-                    # Determine valid rollback targets (earlier stages only)
-                    current_idx = STAGE_ORDER.index(interrupted_stage)
-                    valid_targets = [s for s in STAGE_ORDER[:current_idx] if s != Stage.PREFLIGHT]
-
-                    # Default target based on interrupted stage
-                    if interrupted_stage in [Stage.PM]:
-                        # Can only restart PM
-                        default_target = Stage.PM
-                        valid_targets = [Stage.PM]
-                    elif interrupted_stage == Stage.DESIGN:
-                        default_target = Stage.PM  # Design issues often stem from PM
-                    else:
-                        default_target = Stage.DEV  # Most issues fixed in DEV
-
-                    # Get feedback first
-                    feedback = await app.multiline_input_async(
-                        "What needs to be fixed? (Ctrl+S to submit):", ""
-                    )
-                    feedback_text = feedback or "No details provided"
-
-                    # Ask which stage to roll back to (if there are choices)
-                    target_stage: Stage  # Type annotation for mypy
-                    if len(valid_targets) > 1:
-                        # Build options string
-                        options_text = "\n".join(
-                            f"  [{i + 1}] {s.value}"
-                            + (" (recommended)" if s == default_target else "")
-                            for i, s in enumerate(valid_targets)
-                        )
-                        target_prompt = (
-                            f"Roll back to which stage?\n\n{options_text}\n\nEnter number:"
-                        )
-
-                        target_input = await app.text_input_async(target_prompt, "1")
-                        try:
-                            target_idx = int(target_input or "1") - 1
-                            if 0 <= target_idx < len(valid_targets):
-                                target_stage = valid_targets[target_idx]
-                            else:
-                                target_stage = default_target
-                        except (ValueError, TypeError):
-                            target_stage = default_target
-                    else:
-                        target_stage = valid_targets[0] if valid_targets else interrupted_stage
-
-                    # Append to ROLLBACK.md (preserves history from earlier failures)
-                    from galangal.core.workflow.core import append_rollback_entry
-
-                    append_rollback_entry(
-                        task_name=state.task_name,
-                        source=f"User interrupt (Ctrl+I) during {interrupted_stage_name}",
-                        from_stage=interrupted_stage_name,
-                        target_stage=target_stage.value,
-                        reason=feedback_text,
-                    )
-
-                    state.stage = target_stage
-                    state.last_failure = (
-                        f"Interrupt feedback from {interrupted_stage_name}: {feedback_text}"
-                    )
-                    state.reset_attempts(clear_failure=False)
-                    save_state(state)
-
-                    app._interrupt_requested = False
-                    app._paused = False
-                    app.show_message(
-                        f"Interrupted {interrupted_stage_name} - rolling back to {target_stage.value}",
-                        "warning",
-                    )
-                    app.update_stage(state.stage.value, state.attempt)
+                # Handle user interrupt requests (Ctrl+I, Ctrl+N, Ctrl+B, Ctrl+E)
+                interrupt_result = await _handle_user_interrupts(app, engine)
+                if interrupt_result == "continue":
                     continue
-
-                # Handle skip stage (Ctrl+N)
-                if app._skip_stage_requested:
-                    app.add_activity(f"Skipping {state.stage.value} stage", "⏭️")
-                    skipped_stage = state.stage
-
-                    # Advance to next stage
-                    next_stage = get_next_stage(state.stage, state)
-                    if next_stage:
-                        state.stage = next_stage
-                        state.reset_attempts()
-                        save_state(state)
-                        app.show_message(
-                            f"Skipped {skipped_stage.value} → {next_stage.value}", "info"
-                        )
-                        app.update_stage(state.stage.value, state.attempt)
-                    else:
-                        state.stage = Stage.COMPLETE
-                        save_state(state)
-                        app.show_message("Skipped to COMPLETE", "info")
-
-                    app._skip_stage_requested = False
-                    app._paused = False
-                    continue
-
-                # Handle back stage (Ctrl+B)
-                if app._back_stage_requested:
-                    current_idx = STAGE_ORDER.index(state.stage)
-                    if current_idx > 0:
-                        prev_stage = STAGE_ORDER[current_idx - 1]
-                        app.add_activity(f"Going back to {prev_stage.value}", "⏮️")
-                        state.stage = prev_stage
-                        state.reset_attempts()
-                        save_state(state)
-                        app.show_message(f"Back to {prev_stage.value}", "info")
-                        app.update_stage(state.stage.value, state.attempt)
-                    else:
-                        app.show_message("Already at first stage", "warning")
-
-                    app._back_stage_requested = False
-                    app._paused = False
-                    continue
-
-                # Handle manual edit pause (Ctrl+E)
-                if app._manual_edit_requested:
-                    app.add_activity("Paused for manual editing", "✏️")
-                    app.show_message(
-                        "Workflow paused - make your edits, then press Enter to continue", "info"
-                    )
-
-                    # Wait for user to press Enter
-                    await app.text_input_async("Press Enter when ready to continue...", "")
-
-                    app.add_activity("Resuming workflow", "▶️")
-                    app.show_message("Resuming...", "info")
-
-                    app._manual_edit_requested = False
-                    app._paused = False
-                    # Re-run the current stage
-                    continue
+                elif interrupt_result == "paused":
+                    app._workflow_result = "paused"
+                    break
 
                 if app._paused:
                     app._workflow_result = "paused"
                     break
 
-                if not result.success:
-                    app.show_stage_complete(state.stage.value, False)
-
-                    # Handle preflight failures - prompt for retry
-                    if result.type == StageResultType.PREFLIGHT_FAILED:
-                        modal_message = _build_preflight_error_message(result)
-                        choice = await app.prompt_async(PromptType.PREFLIGHT_RETRY, modal_message)
-
-                        if choice == "retry":
-                            app.show_message("Retrying preflight checks...", "info")
-                            continue
-                        else:
-                            save_state(state)
-                            app._workflow_result = "paused"
-                            break
-
-                    # Handle clarification needed - show questions and get answers
-                    if result.type == StageResultType.CLARIFICATION_NEEDED:
-                        questions_content = read_artifact("QUESTIONS.md", state.task_name)
-                        if questions_content:
-                            # Parse questions from QUESTIONS.md
-                            questions = _parse_questions_from_artifact(questions_content)
-                            if questions:
-                                app.show_message(
-                                    f"Stage has {len(questions)} clarifying question(s)", "warning"
-                                )
-                                # Show Q&A modal and collect answers
-                                answers = await app.question_answer_session_async(questions)
-                                if answers:
-                                    # Write answers to ANSWERS.md
-                                    answers_content = _format_answers_artifact(questions, answers)
-                                    write_artifact("ANSWERS.md", answers_content, state.task_name)
-                                    app.show_message("Answers saved - resuming stage", "success")
-                                    # Clear clarification flag and retry stage
-                                    state.clarification_required = False
-                                    save_state(state)
-                                    continue
-                                else:
-                                    # User cancelled - pause workflow
-                                    app.show_message(
-                                        "Answers cancelled - pausing workflow", "warning"
-                                    )
-                                    save_state(state)
-                                    app._workflow_result = "paused"
-                                    break
-                            else:
-                                app.show_message(
-                                    "QUESTIONS.md exists but couldn't parse questions", "error"
-                                )
-                        else:
-                            app.show_message(result.message, "warning")
-                        save_state(state)
-                        app._workflow_result = "paused"
-                        break
-
-                    # Handle user decision needed (decision file missing)
-                    if result.type == StageResultType.USER_DECISION_NEEDED:
-                        # Build prompt with artifact summary
-                        artifact_preview = (result.output or "")[:500]
-                        if len(result.output or "") > 500:
-                            artifact_preview += "\n..."
-
-                        while True:
-                            choice = await app.prompt_async(
-                                PromptType.USER_DECISION,
-                                f"Decision file missing for {state.stage.value} stage.\n\n"
-                                f"Report preview:\n{artifact_preview}\n\n"
-                                "Please review and decide:",
-                            )
-
-                            if choice == "view":
-                                # Show full report in activity log
-                                app.add_activity("--- Full Report ---", "📄")
-                                for line in (result.output or "No content").split("\n")[:50]:
-                                    app.add_activity(line, "")
-                                app.add_activity("--- End Report ---", "📄")
-                                continue  # Prompt again
-
-                            if choice == "approve":
-                                # Write decision file and continue as success
-                                from galangal.core.state import (
-                                    get_decision_file_name,
-                                    get_decision_words,
-                                )
-
-                                decision_file = get_decision_file_name(state.stage)
-                                approve_word, _ = get_decision_words(state.stage)
-                                if decision_file and approve_word:
-                                    write_artifact(decision_file, approve_word, state.task_name)
-                                else:
-                                    # Fallback for stages without decision metadata
-                                    decision_file = f"{state.stage.value.upper()}_DECISION"
-                                    write_artifact(decision_file, "APPROVE", state.task_name)
-                                app.add_activity(f"User approved - wrote {decision_file}", "✓")
-
-                                # Audit log
-                                workflow_logger.user_decision(
-                                    stage=state.stage.value,
-                                    task_name=state.task_name,
-                                    decision="approve",
-                                    reason="decision file missing",
-                                )
-
-                                # Record stage pass and duration (same as normal success path)
-                                duration = state.record_stage_duration()
-                                app.show_stage_complete(state.stage.value, True, duration)
-                                if state.stage_durations:
-                                    app.update_stage_durations(state.stage_durations)
-                                state.record_passed_stage(state.stage)
-
-                                # Advance to next stage
-                                next_stage = get_next_stage(state.stage, state)
-                                if next_stage is None:
-                                    app.show_workflow_complete()
-                                    app._workflow_result = "complete"
-                                    save_state(state)
-                                    break
-                                state.stage = next_stage
-                                state.reset_attempts()
-                                save_state(state)
-                                app.update_stage(state.stage.value, state.attempt)
-                                break  # Exit user decision loop, continue workflow
-
-                            if choice == "reject":
-                                # Write decision file and rollback to DEV
-                                original_stage = state.stage.value
-                                from galangal.core.state import (
-                                    get_decision_file_name,
-                                    get_decision_words,
-                                )
-
-                                decision_file = get_decision_file_name(state.stage)
-                                _, reject_word = get_decision_words(state.stage)
-                                if decision_file and reject_word:
-                                    write_artifact(decision_file, reject_word, state.task_name)
-                                else:
-                                    # Fallback for stages without decision metadata
-                                    decision_file = f"{original_stage.upper()}_DECISION"
-                                    write_artifact(decision_file, "REQUEST_CHANGES", state.task_name)
-                                app.add_activity(f"User rejected - wrote {decision_file}", "✗")
-
-                                # Audit log
-                                workflow_logger.user_decision(
-                                    stage=original_stage,
-                                    task_name=state.task_name,
-                                    decision="reject",
-                                    reason="decision file missing",
-                                )
-
-                                # Rollback to DEV
-                                state.last_failure = f"User rejected {original_stage} stage"
-                                state.stage = Stage.DEV
-                                state.reset_attempts(clear_failure=False)
-                                save_state(state)
-                                app.show_message("Rolling back to DEV per user decision", "warning")
-                                app.update_stage(state.stage.value, state.attempt)
-                                break  # Exit user decision loop, continue workflow
-
-                            # quit
-                            # Audit log
-                            workflow_logger.user_decision(
-                                stage=state.stage.value,
-                                task_name=state.task_name,
-                                decision="quit",
-                                reason="decision file missing",
-                            )
-                            save_state(state)
-                            app._workflow_result = "paused"
-                            break
-
-                        # Check if we should exit the main loop
-                        if app._workflow_result in ("complete", "paused"):
-                            break
-                        continue  # Continue workflow loop
-
-                    # Handle rollback required
-                    if result.type == StageResultType.ROLLBACK_REQUIRED:
-                        target = result.rollback_to.value if result.rollback_to else "None"
-                        app.add_activity(f"Validation requested rollback to {target}", "⚠")
-                        if handle_rollback(state, result):
-                            app.show_message(
-                                f"Rolling back to {state.stage.value}: {result.message[:60]}",
-                                "warning",
-                            )
-                            app.update_stage(state.stage.value, state.attempt)
-                            continue
-                        else:
-                            # Rollback was blocked - prompt user for action
-                            # This happens when: rollback loop detected, or rollback_to was None
-                            rollback_count = (
-                                state.get_rollback_count(result.rollback_to)
-                                if result.rollback_to
-                                else 0
-                            )
-                            if rollback_count >= 3:
-                                block_reason = f"Too many rollbacks to {target} ({rollback_count} in last hour)"
-                            elif result.rollback_to is None:
-                                block_reason = "Rollback target not specified in validation"
-                            else:
-                                block_reason = "Rollback blocked (unknown reason)"
-
-                            app.add_activity(f"Rollback blocked: {block_reason}", "⚠")
-                            app.show_error(
-                                f"Rollback blocked: {block_reason}",
-                                result.message[:500],
-                            )
-
-                            # Prompt user for what to do
-                            choice = await app.prompt_async(
-                                PromptType.STAGE_FAILURE,
-                                f"Rollback to {target} was blocked.\n\n"
-                                f"Reason: {block_reason}\n\n"
-                                f"Error: {result.message[:300]}\n\n"
-                                "What would you like to do?",
-                            )
-                            app.clear_error()
-
-                            if choice == "retry":
-                                state.reset_attempts()
-                                app.show_message("Retrying stage...", "info")
-                                save_state(state)
-                                continue
-                            elif choice == "fix_in_dev":
-                                # Force rollback to DEV by clearing rollback history for DEV
-                                original_stage = state.stage.value  # Capture before changing
-                                state.rollback_history = [
-                                    r
-                                    for r in state.rollback_history
-                                    if r.to_stage != Stage.DEV.value
-                                ]
-                                state.stage = Stage.DEV
-                                state.last_failure = (
-                                    f"Manual rollback from {original_stage}: {result.message[:500]}"
-                                )
-                                state.reset_attempts(clear_failure=False)
-                                save_state(state)
-                                app.show_message("Rolling back to DEV (manual override)", "warning")
-                                app.update_stage(state.stage.value, state.attempt)
-                                continue
-                            else:
-                                save_state(state)
-                                app._workflow_result = "paused"
-                                break
-                    else:
-                        # Log what result type we got (for debugging)
-                        app.add_activity(f"Validation result type: {result.type.name}", "⚙")
-
-                    # Handle stage failure with retries
-                    error_message = result.output or result.message
-                    state.record_failure(error_message)
-
-                    if not state.can_retry(max_retries):
-                        # Max retries exceeded - prompt user
-                        choice = await _handle_max_retries_exceeded(
-                            app, state, error_message, max_retries
-                        )
-
-                        if choice == "retry":
-                            state.reset_attempts()
-                            app.show_message("Retrying stage...", "info")
-                            save_state(state)
-                            continue
-                        elif choice == "fix_in_dev":
-                            # Handled in _handle_max_retries_exceeded
-                            continue
-                        else:
-                            save_state(state)
-                            app._workflow_result = "paused"
-                            break
-
-                    app.show_message(
-                        f"Retrying (attempt {state.attempt}/{max_retries})...",
-                        "warning",
-                    )
-                    save_state(state)
+                # Handle the workflow event
+                result = await _handle_workflow_event(app, engine, workflow_event, config)
+                if result == "break":
+                    break
+                elif result == "continue":
                     continue
 
-                # Stage succeeded
-                app.clear_error()  # Clear any previous error display
-
-                # Record stage duration before advancing
-                duration = state.record_stage_duration()
-                app.show_stage_complete(state.stage.value, True, duration)
-
-                # Update progress widget with stage durations
-                if state.stage_durations:
-                    app.update_stage_durations(state.stage_durations)
-
-                # Approval gate - check if stage requires approval
-                metadata = state.stage.metadata
-                if metadata.requires_approval and metadata.approval_artifact:
-                    if not artifact_exists(metadata.approval_artifact, state.task_name):
-                        should_continue = await _handle_stage_approval(
-                            app, state, config, metadata.approval_artifact
-                        )
-                        if not should_continue:
-                            if app._workflow_result == "paused":
-                                break
-                            continue  # Rejected - loop back to stage
-
-                # Archive rollback after successful DEV and clear passed_stages
-                if state.stage == Stage.DEV:
-                    archive_rollback_if_exists(state.task_name, app)
-                    # Start fresh tracking of passed stages for this iteration
-                    state.clear_passed_stages()
-
-                # Record this stage as passed (for fast-track rollback support)
-                state.record_passed_stage(state.stage)
-
-                # Advance to next stage
-                next_stage = get_next_stage(state.stage, state)
-                if next_stage:
-                    _show_skipped_stages(app, state.stage, next_stage)
-                    state.stage = next_stage
-                    state.reset_attempts()
-                    state.awaiting_approval = False
-                    state.clarification_required = False
-                    save_state(state)
-                else:
-                    state.stage = Stage.COMPLETE
-                    save_state(state)
-
             # Workflow complete
-            if state.stage == Stage.COMPLETE:
+            if engine.is_complete:
                 await _handle_workflow_complete(app, state)
 
         except Exception as e:
@@ -604,14 +156,12 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
             debug_exception("Workflow execution failed", e)
             app.show_error("Workflow error", str(e))
             app._workflow_result = "error"
-            # Wait for user to acknowledge the error before exiting
             await app.ask_yes_no_async(
                 "An error occurred. Press Enter to exit and see details in the debug log."
             )
             app.set_timer(0.5, app.exit)
             return
         finally:
-            # Only auto-exit if we haven't already handled exit (e.g., from error)
             if app._workflow_result != "error":
                 app.set_timer(0.5, app.exit)
 
@@ -635,9 +185,352 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
     return result
 
 
-# -----------------------------------------------------------------------------
+# =============================================================================
+# Event Handlers - translate engine events to UI updates
+# =============================================================================
+
+
+async def _handle_workflow_event(
+    app: WorkflowTUIApp,
+    engine: WorkflowEngine,
+    event: WorkflowEvent,
+    config: GalangalConfig,
+) -> str:
+    """
+    Handle a workflow event from the engine.
+
+    Returns:
+        "continue" to continue the loop
+        "break" to exit the loop
+        "advance" to advance to next stage (handled by caller)
+    """
+    state = engine.state
+
+    if event.type == EventType.WORKFLOW_PAUSED:
+        app._workflow_result = "paused"
+        return "break"
+
+    if event.type == EventType.STAGE_COMPLETED:
+        app.clear_error()
+        duration = state.record_stage_duration()
+        app.show_stage_complete(state.stage.value, True, duration)
+        if state.stage_durations:
+            app.update_stage_durations(state.stage_durations)
+
+        # Advance to next stage via engine
+        advance_event = engine.handle_action(action(ActionType.CONTINUE), tui_app=app)
+        return await _handle_advance_event(app, engine, advance_event, config)
+
+    if event.type == EventType.APPROVAL_REQUIRED:
+        should_continue = await _handle_stage_approval(
+            app, state, config, event.data.get("artifact_name", "APPROVAL.md")
+        )
+        if not should_continue:
+            if app._workflow_result == "paused":
+                return "break"
+            return "continue"  # Rejected - loop back to stage
+
+        # After approval, advance
+        advance_event = engine.handle_action(action(ActionType.CONTINUE), tui_app=app)
+        return await _handle_advance_event(app, engine, advance_event, config)
+
+    if event.type == EventType.PREFLIGHT_FAILED:
+        app.show_stage_complete(state.stage.value, False)
+        modal_message = _build_preflight_error_message(event.message, event.data.get("details", ""))
+        choice = await app.prompt_async(PromptType.PREFLIGHT_RETRY, modal_message)
+
+        if choice == "retry":
+            app.show_message("Retrying preflight checks...", "info")
+            return "continue"
+        else:
+            save_state(state)
+            app._workflow_result = "paused"
+            return "break"
+
+    if event.type == EventType.CLARIFICATION_REQUIRED:
+        app.show_stage_complete(state.stage.value, False)
+        questions = event.data.get("questions", [])
+        if questions:
+            app.show_message(f"Stage has {len(questions)} clarifying question(s)", "warning")
+            answers = await app.question_answer_session_async(questions)
+            if answers:
+                engine.handle_clarification_answers(questions, answers)
+                app.show_message("Answers saved - resuming stage", "success")
+                return "continue"
+            else:
+                app.show_message("Answers cancelled - pausing workflow", "warning")
+                save_state(state)
+                app._workflow_result = "paused"
+                return "break"
+        else:
+            app.show_message("QUESTIONS.md exists but couldn't parse questions", "error")
+        save_state(state)
+        app._workflow_result = "paused"
+        return "break"
+
+    if event.type == EventType.USER_DECISION_REQUIRED:
+        app.show_stage_complete(state.stage.value, False)
+        artifact_preview = event.data.get("artifact_preview", "")
+        full_content = event.data.get("full_content", "")
+
+        while True:
+            choice = await app.prompt_async(
+                PromptType.USER_DECISION,
+                f"Decision file missing for {state.stage.value} stage.\n\n"
+                f"Report preview:\n{artifact_preview}\n\n"
+                "Please review and decide:",
+            )
+
+            if choice == "view":
+                app.add_activity("--- Full Report ---", "📄")
+                for line in (full_content or "No content").split("\n")[:50]:
+                    app.add_activity(line, "")
+                app.add_activity("--- End Report ---", "📄")
+                continue
+
+            result_event = engine.handle_user_decision(choice, tui_app=app)
+
+            if result_event.type == EventType.WORKFLOW_PAUSED:
+                app._workflow_result = "paused"
+                return "break"
+
+            if result_event.type == EventType.WORKFLOW_COMPLETE:
+                app.show_workflow_complete()
+                app._workflow_result = "complete"
+                return "break"
+
+            if result_event.type == EventType.ROLLBACK_TRIGGERED:
+                app.show_message("Rolling back to DEV per user decision", "warning")
+                app.update_stage(state.stage.value, state.attempt)
+                return "continue"
+
+            if result_event.type == EventType.STAGE_STARTED:
+                # Advanced to next stage
+                app.update_stage(state.stage.value, state.attempt)
+                return "continue"
+
+            return "continue"
+
+    if event.type == EventType.ROLLBACK_TRIGGERED:
+        target = event.data.get("to_stage")
+        app.add_activity(f"Rolling back to {target.value if target else 'unknown'}", "⚠")
+        app.show_message(f"Rolling back: {event.message[:60]}", "warning")
+        app.update_stage(state.stage.value, state.attempt)
+        return "continue"
+
+    if event.type == EventType.ROLLBACK_BLOCKED:
+        app.show_stage_complete(state.stage.value, False)
+        block_reason = event.data.get("block_reason", "")
+        target = event.data.get("target_stage", "unknown")
+
+        app.add_activity(f"Rollback blocked: {block_reason}", "⚠")
+        app.show_error(f"Rollback blocked: {block_reason}", event.message[:500])
+
+        choice = await app.prompt_async(
+            PromptType.STAGE_FAILURE,
+            f"Rollback to {target} was blocked.\n\n"
+            f"Reason: {block_reason}\n\n"
+            f"Error: {event.message[:300]}\n\n"
+            "What would you like to do?",
+        )
+        app.clear_error()
+
+        if choice == "retry":
+            state.reset_attempts()
+            app.show_message("Retrying stage...", "info")
+            save_state(state)
+            return "continue"
+        elif choice == "fix_in_dev":
+            result_event = engine.handle_action(
+                action(ActionType.FIX_IN_DEV, error=event.message),
+                tui_app=app,
+            )
+            app.show_message("Rolling back to DEV (manual override)", "warning")
+            app.update_stage(state.stage.value, state.attempt)
+            return "continue"
+        else:
+            save_state(state)
+            app._workflow_result = "paused"
+            return "break"
+
+    if event.type == EventType.MAX_RETRIES_EXCEEDED:
+        app.show_stage_complete(state.stage.value, False)
+        max_retries = event.data.get("max_retries", config.stages.max_retries)
+        choice = await _handle_max_retries_exceeded(
+            app, state, event.message, max_retries
+        )
+
+        if choice == "retry":
+            state.reset_attempts()
+            app.show_message("Retrying stage...", "info")
+            save_state(state)
+            return "continue"
+        elif choice == "fix_in_dev":
+            # Already handled in _handle_max_retries_exceeded
+            return "continue"
+        else:
+            save_state(state)
+            app._workflow_result = "paused"
+            return "break"
+
+    if event.type == EventType.STAGE_FAILED:
+        app.show_stage_complete(state.stage.value, False)
+        app.show_message(
+            f"Retrying (attempt {state.attempt}/{engine.max_retries})...",
+            "warning",
+        )
+        save_state(state)
+        return "continue"
+
+    if event.type == EventType.WORKFLOW_COMPLETE:
+        return "break"
+
+    # Unknown event - continue
+    app.add_activity(f"Unknown event: {event.type.name}", "⚙")
+    return "continue"
+
+
+async def _handle_advance_event(
+    app: WorkflowTUIApp,
+    engine: WorkflowEngine,
+    event: WorkflowEvent,
+    config: GalangalConfig,
+) -> str:
+    """Handle the event from advancing to next stage."""
+    state = engine.state
+
+    if event.type == EventType.WORKFLOW_COMPLETE:
+        return "break"  # Will be handled in main loop
+
+    if event.type == EventType.STAGE_STARTED:
+        # Show skipped stages if any
+        skipped = event.data.get("skipped_stages", [])
+        for s in skipped:
+            app.show_message(f"Skipped {s.value} (condition not met)", "info")
+
+        app.update_stage(state.stage.value, state.attempt)
+
+        # After PM approval, show stage preview
+        if event.data.get("show_preview"):
+            preview_result = await _show_stage_preview(app, state, config)
+            if preview_result == "quit":
+                app._workflow_result = "paused"
+                return "break"
+
+        return "continue"
+
+    return "continue"
+
+
+async def _handle_user_interrupts(app: WorkflowTUIApp, engine: WorkflowEngine) -> str:
+    """
+    Handle user interrupt requests (Ctrl+I, Ctrl+N, Ctrl+B, Ctrl+E).
+
+    Returns:
+        "continue" if an interrupt was handled and loop should continue
+        "paused" if workflow should pause
+        "none" if no interrupt was requested
+    """
+    state = engine.state
+
+    # Handle interrupt with feedback (Ctrl+I)
+    if app._interrupt_requested:
+        app.add_activity("Interrupted by user", "⏸️")
+
+        # Get feedback
+        feedback = await app.multiline_input_async(
+            "What needs to be fixed? (Ctrl+S to submit):", ""
+        )
+
+        # Get rollback target
+        valid_targets = engine.get_valid_interrupt_targets()
+        default_target = engine.get_default_interrupt_target()
+
+        if len(valid_targets) > 1:
+            options_text = "\n".join(
+                f"  [{i + 1}] {s.value}"
+                + (" (recommended)" if s == default_target else "")
+                for i, s in enumerate(valid_targets)
+            )
+            target_input = await app.text_input_async(
+                f"Roll back to which stage?\n\n{options_text}\n\nEnter number:", "1"
+            )
+            try:
+                target_idx = int(target_input or "1") - 1
+                target_stage = valid_targets[target_idx] if 0 <= target_idx < len(valid_targets) else default_target
+            except (ValueError, TypeError):
+                target_stage = default_target
+        else:
+            target_stage = valid_targets[0] if valid_targets else state.stage
+
+        # Send action to engine
+        result_event = engine.handle_action(
+            action(ActionType.INTERRUPT, feedback=feedback or "", target_stage=target_stage)
+        )
+
+        app._interrupt_requested = False
+        app._paused = False
+        app.show_message(
+            f"Interrupted - rolling back to {target_stage.value}",
+            "warning",
+        )
+        app.update_stage(state.stage.value, state.attempt)
+        return "continue"
+
+    # Handle skip stage (Ctrl+N)
+    if app._skip_stage_requested:
+        app.add_activity(f"Skipping {state.stage.value} stage", "⏭️")
+        skipped_stage = state.stage
+
+        result_event = engine.handle_action(action(ActionType.SKIP))
+
+        if result_event.type == EventType.WORKFLOW_COMPLETE:
+            app.show_message("Skipped to COMPLETE", "info")
+        else:
+            app.show_message(f"Skipped {skipped_stage.value} → {state.stage.value}", "info")
+            app.update_stage(state.stage.value, state.attempt)
+
+        app._skip_stage_requested = False
+        app._paused = False
+        return "continue"
+
+    # Handle back stage (Ctrl+B)
+    if app._back_stage_requested:
+        current_idx = STAGE_ORDER.index(state.stage)
+        if current_idx > 0:
+            result_event = engine.handle_action(action(ActionType.BACK))
+            app.add_activity(f"Going back to {state.stage.value}", "⏮️")
+            app.show_message(f"Back to {state.stage.value}", "info")
+            app.update_stage(state.stage.value, state.attempt)
+        else:
+            app.show_message("Already at first stage", "warning")
+
+        app._back_stage_requested = False
+        app._paused = False
+        return "continue"
+
+    # Handle manual edit pause (Ctrl+E)
+    if app._manual_edit_requested:
+        app.add_activity("Paused for manual editing", "✏️")
+        app.show_message(
+            "Workflow paused - make your edits, then press Enter to continue", "info"
+        )
+
+        await app.text_input_async("Press Enter when ready to continue...", "")
+
+        app.add_activity("Resuming workflow", "▶️")
+        app.show_message("Resuming...", "info")
+
+        app._manual_edit_requested = False
+        app._paused = False
+        return "continue"
+
+    return "none"
+
+
+# =============================================================================
 # PM Discovery Q&A functions
-# -----------------------------------------------------------------------------
+# =============================================================================
 
 
 async def _run_pm_discovery(
@@ -836,240 +729,15 @@ def _write_discovery_log(task_name: str, qa_rounds: list[dict[str, Any]]) -> Non
     write_artifact("DISCOVERY_LOG.md", "".join(content_parts), task_name)
 
 
-def _parse_questions_from_artifact(content: str) -> list[str]:
-    """Parse questions from QUESTIONS.md artifact.
-
-    Supports multiple formats:
-    - Numbered lists: 1. Question text
-    - Bulleted lists: - Question text
-    - Markdown headers: ## Question text
-    """
-    import re
-
-    questions = []
-    lines = content.split("\n")
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-
-        # Skip title/header lines
-        if line.startswith("# ") and "question" in line.lower():
-            continue
-
-        # Match numbered questions (1. Question text)
-        match = re.match(r"^\d+[\.\)]\s*(.+)$", line)
-        if match:
-            questions.append(match.group(1))
-            continue
-
-        # Match bulleted questions
-        if line.startswith("- ") or line.startswith("* "):
-            questions.append(line[2:].strip())
-            continue
-
-        # Match markdown headers as questions
-        if line.startswith("## "):
-            questions.append(line[3:].strip())
-            continue
-
-    return questions
-
-
-def _format_answers_artifact(questions: list[str], answers: list[str]) -> str:
-    """Format questions and answers into ANSWERS.md content."""
-    lines = ["# Answers\n"]
-    lines.append("Responses to clarifying questions.\n\n")
-
-    for i, (q, a) in enumerate(zip(questions, answers), 1):
-        lines.append(f"## Question {i}\n")
-        lines.append(f"**Q:** {q}\n\n")
-        lines.append(f"**A:** {a}\n\n")
-
-    return "".join(lines)
-
-
-# -----------------------------------------------------------------------------
+# =============================================================================
 # Helper functions for workflow logic
-# -----------------------------------------------------------------------------
+# =============================================================================
 
 
-
-async def _handle_user_interrupt(app: WorkflowTUIApp, state: WorkflowState) -> bool:
-    """
-    Handle interrupt with feedback (Ctrl+I).
-
-    Returns:
-        True if interrupt was processed and workflow should continue loop.
-        False if no interrupt was requested.
-    """
-    if not app._interrupt_requested:
-        return False
-
-    app.add_activity("Interrupted by user", "⏸️")
-
-    interrupted_stage = state.stage
-    interrupted_stage_name = interrupted_stage.value
-
-    # Determine valid rollback targets (earlier stages only)
-    current_idx = STAGE_ORDER.index(interrupted_stage)
-    valid_targets = [s for s in STAGE_ORDER[:current_idx] if s != Stage.PREFLIGHT]
-
-    # Default target based on interrupted stage
-    if interrupted_stage in [Stage.PM]:
-        # Can only restart PM
-        default_target = Stage.PM
-        valid_targets = [Stage.PM]
-    elif interrupted_stage == Stage.DESIGN:
-        default_target = Stage.PM  # Design issues often stem from PM
-    else:
-        default_target = Stage.DEV  # Most issues fixed in DEV
-
-    # Get feedback first
-    feedback = await app.multiline_input_async(
-        "What needs to be fixed? (Ctrl+S to submit):", ""
-    )
-    feedback_text = feedback or "No details provided"
-
-    # Ask which stage to roll back to (if there are choices)
-    target_stage: Stage  # Type annotation for mypy
-    if len(valid_targets) > 1:
-        # Build options string
-        options_text = "\n".join(
-            f"  [{i + 1}] {s.value}"
-            + (" (recommended)" if s == default_target else "")
-            for i, s in enumerate(valid_targets)
-        )
-        target_prompt = (
-            f"Roll back to which stage?\n\n{options_text}\n\nEnter number:"
-        )
-
-        target_input = await app.text_input_async(target_prompt, "1")
-        try:
-            target_idx = int(target_input or "1") - 1
-            if 0 <= target_idx < len(valid_targets):
-                target_stage = valid_targets[target_idx]
-            else:
-                target_stage = default_target
-        except (ValueError, TypeError):
-            target_stage = default_target
-    else:
-        target_stage = valid_targets[0] if valid_targets else interrupted_stage
-
-    # Append to ROLLBACK.md (preserves history from earlier failures)
-    # Using the imported function
-    append_rollback_entry(
-        task_name=state.task_name,
-        source=f"User interrupt (Ctrl+I) during {interrupted_stage_name}",
-        from_stage=interrupted_stage_name,
-        target_stage=target_stage.value,
-        reason=feedback_text,
-    )
-
-    state.stage = target_stage
-    state.last_failure = (
-        f"Interrupt feedback from {interrupted_stage_name}: {feedback_text}"
-    )
-    state.reset_attempts(clear_failure=False)
-    save_state(state)
-
-    app._interrupt_requested = False
-    app._paused = False
-    app.show_message(
-        f"Interrupted {interrupted_stage_name} - rolling back to {target_stage.value}",
-        "warning",
-    )
-    app.update_stage(state.stage.value, state.attempt)
-    return True
-
-
-async def _handle_preflight_failure(
-    app: WorkflowTUIApp, state: WorkflowState, result: StageResult
-) -> bool:
-    """
-    Handle preflight check failures.
-
-    Returns:
-        True if user chose to retry (continue workflow loop).
-        False if user cancelled (pause workflow).
-    """
-    modal_message = _build_preflight_error_message(result)
-    choice = await app.prompt_async(PromptType.PREFLIGHT_RETRY, modal_message)
-
-    if choice == "retry":
-        app.show_message("Retrying preflight checks...", "info")
-        return True
-    else:
-        save_state(state)
-        app._workflow_result = "paused"
-        return False
-
-
-async def _handle_stage_completion(
-    app: WorkflowTUIApp, state: WorkflowState, config: GalangalConfig
-) -> bool:
-    """
-    Handle successful stage completion.
-
-    Returns:
-        True if workflow loop should continue (next stage or retry).
-        False if workflow loop should break (paused/stopped).
-    """
-    # Stage succeeded
-    app.clear_error()  # Clear any previous error display
-
-    # Record stage duration before advancing
-    duration = state.record_stage_duration()
-    app.show_stage_complete(state.stage.value, True, duration)
-
-    # Update progress widget with stage durations
-    if state.stage_durations:
-        app.update_stage_durations(state.stage_durations)
-
-    # Approval gate - check if stage requires approval
-    metadata = state.stage.metadata
-    if metadata.requires_approval and metadata.approval_artifact:
-        if not artifact_exists(metadata.approval_artifact, state.task_name):
-            should_continue = await _handle_stage_approval(
-                app, state, config, metadata.approval_artifact
-            )
-            if not should_continue:
-                if app._workflow_result == "paused":
-                    return False
-                return True  # Rejected - loop back to stage
-
-    # Archive rollback after successful DEV and clear passed_stages
-    if state.stage == Stage.DEV:
-        archive_rollback_if_exists(state.task_name, app)
-        # Start fresh tracking of passed stages for this iteration
-        state.clear_passed_stages()
-
-    # Record this stage as passed (for fast-track rollback support)
-    state.record_passed_stage(state.stage)
-
-    # Advance to next stage
-    next_stage = get_next_stage(state.stage, state)
-    if next_stage:
-        _show_skipped_stages(app, state.stage, next_stage)
-        state.stage = next_stage
-        state.reset_attempts()
-        state.awaiting_approval = False
-        state.clarification_required = False
-        save_state(state)
-    else:
-        state.stage = Stage.COMPLETE
-        save_state(state)
-
-    return True
-
-
-def _build_preflight_error_message(result: StageResult) -> str:
+def _build_preflight_error_message(message: str, details: str) -> str:
     """Build error message for preflight failure modal."""
-    detailed_error = result.output or result.message
-
     failed_lines = []
-    for line in detailed_error.split("\n"):
+    for line in details.split("\n"):
         if line.strip().startswith("✗") or "Failed" in line or "Missing" in line or "Error" in line:
             failed_lines.append(line.strip())
 
@@ -1077,7 +745,7 @@ def _build_preflight_error_message(result: StageResult) -> str:
     if failed_lines:
         modal_message += "\n".join(failed_lines[:10])
     else:
-        modal_message += detailed_error[:500]
+        modal_message += details[:500]
     modal_message += "\n\nFix issues and retry?"
 
     return modal_message
@@ -1336,16 +1004,6 @@ async def _handle_stage_approval(
     else:  # quit
         app._workflow_result = "paused"
         return False
-
-
-def _show_skipped_stages(app: WorkflowTUIApp, current_stage: Stage, next_stage: Stage) -> None:
-    """Show messages for any stages that were skipped."""
-    expected_next_idx = STAGE_ORDER.index(current_stage) + 1
-    actual_next_idx = STAGE_ORDER.index(next_stage)
-    if actual_next_idx > expected_next_idx:
-        skipped = STAGE_ORDER[expected_next_idx:actual_next_idx]
-        for s in skipped:
-            app.show_message(f"Skipped {s.value} (condition not met)", "info")
 
 
 async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -> None:
