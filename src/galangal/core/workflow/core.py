@@ -346,12 +346,17 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
 """
         prompt = f"{prompt}\n\n{retry_context}"
 
-    # Log the prompt
+    # Set up log file for streaming output
     logs_dir = get_task_dir(task_name) / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     log_file = logs_dir / f"{stage.value.lower()}_{state.attempt}.log"
+
+    # Write prompt header to log file
     with open(log_file, "w") as f:
         f.write(f"=== Prompt ===\n{prompt}\n\n")
+        f.write(f"=== Backend: {backend.name} ===\n")
+        f.write(f"=== Streaming Output ===\n")
+
     tui_app.add_activity(f"Using {backend.name} backend", "🤖")
 
     ui = TUIAdapter(tui_app)
@@ -363,12 +368,14 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         ui=ui,
         pause_check=pause_check,
         stage=stage.value,
+        log_file=str(log_file),  # Pass log file for streaming
     )
 
-    # Log the output
+    # Add completion marker to log
     with open(log_file, "a") as f:
-        f.write(f"=== Backend: {backend.name} ===\n")
-        f.write(f"=== Output ===\n{invoke_result.output or invoke_result.message}\n")
+        f.write(f"\n=== Result: {invoke_result.type.value} ===\n")
+        if invoke_result.message:
+            f.write(f"{invoke_result.message}\n")
 
     # Return early if AI invocation failed
     if not invoke_result.success:

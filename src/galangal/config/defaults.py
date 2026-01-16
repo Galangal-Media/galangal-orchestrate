@@ -9,10 +9,6 @@ DEFAULT_CONFIG_YAML = """\
 project:
   name: "{project_name}"
 
-  # Technology stacks in this project
-  stacks:
-{stacks_yaml}
-
 # Task storage location
 tasks_dir: galangal-tasks
 
@@ -182,26 +178,6 @@ stage_context:
 """
 
 
-def generate_default_config(
-    project_name: str = "My Project",
-    stacks: list[dict[str, str]] | None = None,
-) -> str:
+def generate_default_config(project_name: str = "My Project") -> str:
     """Generate a default config.yaml content."""
-    if stacks is None:
-        stacks = [{"language": "python", "framework": None, "root": None}]
-
-    # Build stacks YAML
-    stacks_lines = []
-    for stack in stacks:
-        stacks_lines.append(f"    - language: {stack['language']}")
-        if stack.get("framework"):
-            stacks_lines.append(f"      framework: {stack['framework']}")
-        if stack.get("root"):
-            stacks_lines.append(f"      root: {stack['root']}")
-
-    stacks_yaml = "\n".join(stacks_lines) if stacks_lines else "    []"
-
-    return DEFAULT_CONFIG_YAML.format(
-        project_name=project_name,
-        stacks_yaml=stacks_yaml,
-    )
+    return DEFAULT_CONFIG_YAML.format(project_name=project_name)

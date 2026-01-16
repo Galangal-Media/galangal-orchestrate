@@ -6,19 +6,10 @@ Configuration schema using Pydantic models.
 from pydantic import BaseModel, Field
 
 
-class StackConfig(BaseModel):
-    """Configuration for a technology stack."""
-
-    language: str = Field(description="Programming language (python, typescript, php, etc.)")
-    framework: str | None = Field(default=None, description="Framework (fastapi, vite, symfony)")
-    root: str | None = Field(default=None, description="Subdirectory for this stack")
-
-
 class ProjectConfig(BaseModel):
     """Project-level configuration."""
 
     name: str = Field(default="My Project", description="Project name")
-    stacks: list[StackConfig] = Field(default_factory=list, description="Technology stacks")
     approver_name: str | None = Field(default=None, description="Default approver name for plan approvals")
 
 

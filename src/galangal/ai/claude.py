@@ -76,15 +76,31 @@ class ClaudeBackend(AIBackend):
         ui: Optional["StageUI"] = None,
         pause_check: PauseCheck | None = None,
         stage: str | None = None,
+        log_file: str | None = None,
     ) -> StageResult:
         """Invoke Claude Code with a prompt."""
         # State for output processing
         pending_tools: list[tuple[str, str]] = []
+        log_handle = None
+
+        # Open log file for streaming if provided
+        if log_file:
+            try:
+                log_handle = open(log_file, "a")
+            except OSError as e:
+                logger.warning("failed_to_open_log_file", path=log_file, error=str(e))
 
         def on_output(line: str) -> None:
             """Process each output line."""
             if ui:
                 ui.add_raw_line(line)
+            # Stream to log file in real-time
+            if log_handle:
+                try:
+                    log_handle.write(line + "\n")
+                    log_handle.flush()  # Ensure immediate write
+                except OSError:
+                    pass
             self._process_stream_line(line, ui, pending_tools)
 
         def on_idle(elapsed: float) -> None:
@@ -162,6 +178,13 @@ class ClaudeBackend(AIBackend):
 
         except Exception as e:
             return StageResult.error(f"Claude invocation error: {e}")
+        finally:
+            # Close log file handle
+            if log_handle:
+                try:
+                    log_handle.close()
+                except OSError:
+                    pass
 
     def _process_stream_line(
         self,

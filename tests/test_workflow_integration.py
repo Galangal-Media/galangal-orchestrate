@@ -117,6 +117,7 @@ class MockAIBackend:
         ui=None,
         pause_check=None,
         stage: str | None = None,
+        log_file: str | None = None,
     ) -> StageResult:
         """Record the call and return configured response."""
         stage = None

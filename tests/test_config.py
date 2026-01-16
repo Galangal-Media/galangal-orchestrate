@@ -7,7 +7,7 @@ import pytest
 
 from galangal.config import ConfigError
 from galangal.config.loader import load_config, set_project_root
-from galangal.config.schema import GalangalConfig, StackConfig
+from galangal.config.schema import GalangalConfig
 
 
 def test_default_config():
@@ -17,14 +17,6 @@ def test_default_config():
     assert config.branch_pattern == "task/{task_name}"
     assert config.stages.timeout == 14400
     assert config.stages.max_retries == 5
-
-
-def test_stack_config():
-    """Test stack configuration."""
-    stack = StackConfig(language="python", framework="fastapi", root="backend/")
-    assert stack.language == "python"
-    assert stack.framework == "fastapi"
-    assert stack.root == "backend/"
 
 
 def test_config_from_yaml():
@@ -37,9 +29,6 @@ def test_config_from_yaml():
         config_yaml = """
 project:
   name: "Test Project"
-  stacks:
-    - language: python
-      framework: django
 
 stages:
   skip:
@@ -55,9 +44,6 @@ pr:
         config = load_config(project_root)
 
         assert config.project.name == "Test Project"
-        assert len(config.project.stacks) == 1
-        assert config.project.stacks[0].language == "python"
-        assert config.project.stacks[0].framework == "django"
         assert "BENCHMARK" in config.stages.skip
         assert config.stages.max_retries == 3
         assert config.pr.codex_review is True

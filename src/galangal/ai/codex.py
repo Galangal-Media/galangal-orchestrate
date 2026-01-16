@@ -169,6 +169,7 @@ class CodexBackend(AIBackend):
         ui: Optional["StageUI"] = None,
         pause_check: PauseCheck | None = None,
         stage: Optional[str] = None,
+        log_file: Optional[str] = None,
     ) -> StageResult:
         """
         Invoke Codex in non-interactive read-only mode.
@@ -185,6 +186,7 @@ class CodexBackend(AIBackend):
             ui: Optional TUI for progress display
             pause_check: Optional callback for pause detection
             stage: Stage name for schema customization (e.g., "QA", "SECURITY")
+            log_file: Optional path to log file (unused for Codex read-only)
 
         Returns:
             StageResult with structured JSON in the output field

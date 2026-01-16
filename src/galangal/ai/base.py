@@ -117,6 +117,7 @@ class AIBackend(ABC):
         ui: Optional["StageUI"] = None,
         pause_check: PauseCheck | None = None,
         stage: Optional[str] = None,
+        log_file: Optional[str] = None,
     ) -> StageResult:
         """
         Invoke the AI with a prompt for a full stage execution.
@@ -128,6 +129,7 @@ class AIBackend(ABC):
             ui: Optional TUI for progress display
             pause_check: Optional callback that returns True if pause requested
             stage: Optional stage name for backends that customize behavior per stage
+            log_file: Optional path to log file for streaming output
 
         Returns:
             StageResult with success/failure and structured outcome type
