@@ -2,13 +2,15 @@
 Subprocess runner with pause/timeout handling for AI backends.
 """
 
+from __future__ import annotations
+
 import select
 import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from galangal.config.loader import get_project_root
 
@@ -80,7 +82,7 @@ class SubprocessRunner:
         command: str,
         timeout: int = 14400,
         pause_check: PauseCheck | None = None,
-        ui: Optional["StageUI"] = None,
+        ui: StageUI | None = None,
         on_output: OutputCallback | None = None,
         on_idle: IdleCallback | None = None,
         idle_interval: float = 3.0,

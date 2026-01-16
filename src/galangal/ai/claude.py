@@ -2,9 +2,11 @@
 Claude CLI backend implementation.
 """
 
+from __future__ import annotations
+
 import json
 import subprocess
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from galangal.ai.base import AIBackend, PauseCheck
 from galangal.ai.subprocess import SubprocessRunner
@@ -73,7 +75,7 @@ class ClaudeBackend(AIBackend):
         prompt: str,
         timeout: int = 14400,
         max_turns: int = 200,
-        ui: Optional["StageUI"] = None,
+        ui: StageUI | None = None,
         pause_check: PauseCheck | None = None,
         stage: str | None = None,
         log_file: str | None = None,
@@ -218,7 +220,7 @@ class ClaudeBackend(AIBackend):
     def _process_stream_line(
         self,
         line: str,
-        ui: Optional["StageUI"],
+        ui: StageUI | None,
         pending_tools: list[tuple[str, str]],
     ) -> None:
         """Process a single line of streaming output."""
@@ -244,7 +246,7 @@ class ClaudeBackend(AIBackend):
     def _handle_assistant_message(
         self,
         data: dict[str, Any],
-        ui: Optional["StageUI"],
+        ui: StageUI | None,
         pending_tools: list[tuple[str, str]],
     ) -> None:
         """Handle assistant message with tool use."""
@@ -300,7 +302,7 @@ class ClaudeBackend(AIBackend):
     def _handle_user_message(
         self,
         data: dict[str, Any],
-        ui: Optional["StageUI"],
+        ui: StageUI | None,
         pending_tools: list[tuple[str, str]],
     ) -> None:
         """Handle user message with tool results."""
@@ -314,7 +316,7 @@ class ClaudeBackend(AIBackend):
                 if is_error and ui:
                     ui.set_status("error", "tool failed")
 
-    def _handle_system_message(self, data: dict[str, Any], ui: Optional["StageUI"]) -> None:
+    def _handle_system_message(self, data: dict[str, Any], ui: StageUI | None) -> None:
         """Handle system messages."""
         message = data.get("message", "")
         subtype = data.get("subtype", "")

@@ -72,9 +72,6 @@ class TaskType(str, Enum):
 
     def description(self) -> str:
         """Full description with pipeline (derived from TASK_TYPE_SKIP_STAGES)."""
-        # Import here to avoid circular dependency (function defined after class)
-        from galangal.core.state import get_task_type_pipeline
-
         pipeline = get_task_type_pipeline(self)
         if self == TaskType.FEATURE:
             return f"{self.short_description()} (full workflow)"

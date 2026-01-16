@@ -2,12 +2,14 @@
 Abstract base class for AI backends.
 """
 
+from __future__ import annotations
+
 import os
 import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from galangal.results import StageResult
 
@@ -22,7 +24,7 @@ PauseCheck = Callable[[], bool]
 class AIBackend(ABC):
     """Abstract base class for AI backends."""
 
-    def __init__(self, config: Optional["AIBackendConfig"] = None):
+    def __init__(self, config: AIBackendConfig | None = None):
         """
         Initialize the backend with optional configuration.
 
@@ -33,7 +35,7 @@ class AIBackend(ABC):
         self._config = config
 
     @property
-    def config(self) -> Optional["AIBackendConfig"]:
+    def config(self) -> AIBackendConfig | None:
         """Return the backend configuration."""
         return self._config
 
@@ -114,7 +116,7 @@ class AIBackend(ABC):
         prompt: str,
         timeout: int = 14400,
         max_turns: int = 200,
-        ui: Optional["StageUI"] = None,
+        ui: StageUI | None = None,
         pause_check: PauseCheck | None = None,
         stage: str | None = None,
         log_file: str | None = None,

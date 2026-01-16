@@ -2,7 +2,9 @@
 Gemini backend implementation (stub for future use).
 """
 
-from typing import TYPE_CHECKING, Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from galangal.ai.base import AIBackend, PauseCheck
 from galangal.results import StageResult
@@ -27,7 +29,7 @@ class GeminiBackend(AIBackend):
         prompt: str,
         timeout: int = 14400,
         max_turns: int = 200,
-        ui: Optional["StageUI"] = None,
+        ui: StageUI | None = None,
         pause_check: PauseCheck | None = None,
         stage: str | None = None,
     ) -> StageResult:

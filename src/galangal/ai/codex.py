@@ -5,11 +5,13 @@ Uses OpenAI's Codex in non-interactive mode with structured JSON output.
 See: https://developers.openai.com/codex/noninteractive
 """
 
+from __future__ import annotations
+
 import json
 import os
 import subprocess
 import time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from galangal.ai.base import AIBackend, PauseCheck
 from galangal.ai.subprocess import SubprocessRunner
@@ -166,7 +168,7 @@ class CodexBackend(AIBackend):
         prompt: str,
         timeout: int = 14400,
         max_turns: int = 200,
-        ui: Optional["StageUI"] = None,
+        ui: StageUI | None = None,
         pause_check: PauseCheck | None = None,
         stage: str | None = None,
         log_file: str | None = None,
