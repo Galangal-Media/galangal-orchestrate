@@ -90,12 +90,41 @@ class ClaudeBackend(AIBackend):
             except OSError as e:
                 logger.warning("failed_to_open_log_file", path=log_file, error=str(e))
 
+        def should_log_line(line: str) -> bool:
+            """Determine if a line should be logged (errors, warnings, results)."""
+            if not line.strip():
+                return False
+            try:
+                data = json.loads(line.strip())
+                msg_type = data.get("type", "")
+
+                # Always log errors and results
+                if msg_type in ("error", "result"):
+                    return True
+
+                # Log system messages (rate limiting, etc.)
+                if msg_type == "system":
+                    return True
+
+                # Log tool errors
+                if msg_type == "user":
+                    content = data.get("message", {}).get("content", [])
+                    for item in content:
+                        if item.get("type") == "tool_result" and item.get("is_error"):
+                            return True
+
+                return False
+            except (json.JSONDecodeError, KeyError, TypeError):
+                # Log non-JSON lines that look like errors
+                lower = line.lower()
+                return "error" in lower or "warning" in lower or "failed" in lower
+
         def on_output(line: str) -> None:
             """Process each output line."""
             if ui:
                 ui.add_raw_line(line)
-            # Stream to log file in real-time
-            if log_handle:
+            # Only log errors, warnings, and results to file
+            if log_handle and should_log_line(line):
                 try:
                     log_handle.write(line + "\n")
                     log_handle.flush()  # Ensure immediate write
