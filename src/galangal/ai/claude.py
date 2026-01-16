@@ -9,10 +9,13 @@ from typing import TYPE_CHECKING, Any, Optional
 from galangal.ai.base import AIBackend, PauseCheck
 from galangal.ai.subprocess import SubprocessRunner
 from galangal.config.loader import get_project_root
+from galangal.logging import get_logger
 from galangal.results import StageResult
 
 if TYPE_CHECKING:
     from galangal.ui.tui import StageUI
+
+logger = get_logger(__name__)
 
 
 class ClaudeBackend(AIBackend):
@@ -27,7 +30,7 @@ class ClaudeBackend(AIBackend):
         "--max-turns",
         "{max_turns}",
         "--permission-mode",
-        "acceptEdits",
+        "bypassPermissions",
     ]
 
     @property
@@ -72,7 +75,7 @@ class ClaudeBackend(AIBackend):
         max_turns: int = 200,
         ui: Optional["StageUI"] = None,
         pause_check: PauseCheck | None = None,
-        stage: Optional[str] = None,
+        stage: str | None = None,
     ) -> StageResult:
         """Invoke Claude Code with a prompt."""
         # State for output processing
@@ -133,6 +136,8 @@ class ClaudeBackend(AIBackend):
                 # Extract result from JSON stream
                 result_text = ""
                 for line in full_output.splitlines():
+                    if not line.strip():
+                        continue
                     try:
                         data = json.loads(line.strip())
                         if data.get("type") == "result":
@@ -140,7 +145,9 @@ class ClaudeBackend(AIBackend):
                             if ui:
                                 ui.set_turns(data.get("num_turns", 0))
                             break
-                    except (json.JSONDecodeError, KeyError):
+                    except json.JSONDecodeError as e:
+                        logger.debug("json_decode_error", error=str(e), line=line[:100])
+                    except (KeyError, TypeError):
                         pass
 
                 if result.exit_code == 0:
@@ -163,6 +170,9 @@ class ClaudeBackend(AIBackend):
         pending_tools: list[tuple[str, str]],
     ) -> None:
         """Process a single line of streaming output."""
+        if not line.strip():
+            return
+
         try:
             data = json.loads(line.strip())
             msg_type = data.get("type", "")
@@ -174,7 +184,9 @@ class ClaudeBackend(AIBackend):
             elif msg_type == "system":
                 self._handle_system_message(data, ui)
 
-        except (json.JSONDecodeError, KeyError, TypeError):
+        except json.JSONDecodeError as e:
+            logger.debug("json_decode_error", error=str(e), line=line[:100])
+        except (KeyError, TypeError):
             pass
 
     def _handle_assistant_message(

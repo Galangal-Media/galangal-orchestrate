@@ -19,7 +19,7 @@ from galangal.logging import (
     workflow_logger,
 )
 
-__version__ = "0.12.5"
+__version__ = "0.12.6"
 
 __all__ = [
     # Exceptions
