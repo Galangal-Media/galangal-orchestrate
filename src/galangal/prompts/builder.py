@@ -42,6 +42,38 @@ class PromptBuilder:
         self.override_dir = get_prompts_dir()
         self.defaults_dir = Path(__file__).parent / "defaults"
 
+    def _merge_with_base(self, project_prompt: str, base_prompt: str) -> str:
+        """Merge project prompt with base using # BASE marker.
+
+        If project_prompt contains '# BASE', splits around it and inserts
+        the base_prompt at that location. Content before the marker becomes
+        a header, content after becomes a footer.
+
+        Args:
+            project_prompt: Project-specific prompt that may contain # BASE marker.
+            base_prompt: Default/base prompt to insert at marker location.
+
+        Returns:
+            Merged prompt with base inserted at marker, or project_prompt unchanged
+            if no marker present.
+        """
+        if "# BASE" not in project_prompt:
+            return project_prompt
+
+        parts = project_prompt.split("# BASE", 1)
+        header = parts[0].rstrip()
+        footer = parts[1].lstrip() if len(parts) > 1 else ""
+
+        result_parts = []
+        if header:
+            result_parts.append(header)
+        if base_prompt:
+            result_parts.append(base_prompt)
+        if footer:
+            result_parts.append(footer)
+
+        return "\n\n".join(result_parts)
+
     def get_prompt_by_name(self, name: str) -> str:
         """Get a prompt by filename (without .md extension).
 
@@ -67,21 +99,10 @@ class PromptBuilder:
 
         project_prompt = project_path.read_text()
 
-        # Check for # BASE marker (supplement mode)
-        if "# BASE" in project_prompt:
-            parts = project_prompt.split("# BASE", 1)
-            header = parts[0].rstrip()
-            footer = parts[1].lstrip() if len(parts) > 1 else ""
-
-            result_parts = []
-            if header:
-                result_parts.append(header)
-            if base_prompt:
-                result_parts.append(base_prompt)
-            if footer:
-                result_parts.append(footer)
-
-            return "\n\n".join(result_parts)
+        # Merge with base (returns project_prompt unchanged if no # BASE marker)
+        merged = self._merge_with_base(project_prompt, base_prompt)
+        if merged != project_prompt:
+            return merged
 
         # No marker = full override
         return project_prompt
@@ -202,21 +223,10 @@ class PromptBuilder:
             if project_path.exists():
                 project_prompt = project_path.read_text()
 
-                # Check for # BASE marker (supplement mode)
-                if "# BASE" in project_prompt:
-                    parts = project_prompt.split("# BASE", 1)
-                    header = parts[0].rstrip()
-                    footer = parts[1].lstrip() if len(parts) > 1 else ""
-
-                    result_parts = []
-                    if header:
-                        result_parts.append(header)
-                    if base_prompt:
-                        result_parts.append(base_prompt)
-                    if footer:
-                        result_parts.append(footer)
-
-                    return "\n\n".join(result_parts)
+                # Merge with base (returns project_prompt unchanged if no # BASE marker)
+                merged = self._merge_with_base(project_prompt, base_prompt)
+                if merged != project_prompt:
+                    return merged
 
                 # No marker = full override
                 return project_prompt

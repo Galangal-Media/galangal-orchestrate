@@ -164,7 +164,7 @@ def get_next_stage(current: Stage, state: WorkflowState) -> Stage | None:
     """
     Determine the next stage in the workflow pipeline.
 
-    Walks the STAGE_ORDER list starting from the current stage, skipping
+    Iterates through STAGE_ORDER starting after current stage, skipping
     stages that should be bypassed based on (in order):
     1. Config-level skipping (config.stages.skip)
     2. Task type skipping (e.g., DOCS tasks skip TEST, BENCHMARK)
@@ -177,9 +177,6 @@ def get_next_stage(current: Stage, state: WorkflowState) -> Stage | None:
     happen here during planning, ensuring the progress bar accurately
     reflects which stages will run.
 
-    This function is recursive - if the next stage should be skipped, it
-    calls itself to find the next non-skipped stage.
-
     Args:
         current: The stage that just completed.
         state: Current workflow state containing task_name and task_type.
@@ -190,51 +187,48 @@ def get_next_stage(current: Stage, state: WorkflowState) -> Stage | None:
     config = get_config()
     task_name = state.task_name
     task_type = state.task_type
-    idx = STAGE_ORDER.index(current)
+    start_idx = STAGE_ORDER.index(current) + 1
+    config_skip_stages = [s.upper() for s in config.stages.skip]
+    runner = ValidationRunner()  # Create once for all skip_if checks
 
-    if idx >= len(STAGE_ORDER) - 1:
-        return None
+    for next_stage in STAGE_ORDER[start_idx:]:
+        # Check 1: config-level skipping
+        if next_stage.value in config_skip_stages:
+            continue
 
-    next_stage = STAGE_ORDER[idx + 1]
+        # Check 2: task type skipping
+        if should_skip_for_task_type(next_stage, task_type):
+            continue
 
-    # Check config-level skipping
-    if next_stage.value in [s.upper() for s in config.stages.skip]:
-        return get_next_stage(next_stage, state)
+        # Check 3: fast-track skipping (minor rollback - skip stages that already passed)
+        if state.should_fast_track_skip(next_stage):
+            continue
 
-    # Check task type skipping
-    if should_skip_for_task_type(next_stage, task_type):
-        return get_next_stage(next_stage, state)
-
-    # Check fast-track skipping (minor rollback - skip stages that already passed)
-    if state.should_fast_track_skip(next_stage):
-        return get_next_stage(next_stage, state)
-
-    # Check PM-driven stage plan (STAGE_PLAN.md recommendations)
-    if state.stage_plan and next_stage.value in state.stage_plan:
-        plan_entry = state.stage_plan[next_stage.value]
-        if plan_entry.get("action") == "skip":
-            return get_next_stage(next_stage, state)
-
-    # Check manual skip artifacts (e.g., MIGRATION_SKIP.md from galangal skip-*)
-    # Uses metadata as source of truth for which stages have skip artifacts
-    stage_metadata = next_stage.metadata
-    if stage_metadata.skip_artifact and artifact_exists(stage_metadata.skip_artifact, task_name):
-        return get_next_stage(next_stage, state)
-
-    # For conditional stages, if PM explicitly said "run", skip the glob check
-    if next_stage in CONDITIONAL_STAGES:
+        # Check 4: PM-driven stage plan (STAGE_PLAN.md recommendations)
         if state.stage_plan and next_stage.value in state.stage_plan:
-            plan_entry = state.stage_plan[next_stage.value]
-            if plan_entry.get("action") == "run":
-                return next_stage  # PM says run, skip the glob check
+            if state.stage_plan[next_stage.value].get("action") == "skip":
+                continue
 
-    # Check skip_if conditions for ALL stages (glob-based skipping)
-    # This is the single place where skip_if is evaluated
-    runner = ValidationRunner()
-    if runner.should_skip_stage(next_stage.value.upper(), task_name):
-        return get_next_stage(next_stage, state)
+        # Check 5: manual skip artifacts (e.g., MIGRATION_SKIP.md from galangal skip-*)
+        # Uses metadata as source of truth for which stages have skip artifacts
+        stage_metadata = next_stage.metadata
+        if stage_metadata.skip_artifact and artifact_exists(stage_metadata.skip_artifact, task_name):
+            continue
 
-    return next_stage
+        # Check 6: for conditional stages, if PM explicitly said "run", skip the glob check
+        if next_stage in CONDITIONAL_STAGES:
+            if state.stage_plan and next_stage.value in state.stage_plan:
+                if state.stage_plan[next_stage.value].get("action") == "run":
+                    return next_stage  # PM says run, skip the glob check
+
+        # Check 7: skip_if conditions for ALL stages (glob-based skipping)
+        # This is the single place where skip_if is evaluated
+        if runner.should_skip_stage(next_stage.value.upper(), task_name):
+            continue
+
+        return next_stage
+
+    return None
 
 
 def execute_stage(
@@ -355,7 +349,7 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     with open(log_file, "w") as f:
         f.write(f"=== Prompt ===\n{prompt}\n\n")
         f.write(f"=== Backend: {backend.name} ===\n")
-        f.write(f"=== Streaming Output ===\n")
+        f.write("=== Streaming Output ===\n")
 
     tui_app.add_activity(f"Using {backend.name} backend", "🤖")
 

@@ -7,24 +7,22 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Debug mode is enabled via GALANGAL_DEBUG environment variable
-_debug_enabled: bool | None = None
+# Debug log file path (lazily initialized)
 _debug_file: Path | None = None
 
 
 def is_debug_enabled() -> bool:
     """Check if debug mode is enabled.
 
-    Note: This always checks the environment variable (no caching) to handle
+    Always checks the environment variable (no caching) to handle
     cases where debug mode is enabled after initial import.
     """
     return os.environ.get("GALANGAL_DEBUG", "").lower() in ("1", "true", "yes")
 
 
 def reset_debug_state() -> None:
-    """Reset debug state. Called when debug mode is enabled via CLI."""
-    global _debug_enabled, _debug_file
-    _debug_enabled = None
+    """Reset debug file path. Called when debug mode is enabled via CLI."""
+    global _debug_file
     _debug_file = None
 
 
