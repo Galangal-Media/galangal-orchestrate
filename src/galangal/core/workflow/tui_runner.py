@@ -356,9 +356,7 @@ async def _handle_workflow_event(
     if event.type == EventType.MAX_RETRIES_EXCEEDED:
         app.show_stage_complete(state.stage.value, False)
         max_retries = event.data.get("max_retries", config.stages.max_retries)
-        choice = await _handle_max_retries_exceeded(
-            app, state, event.message, max_retries
-        )
+        choice = await _handle_max_retries_exceeded(app, state, event.message, max_retries)
 
         if choice == "retry":
             state.reset_attempts()
@@ -448,8 +446,7 @@ async def _handle_user_interrupts(app: WorkflowTUIApp, engine: WorkflowEngine) -
 
         if len(valid_targets) > 1:
             options_text = "\n".join(
-                f"  [{i + 1}] {s.value}"
-                + (" (recommended)" if s == default_target else "")
+                f"  [{i + 1}] {s.value}" + (" (recommended)" if s == default_target else "")
                 for i, s in enumerate(valid_targets)
             )
             target_input = await app.text_input_async(
@@ -457,7 +454,11 @@ async def _handle_user_interrupts(app: WorkflowTUIApp, engine: WorkflowEngine) -
             )
             try:
                 target_idx = int(target_input or "1") - 1
-                target_stage = valid_targets[target_idx] if 0 <= target_idx < len(valid_targets) else default_target
+                target_stage = (
+                    valid_targets[target_idx]
+                    if 0 <= target_idx < len(valid_targets)
+                    else default_target
+                )
             except (ValueError, TypeError):
                 target_stage = default_target
         else:
@@ -512,9 +513,7 @@ async def _handle_user_interrupts(app: WorkflowTUIApp, engine: WorkflowEngine) -
     # Handle manual edit pause (Ctrl+E)
     if app._manual_edit_requested:
         app.add_activity("Paused for manual editing", "✏️")
-        app.show_message(
-            "Workflow paused - make your edits, then press Enter to continue", "info"
-        )
+        app.show_message("Workflow paused - make your edits, then press Enter to continue", "info")
 
         await app.text_input_async("Press Enter when ready to continue...", "")
 

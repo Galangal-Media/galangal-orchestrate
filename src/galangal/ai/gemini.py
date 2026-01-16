@@ -29,7 +29,7 @@ class GeminiBackend(AIBackend):
         max_turns: int = 200,
         ui: Optional["StageUI"] = None,
         pause_check: PauseCheck | None = None,
-        stage: Optional[str] = None,
+        stage: str | None = None,
     ) -> StageResult:
         """Invoke Gemini with a prompt."""
         # TODO: Implement Gemini invocation

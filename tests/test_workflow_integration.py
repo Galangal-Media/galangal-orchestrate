@@ -10,11 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from galangal.config.schema import GalangalConfig, StageConfig
 from galangal.core.state import (
-    STAGE_ORDER,
     Stage,
     TaskType,
     WorkflowState,
@@ -29,7 +26,6 @@ from galangal.core.workflow.core import (
 from galangal.results import StageResult, StageResultType
 from galangal.ui.tui import StageUI
 from galangal.validation.runner import ValidationResult
-
 
 # ============================================================================
 # Helper functions and classes (duplicated from conftest for direct import)
@@ -138,10 +134,6 @@ class MockAIBackend:
     def generate_text(self, prompt: str, timeout: int = 30) -> str:
         self.calls.append((prompt[:100], None, None))
         return "mock-generated-text"
-
-    @property
-    def name(self) -> str:
-        return "mock"
 
 
 class TestWorkflowStageProgression:
@@ -257,7 +249,9 @@ class TestExecuteStageWithMockBackend:
         create_artifact(sample_task, "PLAN.md", "# Plan\n\nTest plan")
 
         mock_backend = MockAIBackend(
-            default_response=StageResult.create_success("DEV completed", output="Implementation done")
+            default_response=StageResult.create_success(
+                "DEV completed", output="Implementation done"
+            )
         )
 
         with patch("galangal.core.workflow.core.get_config", return_value=sample_config):
@@ -289,9 +283,7 @@ class TestExecuteStageWithMockBackend:
         state = make_state(task_name="test-task", stage=Stage.QA)
         mock_ui = MockStageUI()
 
-        mock_backend = MockAIBackend(
-            default_response=StageResult.create_success("QA completed")
-        )
+        mock_backend = MockAIBackend(default_response=StageResult.create_success("QA completed"))
 
         with patch("galangal.core.workflow.core.get_config", return_value=sample_config):
             with patch("galangal.core.workflow.core.get_task_dir", return_value=sample_task):
@@ -316,9 +308,7 @@ class TestExecuteStageWithMockBackend:
         assert result.type == StageResultType.ROLLBACK_REQUIRED
         assert result.rollback_to == Stage.DEV
 
-    def test_execute_preflight_stage(
-        self, sample_task: Path, sample_config: GalangalConfig
-    ):
+    def test_execute_preflight_stage(self, sample_task: Path, sample_config: GalangalConfig):
         """Test PREFLIGHT stage runs validation directly without AI."""
         state = make_state(task_name="test-task", stage=Stage.PREFLIGHT)
         mock_ui = MockStageUI()
@@ -416,9 +406,7 @@ class TestRollbackIntegration:
 class TestRetryBehavior:
     """Tests for retry logic in workflow execution."""
 
-    def test_retry_context_added_to_prompt(
-        self, sample_task: Path, sample_config: GalangalConfig
-    ):
+    def test_retry_context_added_to_prompt(self, sample_task: Path, sample_config: GalangalConfig):
         """Test that retry context is added to prompt on subsequent attempts."""
         state = make_state(task_name="test-task", stage=Stage.DEV, attempt=2)
         state.last_failure = "Tests failed with error: AssertionError"
@@ -439,9 +427,7 @@ class TestRetryBehavior:
                     ):
                         mock_runner = MagicMock()
                         mock_runner.should_skip_stage.return_value = False
-                        mock_runner.validate_stage.return_value = ValidationResult(
-                            True, "passed"
-                        )
+                        mock_runner.validate_stage.return_value = ValidationResult(True, "passed")
                         with patch(
                             "galangal.core.workflow.core.ValidationRunner",
                             return_value=mock_runner,
@@ -450,7 +436,6 @@ class TestRetryBehavior:
 
         # Check that backend was called with retry context in prompt
         assert len(mock_backend.calls) > 0
-        prompt = mock_backend.calls[0][0]
         # The prompt should mention it's a retry
         # (Note: actual prompt content depends on PromptBuilder)
 

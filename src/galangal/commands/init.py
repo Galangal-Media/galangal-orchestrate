@@ -13,10 +13,18 @@ from galangal.ui.console import console, print_info, print_success
 
 def cmd_init(args: argparse.Namespace) -> int:
     """Initialize galangal in the current project."""
-    console.print("\n[bold cyan]╔══════════════════════════════════════════════════════════════╗[/bold cyan]")
-    console.print("[bold cyan]║[/bold cyan]              [bold]Galangal Orchestrate[/bold]                          [bold cyan]║[/bold cyan]")
-    console.print("[bold cyan]║[/bold cyan]          AI-Driven Development Workflow                     [bold cyan]║[/bold cyan]")
-    console.print("[bold cyan]╚══════════════════════════════════════════════════════════════╝[/bold cyan]\n")
+    console.print(
+        "\n[bold cyan]╔══════════════════════════════════════════════════════════════╗[/bold cyan]"
+    )
+    console.print(
+        "[bold cyan]║[/bold cyan]              [bold]Galangal Orchestrate[/bold]                          [bold cyan]║[/bold cyan]"
+    )
+    console.print(
+        "[bold cyan]║[/bold cyan]          AI-Driven Development Workflow                     [bold cyan]║[/bold cyan]"
+    )
+    console.print(
+        "[bold cyan]╚══════════════════════════════════════════════════════════════╝[/bold cyan]\n"
+    )
 
     project_root = find_project_root()
     galangal_dir = project_root / ".galangal"
@@ -58,9 +66,11 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     console.print("\n[bold green]Initialization complete![/bold green]\n")
     console.print("To customize prompts for your project:")
-    console.print("  [cyan]galangal prompts export[/cyan]    # Export defaults to .galangal/prompts/")
+    console.print(
+        "  [cyan]galangal prompts export[/cyan]    # Export defaults to .galangal/prompts/"
+    )
     console.print("\nNext steps:")
-    console.print("  [cyan]galangal start \"Your first task\"[/cyan]")
+    console.print('  [cyan]galangal start "Your first task"[/cyan]')
     console.print("\nFor GitHub Issues integration:")
     console.print("  [cyan]galangal github setup[/cyan]      # Create labels and configure")
 

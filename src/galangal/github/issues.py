@@ -112,13 +112,20 @@ def list_issues(
     """
     client = GitHubClient()
 
-    data = client.run_json_command([
-        "issue", "list",
-        "--label", label,
-        "--state", state,
-        "--limit", str(limit),
-        "--json", "number,title,body,labels,state,url,author",
-    ])
+    data = client.run_json_command(
+        [
+            "issue",
+            "list",
+            "--label",
+            label,
+            "--state",
+            state,
+            "--limit",
+            str(limit),
+            "--json",
+            "number,title,body,labels,state,url,author",
+        ]
+    )
 
     if not data:
         return []
@@ -139,11 +146,15 @@ def get_issue(issue_number: int) -> GitHubIssue | None:
     client = GitHubClient()
 
     try:
-        data = client.run_json_command([
-            "issue", "view",
-            str(issue_number),
-            "--json", "number,title,body,labels,state,url,author",
-        ])
+        data = client.run_json_command(
+            [
+                "issue",
+                "view",
+                str(issue_number),
+                "--json",
+                "number,title,body,labels,state,url,author",
+            ]
+        )
 
         if data:
             return GitHubIssue.from_dict(data)

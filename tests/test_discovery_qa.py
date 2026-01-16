@@ -12,13 +12,11 @@ This module tests:
 
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 
 from galangal.config.schema import GalangalConfig, TaskTypeSettings
 from galangal.core.state import Stage, TaskType, WorkflowState
-
 
 # -----------------------------------------------------------------------------
 # State Q&A Fields Tests
@@ -265,9 +263,7 @@ class TestDiscoveryLogWriting:
             lambda name: task_dir,
         )
 
-        qa_rounds = [
-            {"questions": ["What auth?", "What scope?"], "answers": ["JWT", "API only"]}
-        ]
+        qa_rounds = [{"questions": ["What auth?", "What scope?"], "answers": ["JWT", "API only"]}]
 
         _write_discovery_log("test-task", qa_rounds)
 

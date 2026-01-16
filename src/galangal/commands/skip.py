@@ -29,9 +29,13 @@ def cmd_skip_to(args: argparse.Namespace) -> int:
 
     # Warn if skipping backwards or forwards
     if target_idx < current_idx:
-        console.print(f"[yellow]⚠️  Going backwards: {current_stage.value} → {target_stage.value}[/yellow]")
+        console.print(
+            f"[yellow]⚠️  Going backwards: {current_stage.value} → {target_stage.value}[/yellow]"
+        )
     elif target_idx > current_idx:
-        console.print(f"[yellow]⚠️  Skipping forward: {current_stage.value} → {target_stage.value}[/yellow]")
+        console.print(
+            f"[yellow]⚠️  Skipping forward: {current_stage.value} → {target_stage.value}[/yellow]"
+        )
     else:
         console.print(f"[dim]Re-running current stage: {target_stage.value}[/dim]")
 

@@ -9,7 +9,6 @@ from galangal.config.schema import GalangalConfig, StageConfig
 from galangal.core.state import Stage, TaskType, WorkflowState
 from galangal.core.workflow.core import get_next_stage, handle_rollback
 from galangal.results import StageResult, StageResultType
-from galangal.validation.runner import ValidationResult
 
 
 def make_state(
@@ -210,7 +209,9 @@ class TestGetNextStage:
                 # Mock validation runner to not skip any stages
                 mock_runner = MagicMock()
                 mock_runner.should_skip_stage.return_value = False
-                with patch("galangal.core.workflow.core.ValidationRunner", return_value=mock_runner):
+                with patch(
+                    "galangal.core.workflow.core.ValidationRunner", return_value=mock_runner
+                ):
                     next_stage = get_next_stage(Stage.PM, state)
                     assert next_stage == Stage.DESIGN
 
@@ -231,7 +232,9 @@ class TestGetNextStage:
             with patch("galangal.core.workflow.core.artifact_exists", return_value=False):
                 mock_runner = MagicMock()
                 mock_runner.should_skip_stage.return_value = False
-                with patch("galangal.core.workflow.core.ValidationRunner", return_value=mock_runner):
+                with patch(
+                    "galangal.core.workflow.core.ValidationRunner", return_value=mock_runner
+                ):
                     next_stage = get_next_stage(Stage.PM, state)
                     # Should skip DESIGN and go to PREFLIGHT
                     assert next_stage == Stage.PREFLIGHT
@@ -246,7 +249,9 @@ class TestGetNextStage:
             with patch("galangal.core.workflow.core.artifact_exists", return_value=False):
                 mock_runner = MagicMock()
                 mock_runner.should_skip_stage.return_value = False
-                with patch("galangal.core.workflow.core.ValidationRunner", return_value=mock_runner):
+                with patch(
+                    "galangal.core.workflow.core.ValidationRunner", return_value=mock_runner
+                ):
                     next_stage = get_next_stage(Stage.PM, state)
                     # DOCS goes directly to DOCS stage
                     assert next_stage == Stage.DOCS
@@ -259,10 +264,15 @@ class TestGetNextStage:
             return name == "MIGRATION_SKIP.md"
 
         with patch("galangal.core.workflow.core.get_config", return_value=self.config):
-            with patch("galangal.core.workflow.core.artifact_exists", side_effect=artifact_exists_side_effect):
+            with patch(
+                "galangal.core.workflow.core.artifact_exists",
+                side_effect=artifact_exists_side_effect,
+            ):
                 mock_runner = MagicMock()
                 mock_runner.should_skip_stage.return_value = False
-                with patch("galangal.core.workflow.core.ValidationRunner", return_value=mock_runner):
+                with patch(
+                    "galangal.core.workflow.core.ValidationRunner", return_value=mock_runner
+                ):
                     # After TEST comes MIGRATION, but should skip due to artifact
                     # Actual next depends on stage order, but MIGRATION should be skipped
                     next_stage = get_next_stage(Stage.DEV, state)
@@ -278,7 +288,9 @@ class TestGetNextStage:
                 mock_runner = MagicMock()
                 # Return True for MIGRATION to indicate it should be skipped
                 mock_runner.should_skip_stage.return_value = True
-                with patch("galangal.core.workflow.core.ValidationRunner", return_value=mock_runner):
+                with patch(
+                    "galangal.core.workflow.core.ValidationRunner", return_value=mock_runner
+                ):
                     next_stage = get_next_stage(Stage.DEV, state)
                     # All stages get skipped due to should_skip_stage returning True
                     # This will recurse until COMPLETE

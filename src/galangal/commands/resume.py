@@ -22,7 +22,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     console.print(f"[dim]Type:[/dim] {state.task_type.display_name()}")
 
     # Pass skip_discovery flag via state attribute
-    if getattr(args, 'skip_discovery', False):
+    if getattr(args, "skip_discovery", False):
         state._skip_discovery = True
         console.print("[dim]Discovery Q&A:[/dim] skipped")
 

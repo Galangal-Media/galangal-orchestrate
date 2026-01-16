@@ -62,7 +62,9 @@ class TestValidationRunnerDefaults:
                 def exists_side_effect(name, task):
                     return name == "SPEC.md"
 
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_side_effect):
+                with patch(
+                    "galangal.validation.runner.artifact_exists", side_effect=exists_side_effect
+                ):
                     result = runner._validate_with_defaults("PM", "test-task")
                     assert result.success is False
                     assert "PLAN.md" in result.message
@@ -81,7 +83,9 @@ class TestValidationRunnerDefaults:
                 def exists_side_effect(name, task):
                     return name == "DESIGN_SKIP.md"
 
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_side_effect):
+                with patch(
+                    "galangal.validation.runner.artifact_exists", side_effect=exists_side_effect
+                ):
                     result = runner._validate_with_defaults("DESIGN", "test-task")
                     assert result.success is True
                     assert "skipped" in result.message.lower()
@@ -110,13 +114,17 @@ class TestValidationRunnerDefaults:
                 def exists_decision(name, task):
                     return name == "QA_DECISION"
 
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                with patch(
+                    "galangal.validation.runner.artifact_exists", side_effect=exists_decision
+                ):
                     with patch("galangal.validation.runner.read_artifact", return_value="PASS"):
                         result = runner._validate_with_defaults("QA", "test-task")
                         assert result.success is True
 
                 # Decision file with FAIL
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                with patch(
+                    "galangal.validation.runner.artifact_exists", side_effect=exists_decision
+                ):
                     with patch("galangal.validation.runner.read_artifact", return_value="FAIL"):
                         result = runner._validate_with_defaults("QA", "test-task")
                         assert result.success is False
@@ -126,8 +134,12 @@ class TestValidationRunnerDefaults:
                 def exists_report_only(name, task):
                     return name == "QA_REPORT.md"
 
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_report_only):
-                    with patch("galangal.validation.runner.read_artifact", return_value="Status: PASS"):
+                with patch(
+                    "galangal.validation.runner.artifact_exists", side_effect=exists_report_only
+                ):
+                    with patch(
+                        "galangal.validation.runner.read_artifact", return_value="Status: PASS"
+                    ):
                         result = runner._validate_with_defaults("QA", "test-task")
                         assert result.needs_user_decision is True
 
@@ -141,20 +153,26 @@ class TestValidationRunnerDefaults:
                 def exists_decision(name, task):
                     return name == "SECURITY_DECISION"
 
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                with patch(
+                    "galangal.validation.runner.artifact_exists", side_effect=exists_decision
+                ):
                     with patch("galangal.validation.runner.read_artifact", return_value="APPROVED"):
                         result = runner._validate_with_defaults("SECURITY", "test-task")
                         assert result.success is True
 
                 # Decision file with REJECTED
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                with patch(
+                    "galangal.validation.runner.artifact_exists", side_effect=exists_decision
+                ):
                     with patch("galangal.validation.runner.read_artifact", return_value="REJECTED"):
                         result = runner._validate_with_defaults("SECURITY", "test-task")
                         assert result.success is False
                         assert result.rollback_to == "DEV"
 
                 # Decision file with BLOCKED
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                with patch(
+                    "galangal.validation.runner.artifact_exists", side_effect=exists_decision
+                ):
                     with patch("galangal.validation.runner.read_artifact", return_value="BLOCKED"):
                         result = runner._validate_with_defaults("SECURITY", "test-task")
                         assert result.success is False
@@ -164,8 +182,13 @@ class TestValidationRunnerDefaults:
                 def exists_checklist_only(name, task):
                     return name == "SECURITY_CHECKLIST.md"
 
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_checklist_only):
-                    with patch("galangal.validation.runner.read_artifact", return_value="## Security Review\nReview done."):
+                with patch(
+                    "galangal.validation.runner.artifact_exists", side_effect=exists_checklist_only
+                ):
+                    with patch(
+                        "galangal.validation.runner.read_artifact",
+                        return_value="## Security Review\nReview done.",
+                    ):
                         result = runner._validate_with_defaults("SECURITY", "test-task")
                         assert result.needs_user_decision is True
 
@@ -200,7 +223,9 @@ class TestValidationRunnerQAReport:
                 def exists_decision(name, task):
                     return name == "QA_DECISION"
 
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                with patch(
+                    "galangal.validation.runner.artifact_exists", side_effect=exists_decision
+                ):
                     with patch("galangal.validation.runner.read_artifact", return_value="PASS"):
                         result = runner._check_qa_report("test-task")
                         assert result.success is True
@@ -214,7 +239,9 @@ class TestValidationRunnerQAReport:
                 def exists_decision(name, task):
                     return name == "QA_DECISION"
 
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_decision):
+                with patch(
+                    "galangal.validation.runner.artifact_exists", side_effect=exists_decision
+                ):
                     with patch("galangal.validation.runner.read_artifact", return_value="FAIL"):
                         result = runner._check_qa_report("test-task")
                         assert result.success is False
@@ -229,8 +256,12 @@ class TestValidationRunnerQAReport:
                 def exists_report_only(name, task):
                     return name == "QA_REPORT.md"
 
-                with patch("galangal.validation.runner.artifact_exists", side_effect=exists_report_only):
-                    with patch("galangal.validation.runner.read_artifact", return_value="QA Report content"):
+                with patch(
+                    "galangal.validation.runner.artifact_exists", side_effect=exists_report_only
+                ):
+                    with patch(
+                        "galangal.validation.runner.read_artifact", return_value="QA Report content"
+                    ):
                         result = runner._check_qa_report("test-task")
                         assert result.needs_user_decision is True
 
@@ -265,7 +296,9 @@ class TestValidationRunnerArtifactMarkers:
                     fail_marker="REJECTED",
                 )
 
-                with patch("galangal.validation.runner.read_artifact", return_value="Decision: APPROVED"):
+                with patch(
+                    "galangal.validation.runner.read_artifact", return_value="Decision: APPROVED"
+                ):
                     result = runner._check_artifact_markers(stage_config, "test-task")
                     assert result.success is True
 
@@ -281,7 +314,9 @@ class TestValidationRunnerArtifactMarkers:
                     fail_marker="REJECTED",
                 )
 
-                with patch("galangal.validation.runner.read_artifact", return_value="Decision: REJECTED"):
+                with patch(
+                    "galangal.validation.runner.read_artifact", return_value="Decision: REJECTED"
+                ):
                     result = runner._check_artifact_markers(stage_config, "test-task")
                     assert result.success is False
                     assert result.rollback_to == "DEV"
@@ -449,7 +484,9 @@ class TestValidationRunnerPreflightChecks:
             (project_root / "pyproject.toml").touch()
 
             with patch("galangal.validation.runner.get_config", return_value=self.config):
-                with patch("galangal.validation.runner.get_project_root", return_value=project_root):
+                with patch(
+                    "galangal.validation.runner.get_project_root", return_value=project_root
+                ):
                     runner = ValidationRunner()
 
                     checks = [PreflightCheck(name="pyproject", path_exists="pyproject.toml")]
@@ -464,7 +501,9 @@ class TestValidationRunnerPreflightChecks:
             project_root = Path(tmpdir)
 
             with patch("galangal.validation.runner.get_config", return_value=self.config):
-                with patch("galangal.validation.runner.get_project_root", return_value=project_root):
+                with patch(
+                    "galangal.validation.runner.get_project_root", return_value=project_root
+                ):
                     runner = ValidationRunner()
 
                     checks = [PreflightCheck(name="pyproject", path_exists="pyproject.toml")]
@@ -496,7 +535,9 @@ class TestValidationRunnerPreflightChecks:
             project_root = Path(tmpdir)
 
             with patch("galangal.validation.runner.get_config", return_value=self.config):
-                with patch("galangal.validation.runner.get_project_root", return_value=project_root):
+                with patch(
+                    "galangal.validation.runner.get_project_root", return_value=project_root
+                ):
                     runner = ValidationRunner()
 
                     checks = [

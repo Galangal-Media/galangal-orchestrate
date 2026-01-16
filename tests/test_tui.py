@@ -119,7 +119,9 @@ class TestPromptActions:
         """Test that pressing 1 triggers option 1 callback."""
         async with app.run_test() as pilot:
             callback_result = []
-            app.show_prompt(PromptType.PLAN_APPROVAL, "Test prompt", lambda v: callback_result.append(v))
+            app.show_prompt(
+                PromptType.PLAN_APPROVAL, "Test prompt", lambda v: callback_result.append(v)
+            )
 
             await pilot.pause()
 
@@ -134,7 +136,9 @@ class TestPromptActions:
         """Test that pressing 2 triggers option 2 callback."""
         async with app.run_test() as pilot:
             callback_result = []
-            app.show_prompt(PromptType.PLAN_APPROVAL, "Test prompt", lambda v: callback_result.append(v))
+            app.show_prompt(
+                PromptType.PLAN_APPROVAL, "Test prompt", lambda v: callback_result.append(v)
+            )
 
             await pilot.pause()
 
@@ -149,7 +153,9 @@ class TestPromptActions:
         """Test that pressing Escape triggers quit callback."""
         async with app.run_test() as pilot:
             callback_result = []
-            app.show_prompt(PromptType.PLAN_APPROVAL, "Test prompt", lambda v: callback_result.append(v))
+            app.show_prompt(
+                PromptType.PLAN_APPROVAL, "Test prompt", lambda v: callback_result.append(v)
+            )
 
             await pilot.pause()
 

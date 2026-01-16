@@ -2,7 +2,7 @@
 
 import argparse
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from galangal.core.state import Stage, TaskType, WorkflowState
 
@@ -114,7 +114,9 @@ class TestCmdSkipTo:
 
         args = argparse.Namespace(stage="DEV", force=False, resume=False)
 
-        with patch("galangal.commands.skip.ensure_active_task_with_state", return_value=(None, None)):
+        with patch(
+            "galangal.commands.skip.ensure_active_task_with_state", return_value=(None, None)
+        ):
             result = cmd_skip_to(args)
             assert result == 1
 
@@ -125,7 +127,10 @@ class TestCmdSkipTo:
         args = argparse.Namespace(stage="INVALID", force=False, resume=False)
         state = make_state(stage=Stage.DEV)
 
-        with patch("galangal.commands.skip.ensure_active_task_with_state", return_value=("test-task", state)):
+        with patch(
+            "galangal.commands.skip.ensure_active_task_with_state",
+            return_value=("test-task", state),
+        ):
             with patch("galangal.ui.console.print_error") as mock_error:
                 with patch("galangal.commands.skip.console.print"):
                     result = cmd_skip_to(args)
@@ -139,7 +144,10 @@ class TestCmdSkipTo:
         args = argparse.Namespace(stage="COMPLETE", force=False, resume=False)
         state = make_state(stage=Stage.DEV)
 
-        with patch("galangal.commands.skip.ensure_active_task_with_state", return_value=("test-task", state)):
+        with patch(
+            "galangal.commands.skip.ensure_active_task_with_state",
+            return_value=("test-task", state),
+        ):
             with patch("galangal.ui.console.print_error") as mock_error:
                 result = cmd_skip_to(args)
                 assert result == 1
@@ -152,7 +160,10 @@ class TestCmdSkipTo:
         args = argparse.Namespace(stage="QA", force=True, resume=False)
         state = make_state(stage=Stage.DEV)
 
-        with patch("galangal.commands.skip.ensure_active_task_with_state", return_value=("test-task", state)):
+        with patch(
+            "galangal.commands.skip.ensure_active_task_with_state",
+            return_value=("test-task", state),
+        ):
             with patch("galangal.commands.skip.save_state") as mock_save:
                 with patch("galangal.commands.skip.print_success"):
                     with patch("galangal.commands.skip.console.print"):
@@ -170,7 +181,10 @@ class TestCmdSkipTo:
         args = argparse.Namespace(stage="QA", force=False, resume=False)
         state = make_state(stage=Stage.DEV)
 
-        with patch("galangal.commands.skip.ensure_active_task_with_state", return_value=("test-task", state)):
+        with patch(
+            "galangal.commands.skip.ensure_active_task_with_state",
+            return_value=("test-task", state),
+        ):
             with patch("galangal.commands.skip.Prompt.ask", return_value="n"):
                 with patch("galangal.commands.skip.print_info") as mock_info:
                     with patch("galangal.commands.skip.console.print"):
@@ -184,8 +198,8 @@ class TestCreateTaskBranch:
 
     def test_creates_new_branch(self):
         """Test creating a new branch when it doesn't exist."""
-        from galangal.core.tasks import create_task_branch
         from galangal.config.schema import GalangalConfig
+        from galangal.core.tasks import create_task_branch
 
         config = GalangalConfig()
 
@@ -206,8 +220,8 @@ class TestCreateTaskBranch:
 
     def test_checks_out_existing_branch(self):
         """Test that existing branch is checked out instead of just returning success."""
-        from galangal.core.tasks import create_task_branch
         from galangal.config.schema import GalangalConfig
+        from galangal.core.tasks import create_task_branch
 
         config = GalangalConfig()
 
@@ -229,8 +243,8 @@ class TestCreateTaskBranch:
 
     def test_existing_branch_checkout_failure(self):
         """Test error handling when existing branch checkout fails."""
-        from galangal.core.tasks import create_task_branch
         from galangal.config.schema import GalangalConfig
+        from galangal.core.tasks import create_task_branch
 
         config = GalangalConfig()
 
@@ -251,8 +265,8 @@ class TestBaseBranchCheck:
 
     def test_is_on_base_branch_true(self):
         """Test is_on_base_branch returns True when on base branch."""
-        from galangal.core.tasks import is_on_base_branch
         from galangal.config.schema import GalangalConfig
+        from galangal.core.tasks import is_on_base_branch
 
         config = GalangalConfig()  # default base_branch is "main"
 
@@ -266,8 +280,8 @@ class TestBaseBranchCheck:
 
     def test_is_on_base_branch_false(self):
         """Test is_on_base_branch returns False when on different branch."""
-        from galangal.core.tasks import is_on_base_branch
         from galangal.config.schema import GalangalConfig
+        from galangal.core.tasks import is_on_base_branch
 
         config = GalangalConfig()
 
@@ -281,8 +295,8 @@ class TestBaseBranchCheck:
 
     def test_switch_to_base_branch_success(self):
         """Test switch_to_base_branch succeeds."""
-        from galangal.core.tasks import switch_to_base_branch
         from galangal.config.schema import GalangalConfig
+        from galangal.core.tasks import switch_to_base_branch
 
         config = GalangalConfig()
 
@@ -295,13 +309,16 @@ class TestBaseBranchCheck:
 
     def test_switch_to_base_branch_failure(self):
         """Test switch_to_base_branch handles failure."""
-        from galangal.core.tasks import switch_to_base_branch
         from galangal.config.schema import GalangalConfig
+        from galangal.core.tasks import switch_to_base_branch
 
         config = GalangalConfig()
 
         with patch("galangal.core.tasks.get_config", return_value=config):
-            with patch("galangal.core.tasks.run_command", return_value=(1, "", "error: uncommitted changes")):
+            with patch(
+                "galangal.core.tasks.run_command",
+                return_value=(1, "", "error: uncommitted changes"),
+            ):
                 success, msg = switch_to_base_branch()
 
                 assert success is False

@@ -194,9 +194,7 @@ def create_pull_request(
         if "already exists" in combined_output:
             return True, "PR already exists"
         if "pull request create failed" in combined_output:
-            code2, pr_url, _ = run_command(
-                ["gh", "pr", "view", "--json", "url", "-q", ".url"]
-            )
+            code2, pr_url, _ = run_command(["gh", "pr", "view", "--json", "url", "-q", ".url"])
             if code2 == 0 and pr_url.strip():
                 return True, pr_url.strip()
         return False, f"Failed to create PR: {err or out}"
@@ -207,6 +205,7 @@ def create_pull_request(
     if github_issue and pr_url:
         try:
             from galangal.github.issues import mark_issue_pr_created
+
             mark_issue_pr_created(github_issue, pr_url)
         except Exception:
             pass  # Non-critical
@@ -259,7 +258,9 @@ Changes: {change_count} files"""
     return True, f"Committed {change_count} files"
 
 
-def finalize_task(task_name: str, state, force: bool = False, progress_callback=None) -> tuple[bool, str]:
+def finalize_task(
+    task_name: str, state, force: bool = False, progress_callback=None
+) -> tuple[bool, str]:
     """Finalize a completed task: move to done/, commit, create PR.
 
     Args:
@@ -272,6 +273,7 @@ def finalize_task(task_name: str, state, force: bool = False, progress_callback=
     Returns:
         Tuple of (success, pr_url_or_error_message)
     """
+
     def report(message: str, status: str = "info"):
         if progress_callback:
             progress_callback(message, status)
@@ -318,6 +320,7 @@ def finalize_task(task_name: str, state, force: bool = False, progress_callback=
             if confirm != "y":
                 shutil.move(str(dest), str(task_dir))
                 from galangal.core.tasks import set_active_task
+
                 set_active_task(task_name)
                 report("Aborted. Task restored to original location.", "warning")
                 return False, "Aborted by user"

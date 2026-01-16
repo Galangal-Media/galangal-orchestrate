@@ -100,8 +100,7 @@ class StageProgressWidget(Static):
 
         try:
             current_idx = next(
-                i for i, s in enumerate(visible_stages)
-                if s.value == self.current_stage
+                i for i, s in enumerate(visible_stages) if s.value == self.current_stage
             )
         except StopIteration:
             current_idx = 0

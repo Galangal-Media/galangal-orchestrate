@@ -28,10 +28,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 1
 
     # Collect artifact status - derived from STAGE_METADATA
-    artifacts = [
-        (name, artifact_exists(name, active))
-        for name in get_all_artifact_names()
-    ]
+    artifacts = [(name, artifact_exists(name, active)) for name in get_all_artifact_names()]
 
     display_status(
         task_name=active,

@@ -232,7 +232,9 @@ class GitHubClient:
             errors=errors,
         )
 
-    def run_json_command(self, args: list[str], timeout: int = 30) -> dict[str, Any] | list[Any] | None:
+    def run_json_command(
+        self, args: list[str], timeout: int = 30
+    ) -> dict[str, Any] | list[Any] | None:
         """
         Run a gh command that returns JSON.
 
@@ -311,9 +313,7 @@ class GitHubClient:
             "open", "closed", or None if not found
         """
         try:
-            data = self.run_json_command(
-                ["issue", "view", str(issue_number), "--json", "state"]
-            )
+            data = self.run_json_command(["issue", "view", str(issue_number), "--json", "state"])
             if isinstance(data, dict) and "state" in data:
                 state = data["state"]
                 return str(state).lower() if state else None
@@ -330,9 +330,7 @@ class GitHubClient:
             or None on error
         """
         try:
-            result = self.run_json_command(
-                ["label", "list", "--json", "name,color,description"]
-            )
+            result = self.run_json_command(["label", "list", "--json", "name,color,description"])
             if isinstance(result, list):
                 return result
             return None

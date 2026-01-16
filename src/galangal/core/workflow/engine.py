@@ -312,9 +312,7 @@ class WorkflowEngine:
             else:
                 # Rollback was blocked (loop detection)
                 rollback_count = (
-                    self.state.get_rollback_count(result.rollback_to)
-                    if result.rollback_to
-                    else 0
+                    self.state.get_rollback_count(result.rollback_to) if result.rollback_to else 0
                 )
                 target = result.rollback_to.value if result.rollback_to else "None"
 
@@ -379,7 +377,9 @@ class WorkflowEngine:
 
         return questions
 
-    def handle_action(self, user_action: UserAction, tui_app: WorkflowTUIApp | None = None) -> WorkflowEvent:
+    def handle_action(
+        self, user_action: UserAction, tui_app: WorkflowTUIApp | None = None
+    ) -> WorkflowEvent:
         """
         Handle a user action and return the resulting event.
 
@@ -576,7 +576,9 @@ class WorkflowEngine:
             to_stage=target_stage,
         )
 
-    def _handle_approval(self, approved: bool, approver: str = "", reason: str = "") -> WorkflowEvent:
+    def _handle_approval(
+        self, approved: bool, approver: str = "", reason: str = ""
+    ) -> WorkflowEvent:
         """Handle approval decision."""
         stage = self.state.stage
         metadata = stage.metadata
@@ -728,7 +730,9 @@ class WorkflowEngine:
             save_state(self.state)
             return event(EventType.WORKFLOW_PAUSED, reason="user_quit")
 
-    def handle_clarification_answers(self, questions: list[str], answers: list[str]) -> WorkflowEvent:
+    def handle_clarification_answers(
+        self, questions: list[str], answers: list[str]
+    ) -> WorkflowEvent:
         """
         Handle answers to clarification questions.
 

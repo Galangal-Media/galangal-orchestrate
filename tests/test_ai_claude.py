@@ -15,11 +15,13 @@ SUBPROCESS_TIME = "galangal.ai.subprocess.time.time"
 def make_select_side_effect(mock_stdout, ready_count):
     """Create a select.select side_effect that returns ready N times then not-ready."""
     call_count = [0]
+
     def side_effect(*args, **kwargs):
         call_count[0] += 1
         if call_count[0] <= ready_count:
             return ([mock_stdout], [], [])
         return ([], [], [])
+
     return side_effect
 
 
@@ -121,7 +123,8 @@ class TestClaudeBackendInvoke:
         mock_process.wait = MagicMock()
 
         # Use a callback that returns True (pause requested)
-        pause_check = lambda: True
+        def pause_check() -> bool:
+            return True
 
         with patch(SUBPROCESS_POPEN, return_value=mock_process):
             with patch(SUBPROCESS_SELECT, return_value=([], [], [])):
@@ -144,7 +147,8 @@ class TestClaudeBackendInvoke:
         mock_process.returncode = 0
 
         # Use a callback that returns False (no pause)
-        pause_check = lambda: False
+        def pause_check() -> bool:
+            return False
 
         select_effect = make_select_side_effect(mock_process.stdout, 2)
 
@@ -273,6 +277,7 @@ class TestClaudeBackendStderrHandling:
     def test_stderr_merged_into_stdout(self):
         """Test that Popen is called with stderr=STDOUT to prevent deadlock."""
         import subprocess
+
         from galangal.ai.claude import ClaudeBackend
 
         backend = ClaudeBackend()

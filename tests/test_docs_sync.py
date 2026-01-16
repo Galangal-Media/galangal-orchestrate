@@ -13,8 +13,6 @@ import pytest
 from galangal.core.state import (
     STAGE_METADATA,
     STAGE_ORDER,
-    TASK_TYPE_SKIP_STAGES,
-    Stage,
     TaskType,
     get_task_type_pipeline,
 )
@@ -89,9 +87,7 @@ class TestReadmeTaskTypes:
                 )
 
         if mismatches:
-            pytest.fail(
-                "README task type pipelines don't match code:\n" + "\n".join(mismatches)
-            )
+            pytest.fail("README task type pipelines don't match code:\n" + "\n".join(mismatches))
 
     def _pipelines_match(self, readme: str, expected: str) -> bool:
         """
@@ -138,9 +134,12 @@ class TestWorkflowPipelineDoc:
         for task_type in TaskType:
             display_name = task_type.display_name().lower()
             # Convert to match doc format (e.g., "bug_fix" -> "bug_fix")
-            assert display_name.replace(" ", "_") in table_content.lower() or \
-                   display_name in table_content.lower(), \
-                   f"Task type '{task_type.display_name()}' not found in workflow-pipeline.md skip table"
+            assert (
+                display_name.replace(" ", "_") in table_content.lower()
+                or display_name in table_content.lower()
+            ), (
+                f"Task type '{task_type.display_name()}' not found in workflow-pipeline.md skip table"
+            )
 
 
 class TestStageMetadataConsistency:

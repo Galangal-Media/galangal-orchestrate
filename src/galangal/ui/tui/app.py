@@ -323,9 +323,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         level = levels.get(style, ActivityLevel.INFO)
         self.add_activity(message, icon, level=level, category=category)
 
-    def show_stage_complete(
-        self, stage: str, success: bool, duration: int | None = None
-    ) -> None:
+    def show_stage_complete(self, stage: str, success: bool, duration: int | None = None) -> None:
         """Show stage completion with optional duration."""
         if success:
             if duration is not None:
@@ -343,9 +341,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
                     ActivityCategory.STAGE,
                 )
             else:
-                self.show_message(
-                    f"Stage {stage} completed", "success", ActivityCategory.STAGE
-                )
+                self.show_message(f"Stage {stage} completed", "success", ActivityCategory.STAGE)
         else:
             self.show_message(f"Stage {stage} failed", "error", ActivityCategory.STAGE)
 
@@ -409,7 +405,9 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
 
         self._safe_update(_update)
 
-    def show_prompt(self, prompt_type: PromptType, message: str, callback: Callable[..., None]) -> None:
+    def show_prompt(
+        self, prompt_type: PromptType, message: str, callback: Callable[..., None]
+    ) -> None:
         """
         Show a modal prompt for user choice.
 
@@ -634,9 +632,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         self._safe_update(_show)
         return await future
 
-    async def select_github_issue_async(
-        self, issues: list[tuple[int, str]]
-    ) -> int | None:
+    async def select_github_issue_async(self, issues: list[tuple[int, str]]) -> int | None:
         """
         Show a modal for selecting a GitHub issue.
 
@@ -689,9 +685,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
 
         self._safe_update(_show)
 
-    def show_github_issue_select(
-        self, issues: list[tuple[int, str]], callback: Callable
-    ) -> None:
+    def show_github_issue_select(self, issues: list[tuple[int, str]], callback: Callable) -> None:
         """
         Show a modal for selecting a GitHub issue.
 

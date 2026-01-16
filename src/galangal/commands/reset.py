@@ -27,9 +27,7 @@ def cmd_reset(args: argparse.Namespace) -> int:
 
     if not args.force:
         confirm = (
-            Prompt.ask(
-                f"Delete task '{active}' and all its artifacts? [y/N]", default="n"
-            )
+            Prompt.ask(f"Delete task '{active}' and all its artifacts? [y/N]", default="n")
             .strip()
             .lower()
         )

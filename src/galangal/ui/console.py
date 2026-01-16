@@ -36,9 +36,7 @@ def print_info(message: str) -> None:
     console.print(f"[blue]ℹ {message}[/blue]")
 
 
-def display_task_list(
-    tasks: list[tuple[str, str, str, str]], active: str | None
-) -> None:
+def display_task_list(tasks: list[tuple[str, str, str, str]], active: str | None) -> None:
     """Display a table of tasks."""
     if not tasks:
         print_info("No tasks found.")

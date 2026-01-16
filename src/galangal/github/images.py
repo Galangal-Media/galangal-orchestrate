@@ -14,12 +14,12 @@ from urllib.parse import urlparse
 
 # Patterns for finding images in markdown
 MARKDOWN_IMAGE_PATTERN = re.compile(
-    r'!\[([^\]]*)\]\(([^)]+)\)',  # ![alt text](url)
-    re.MULTILINE
+    r"!\[([^\]]*)\]\(([^)]+)\)",  # ![alt text](url)
+    re.MULTILINE,
 )
 HTML_IMG_PATTERN = re.compile(
     r'<img[^>]+src=["\']([^"\']+)["\']',  # <img src="url">
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 # GitHub domains that host user-uploaded images
@@ -56,11 +56,13 @@ def extract_image_urls(markdown_text: str) -> list[dict]:
         url = match.group(2).strip()
 
         if url and url not in seen_urls and _is_image_url(url):
-            images.append({
-                "url": url,
-                "alt_text": alt_text,
-                "source": "markdown",
-            })
+            images.append(
+                {
+                    "url": url,
+                    "alt_text": alt_text,
+                    "source": "markdown",
+                }
+            )
             seen_urls.add(url)
 
     # Find HTML img tags: <img src="url">
@@ -68,11 +70,13 @@ def extract_image_urls(markdown_text: str) -> list[dict]:
         url = match.group(1).strip()
 
         if url and url not in seen_urls and _is_image_url(url):
-            images.append({
-                "url": url,
-                "alt_text": "",
-                "source": "html",
-            })
+            images.append(
+                {
+                    "url": url,
+                    "alt_text": "",
+                    "source": "html",
+                }
+            )
             seen_urls.add(url)
 
     return images
@@ -94,9 +98,7 @@ def _is_image_url(url: str) -> bool:
                 return True
 
         # GitHub blob URLs often contain images
-        if "blob" in parsed.path and any(
-            ext in path_lower for ext in IMAGE_EXTENSIONS
-        ):
+        if "blob" in parsed.path and any(ext in path_lower for ext in IMAGE_EXTENSIONS):
             return True
 
         return False
@@ -119,8 +121,8 @@ def _generate_filename(url: str, alt_text: str, index: int) -> str:
     # Create a descriptive name
     if alt_text:
         # Sanitize alt text for filename
-        safe_alt = re.sub(r'[^\w\s-]', '', alt_text)[:30].strip()
-        safe_alt = re.sub(r'[\s]+', '_', safe_alt).lower()
+        safe_alt = re.sub(r"[^\w\s-]", "", alt_text)[:30].strip()
+        safe_alt = re.sub(r"[\s]+", "_", safe_alt).lower()
         if safe_alt:
             return f"screenshot_{index:02d}_{safe_alt}{ext}"
 
@@ -204,9 +206,8 @@ def _download_with_gh(url: str, output_path: Path) -> bool:
 
         # For private-user-images or user-attachments, use gh api
         # These URLs require authenticated access for private repos
-        if (
-            parsed.netloc == "private-user-images.githubusercontent.com"
-            or (parsed.netloc == "github.com" and "/user-attachments/" in parsed.path)
+        if parsed.netloc == "private-user-images.githubusercontent.com" or (
+            parsed.netloc == "github.com" and "/user-attachments/" in parsed.path
         ):
             debug_log("Downloading with gh api", url=url[:80])
             # Use gh api to fetch with authentication
@@ -268,9 +269,7 @@ def _download_direct(url: str, output_path: Path) -> None:
     Raises:
         Exception on download failure
     """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; galangal-orchestrate/1.0)"
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; galangal-orchestrate/1.0)"}
     request = urllib.request.Request(url, headers=headers)
 
     with urllib.request.urlopen(request, timeout=60) as response:

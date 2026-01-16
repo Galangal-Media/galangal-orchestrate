@@ -19,7 +19,6 @@ class StageResultType(Enum):
     """Types of outcomes from stage execution."""
 
     SUCCESS = auto()
-    SKIPPED = auto()  # Stage skipped due to skip_if condition
     PREFLIGHT_FAILED = auto()
     VALIDATION_FAILED = auto()
     ROLLBACK_REQUIRED = auto()
@@ -68,20 +67,6 @@ class StageResult(Result):
             message=message,
             type=StageResultType.SUCCESS,
             output=output,
-        )
-
-    @classmethod
-    def skipped(cls, message: str = "") -> StageResult:
-        """Create a skipped stage result.
-
-        Used when a stage is skipped due to skip_if conditions (e.g., no
-        migration files changed). Skipped is treated as success since
-        there's nothing to fail.
-        """
-        return cls(
-            success=True,
-            message=message,
-            type=StageResultType.SKIPPED,
         )
 
     @classmethod
@@ -177,9 +162,7 @@ class StageResult(Result):
         )
 
     @classmethod
-    def user_decision_needed(
-        cls, message: str, artifact_content: str | None = None
-    ) -> StageResult:
+    def user_decision_needed(cls, message: str, artifact_content: str | None = None) -> StageResult:
         """Create a result indicating user must confirm the stage decision.
 
         Used when the AI-generated decision file is missing or unclear.

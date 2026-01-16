@@ -75,6 +75,7 @@ class WidgetAccessMixin:
         Args:
             message: Rich-formatted message to write.
         """
+
         def _write():
             log = self._safe_query("#activity-log", RichLog)
             if log:
@@ -176,6 +177,7 @@ class DiscoveryMixin:
             from galangal.ui.tui.modals import QuestionAnswerModal
 
             try:
+
                 def _handle(result: list[str] | None) -> None:
                     if not future.done():
                         future.set_result(result)

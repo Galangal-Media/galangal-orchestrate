@@ -1,6 +1,5 @@
 """Tests for structured result types."""
 
-
 from galangal.core.state import Stage
 from galangal.results import Result, StageResult, StageResultType
 

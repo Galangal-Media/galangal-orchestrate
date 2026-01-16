@@ -202,8 +202,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                         check = ensure_github_ready()
                         if not check:
                             app.show_message(
-                                "GitHub not ready. Run 'galangal github check'",
-                                "error"
+                                "GitHub not ready. Run 'galangal github check'", "error"
                             )
                             app._workflow_result = "error"
                             result_code["value"] = 1
@@ -245,27 +244,23 @@ def cmd_start(args: argparse.Namespace) -> int:
 
                         # Get the selected issue details
                         selected_issue = next(
-                            (i for i in issues if i.number == issue_result["value"]),
-                            None
+                            (i for i in issues if i.number == issue_result["value"]), None
                         )
                         if selected_issue:
                             task_info["github_issue"] = selected_issue.number
                             task_info["description"] = (
                                 f"{selected_issue.title}\n\n{selected_issue.body}"
                             )
-                            app.show_message(
-                                f"Selected issue #{selected_issue.number}",
-                                "success"
-                            )
+                            app.show_message(f"Selected issue #{selected_issue.number}", "success")
 
                             # Download screenshots from issue body
                             from galangal.github.images import extract_image_urls
+
                             images = extract_image_urls(selected_issue.body)
                             if images:
                                 app.set_status("setup", "downloading screenshots")
                                 app.show_message(
-                                    f"Found {len(images)} screenshot(s) in issue...",
-                                    "info"
+                                    f"Found {len(images)} screenshot(s) in issue...", "info"
                                 )
                                 # Note: Actual download happens after task_name is generated
                                 # Store the issue body for later processing
@@ -277,7 +272,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                                 task_info["type"] = TaskType.from_str(type_hint)
                                 app.show_message(
                                     f"Inferred type from labels: {task_info['type'].display_name()}",
-                                    "info"
+                                    "info",
                                 )
 
                     except Exception as e:
@@ -326,7 +321,9 @@ def cmd_start(args: argparse.Namespace) -> int:
                     task_info["description"] = desc
                     desc_event.set()
 
-                app.show_multiline_input("Enter task description (Ctrl+S to submit):", "", handle_description)
+                app.show_multiline_input(
+                    "Enter task description (Ctrl+S to submit):", "", handle_description
+                )
                 desc_event.wait()
 
                 if not task_info["description"]:
@@ -403,8 +400,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                         if screenshot_paths:
                             task_info["screenshots"] = screenshot_paths
                             app.show_message(
-                                f"Downloaded {len(screenshot_paths)} screenshot(s)",
-                                "success"
+                                f"Downloaded {len(screenshot_paths)} screenshot(s)", "success"
                             )
                             debug_log("Screenshots downloaded", count=len(screenshot_paths))
 
@@ -422,6 +418,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 if task_info["github_issue"]:
                     try:
                         from galangal.github.issues import mark_issue_in_progress
+
                         mark_issue_in_progress(task_info["github_issue"])
                         app.show_message("Marked issue as in-progress", "info")
                     except Exception as e:
@@ -448,7 +445,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     # Log the TUI result for debugging
     debug_log(
         "TUI app exited",
-        result=getattr(app, '_workflow_result', 'unknown'),
+        result=getattr(app, "_workflow_result", "unknown"),
         task_name=task_info.get("name", "none"),
         result_code=result_code["value"],
     )
@@ -459,7 +456,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         state = load_state(task_info["name"])
         if state:
             # Pass skip_discovery flag via state attribute
-            if getattr(args, 'skip_discovery', False):
+            if getattr(args, "skip_discovery", False):
                 state._skip_discovery = True
             try:
                 debug_log("Starting workflow", task=task_info["name"])
@@ -467,6 +464,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             except Exception as e:
                 debug_exception("Workflow failed to start", e)
                 from galangal.ui.console import print_error
+
                 print_error(f"Workflow failed: {e}")
                 return 1
         else:

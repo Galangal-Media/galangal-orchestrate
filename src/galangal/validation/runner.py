@@ -691,7 +691,9 @@ class ValidationRunner:
             "results": results,
         }
 
-    def _write_validation_report(self, stage: str, task_name: str, command_results: dict[str, Any]) -> None:
+    def _write_validation_report(
+        self, stage: str, task_name: str, command_results: dict[str, Any]
+    ) -> None:
         """
         Write VALIDATION_REPORT.md with aggregated command outputs.
 

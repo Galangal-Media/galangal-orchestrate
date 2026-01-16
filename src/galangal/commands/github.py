@@ -82,7 +82,9 @@ def cmd_github_setup(args: argparse.Namespace) -> int:
         if getattr(args, "help_install", False):
             console.print(GH_INSTALL_INSTRUCTIONS)
         else:
-            console.print("\n[dim]Run 'galangal github setup --help-install' for detailed instructions[/dim]")
+            console.print(
+                "\n[dim]Run 'galangal github setup --help-install' for detailed instructions[/dim]"
+            )
         return 1
 
     print_success(f"GitHub CLI installed: {gh_version}")
@@ -127,9 +129,7 @@ def cmd_github_setup(args: argparse.Namespace) -> int:
 
     created_count = 0
     for label_name, color, description in labels_to_create:
-        success, was_created = client.create_label_if_missing(
-            label_name, color, description
-        )
+        success, was_created = client.create_label_if_missing(label_name, color, description)
         if success:
             if was_created:
                 print_success(f"Created label: {label_name}")
@@ -147,9 +147,15 @@ def cmd_github_setup(args: argparse.Namespace) -> int:
         console.print(f"Created {created_count} new label(s).\n")
 
     console.print("[bold]How to use GitHub integration:[/bold]")
-    console.print(f"  1. Add the '[cyan]{github_config.pickup_label}[/cyan]' label to issues you want galangal to work on")
-    console.print("  2. Run '[cyan]galangal start[/cyan]' and select 'GitHub issue' as the task source")
-    console.print("  3. Or run '[cyan]galangal github run[/cyan]' to process all labeled issues automatically")
+    console.print(
+        f"  1. Add the '[cyan]{github_config.pickup_label}[/cyan]' label to issues you want galangal to work on"
+    )
+    console.print(
+        "  2. Run '[cyan]galangal start[/cyan]' and select 'GitHub issue' as the task source"
+    )
+    console.print(
+        "  3. Or run '[cyan]galangal github run[/cyan]' to process all labeled issues automatically"
+    )
 
     console.print("\n[bold]Label to task type mapping:[/bold]")
     mapping = github_config.label_mapping
@@ -160,7 +166,9 @@ def cmd_github_setup(args: argparse.Namespace) -> int:
     console.print(f"  chore:    {', '.join(mapping.chore)}")
     console.print(f"  hotfix:   {', '.join(mapping.hotfix)}")
 
-    console.print("\n[dim]Customize mappings in .galangal/config.yaml under 'github.label_mapping'[/dim]")
+    console.print(
+        "\n[dim]Customize mappings in .galangal/config.yaml under 'github.label_mapping'[/dim]"
+    )
 
     return 0
 

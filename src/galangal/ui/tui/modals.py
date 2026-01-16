@@ -142,9 +142,7 @@ class QuestionAnswerModal(ModalScreen[list[str] | None]):
 
     def compose(self) -> ComposeResult:
         # Format all questions for display
-        questions_display = "\n".join(
-            f"  {i+1}. {q}" for i, q in enumerate(self._questions)
-        )
+        questions_display = "\n".join(f"  {i + 1}. {q}" for i, q in enumerate(self._questions))
 
         with Vertical(id="qa-dialog"):
             yield Static("Discovery Questions", id="qa-title")
@@ -209,15 +207,9 @@ class UserQuestionsModal(ModalScreen[list[str] | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="user-questions-dialog"):
-            yield Static(
-                "Enter your questions (one per line):",
-                id="user-questions-label"
-            )
+            yield Static("Enter your questions (one per line):", id="user-questions-label")
             yield TextArea("", id="user-questions-field")
-            yield Static(
-                "Ctrl+S to submit, Esc to cancel",
-                id="user-questions-hint"
-            )
+            yield Static("Ctrl+S to submit, Esc to cancel", id="user-questions-hint")
 
     def on_mount(self) -> None:
         field = self.query_one("#user-questions-field", TextArea)
@@ -306,8 +298,7 @@ class GitHubIssueSelectModal(ModalScreen[int | None]):
             yield Static("Select GitHub Issue", id="issue-select-title")
             yield Static(self._render_issue_list(), id="issue-select-list")
             yield Static(
-                "↑/↓ or j/k to navigate, Enter to select, Esc to cancel",
-                id="issue-select-hint"
+                "↑/↓ or j/k to navigate, Enter to select, Esc to cancel", id="issue-select-hint"
             )
 
     def _render_issue_list(self) -> str:

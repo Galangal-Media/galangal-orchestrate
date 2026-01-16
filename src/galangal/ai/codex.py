@@ -168,8 +168,8 @@ class CodexBackend(AIBackend):
         max_turns: int = 200,
         ui: Optional["StageUI"] = None,
         pause_check: PauseCheck | None = None,
-        stage: Optional[str] = None,
-        log_file: Optional[str] = None,
+        stage: str | None = None,
+        log_file: str | None = None,
     ) -> StageResult:
         """
         Invoke Codex in non-interactive read-only mode.

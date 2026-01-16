@@ -54,11 +54,7 @@ def list_tasks() -> list[tuple[str, str, str, str]]:
         return tasks
 
     for task_dir in tasks_dir.iterdir():
-        if (
-            task_dir.is_dir()
-            and not task_dir.name.startswith(".")
-            and task_dir.name != "done"
-        ):
+        if task_dir.is_dir() and not task_dir.name.startswith(".") and task_dir.name != "done":
             state_file = task_dir / "state.json"
             if state_file.exists():
                 try:
@@ -164,7 +160,10 @@ def is_valid_task_name(name: str) -> tuple[bool, str]:
         return False, "Task name must be 60 characters or less"
 
     if not TASK_NAME_PATTERN.match(name):
-        return False, "Task name must start with letter/number and contain only alphanumeric, hyphens, underscores"
+        return (
+            False,
+            "Task name must start with letter/number and contain only alphanumeric, hyphens, underscores",
+        )
 
     return True, ""
 

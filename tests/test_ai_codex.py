@@ -390,6 +390,7 @@ class TestCodexBackendStderrHandling:
     def test_stderr_merged_into_stdout(self):
         """Test that Popen is called with stderr=STDOUT to prevent deadlock."""
         import subprocess
+
         from galangal.ai.codex import CodexBackend
 
         backend = CodexBackend()

@@ -103,7 +103,9 @@ class StageMetadata:
     is_skippable: bool = False
     produces_artifacts: tuple[str, ...] = ()
     skip_artifact: str | None = None  # e.g., "MIGRATION_SKIP.md"
-    approval_artifact: str | None = None  # e.g., "APPROVAL.md" - checked when requires_approval=True
+    approval_artifact: str | None = (
+        None  # e.g., "APPROVAL.md" - checked when requires_approval=True
+    )
     # Decision file for validation (e.g., "SECURITY_DECISION")
     decision_file: str | None = None
     # Valid decision values and their outcomes: (value, success, message, rollback_to, is_fast_track)
@@ -213,8 +215,20 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         decision_file="TEST_DECISION",
         decision_outcomes=(
             ("PASS", True, "Tests passed", None, False),
-            ("FAIL", False, "Tests failed due to implementation issues - needs DEV fix", "DEV", False),
-            ("BLOCKED", False, "Tests blocked by implementation issues - needs DEV fix", "DEV", False),
+            (
+                "FAIL",
+                False,
+                "Tests failed due to implementation issues - needs DEV fix",
+                "DEV",
+                False,
+            ),
+            (
+                "BLOCKED",
+                False,
+                "Tests blocked by implementation issues - needs DEV fix",
+                "DEV",
+                False,
+            ),
         ),
     ),
     Stage.CONTRACT: StageMetadata(
@@ -278,7 +292,13 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         decision_outcomes=(
             ("APPROVE", True, "Review approved", None, False),
             ("REQUEST_CHANGES", False, "Review requested changes", "DEV", False),
-            ("REQUEST_MINOR_CHANGES", False, "Review requested minor changes (fast-track)", "DEV", True),
+            (
+                "REQUEST_MINOR_CHANGES",
+                False,
+                "Review requested minor changes (fast-track)",
+                "DEV",
+                True,
+            ),
         ),
         artifact_schema={
             "notes_file": "REVIEW_NOTES.md",
@@ -382,10 +402,7 @@ def get_task_type_pipeline(task_type: TaskType) -> str:
         Pipeline string like "PM → DEV → TEST → QA"
     """
     skip_stages = TASK_TYPE_SKIP_STAGES.get(task_type, set())
-    stages = [
-        s.value for s in STAGE_ORDER
-        if s not in skip_stages and s != Stage.COMPLETE
-    ]
+    stages = [s.value for s in STAGE_ORDER if s not in skip_stages and s != Stage.COMPLETE]
     return " → ".join(stages)
 
 
@@ -617,7 +634,9 @@ def parse_stage_arg(
     return stage
 
 
-def get_hidden_stages_for_task_type(task_type: TaskType, config_skip: list[str] | None = None) -> set[str]:
+def get_hidden_stages_for_task_type(
+    task_type: TaskType, config_skip: list[str] | None = None
+) -> set[str]:
     """Get stages to hide from progress bar based on task type and config.
 
     Args:
@@ -748,7 +767,9 @@ class WorkflowState:
         """
         self.attempt += 1
         if len(error) > max_length:
-            self.last_failure = error[:max_length] + "\n\n[... truncated, see logs/ for full output]"
+            self.last_failure = (
+                error[:max_length] + "\n\n[... truncated, see logs/ for full output]"
+            )
         else:
             self.last_failure = error
 
@@ -870,7 +891,8 @@ class WorkflowState:
         cutoff_str = cutoff.isoformat()
 
         recent_rollbacks = [
-            r for r in self.rollback_history
+            r
+            for r in self.rollback_history
             if r.to_stage == target_stage.value and r.timestamp > cutoff_str
         ]
 
@@ -889,10 +911,13 @@ class WorkflowState:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=ROLLBACK_TIME_WINDOW_HOURS)
         cutoff_str = cutoff.isoformat()
 
-        return len([
-            r for r in self.rollback_history
-            if r.to_stage == target_stage.value and r.timestamp > cutoff_str
-        ])
+        return len(
+            [
+                r
+                for r in self.rollback_history
+                if r.to_stage == target_stage.value and r.timestamp > cutoff_str
+            ]
+        )
 
     # -------------------------------------------------------------------------
     # Fast-track rollback methods
@@ -963,9 +988,7 @@ class WorkflowState:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "WorkflowState":
         # Parse rollback history if present
-        rollback_history = [
-            RollbackEvent.from_dict(r) for r in d.get("rollback_history", [])
-        ]
+        rollback_history = [RollbackEvent.from_dict(r) for r in d.get("rollback_history", [])]
 
         return cls(
             stage=Stage.from_str(d["stage"]),

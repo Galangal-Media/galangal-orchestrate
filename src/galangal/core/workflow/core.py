@@ -212,7 +212,9 @@ def get_next_stage(current: Stage, state: WorkflowState) -> Stage | None:
         # Check 5: manual skip artifacts (e.g., MIGRATION_SKIP.md from galangal skip-*)
         # Uses metadata as source of truth for which stages have skip artifacts
         stage_metadata = next_stage.metadata
-        if stage_metadata.skip_artifact and artifact_exists(stage_metadata.skip_artifact, task_name):
+        if stage_metadata.skip_artifact and artifact_exists(
+            stage_metadata.skip_artifact, task_name
+        ):
             continue
 
         # Check 6: for conditional stages, if PM explicitly said "run", skip the glob check
