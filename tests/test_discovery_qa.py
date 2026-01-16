@@ -40,14 +40,12 @@ class TestStateQAFields:
             task_description="Test task",
             task_name="test-task",
             task_type=TaskType.FEATURE,
-            pm_subphase="questioning",
             qa_rounds=[{"questions": ["Q1?"], "answers": ["A1"]}],
             qa_complete=False,
         )
 
         data = state.to_dict()
 
-        assert data["pm_subphase"] == "questioning"
         assert data["qa_rounds"] == [{"questions": ["Q1?"], "answers": ["A1"]}]
         assert data["qa_complete"] is False
 
@@ -63,7 +61,6 @@ class TestStateQAFields:
             "task_description": "Test",
             "task_name": "test",
             "task_type": "feature",
-            "pm_subphase": "specifying",
             "qa_rounds": [
                 {"questions": ["Q1?", "Q2?"], "answers": ["A1", "A2"]},
                 {"questions": ["Q3?"], "answers": ["A3"]},
@@ -73,7 +70,6 @@ class TestStateQAFields:
 
         state = WorkflowState.from_dict(data)
 
-        assert state.pm_subphase == "specifying"
         assert len(state.qa_rounds) == 2
         assert state.qa_rounds[0]["questions"] == ["Q1?", "Q2?"]
         assert state.qa_complete is True
@@ -94,7 +90,6 @@ class TestStateQAFields:
 
         state = WorkflowState.from_dict(data)
 
-        assert state.pm_subphase is None
         assert state.qa_rounds is None
         assert state.qa_complete is False
 
@@ -110,7 +105,6 @@ class TestStateQAFields:
             task_description="Test task",
             task_name="test-task",
             task_type=TaskType.FEATURE,
-            pm_subphase="analyzing",
             qa_rounds=[
                 {"questions": ["What auth?", "What scope?"], "answers": ["JWT", "API only"]},
             ],
@@ -121,7 +115,6 @@ class TestStateQAFields:
         json_str = json.dumps(original.to_dict())
         restored = WorkflowState.from_dict(json.loads(json_str))
 
-        assert restored.pm_subphase == original.pm_subphase
         assert restored.qa_rounds == original.qa_rounds
         assert restored.qa_complete == original.qa_complete
 

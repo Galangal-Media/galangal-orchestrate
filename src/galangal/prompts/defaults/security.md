@@ -75,26 +75,6 @@ OR
 **REJECTED** - Must fix: [list blocking issues]
 ```
 
-## CRITICAL: Decision File
-
-After creating SECURITY_CHECKLIST.md, you MUST also create a separate decision file:
-
-**File:** `SECURITY_DECISION` (no extension)
-**Contents:** Exactly one word - either `APPROVED` or `REJECTED`
-
-Example:
-```
-APPROVED
-```
-or
-```
-REJECTED
-```
-
-This file must contain ONLY the decision word, nothing else. No explanation, no markdown, no extra text.
-
-The validation system reads this file to determine if the stage passes. If the file is missing or unclear, the user will be prompted to make the decision manually.
-
 ## Process
 
 1. Review code changes for security implications

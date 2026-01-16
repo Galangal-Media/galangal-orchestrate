@@ -71,6 +71,7 @@ def is_backend_available(
         True if the backend's CLI is installed and accessible
     """
     # Check config for custom command name
+    cmd: str | None
     if config and name.lower() in config.ai.backends:
         cmd = config.ai.backends[name.lower()].command
     else:

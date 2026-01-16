@@ -55,11 +55,21 @@ def _setup_debug_mode() -> None:
         debug_log("Failed to configure structured logging", error=str(e))
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Galangal Orchestrate - AI-Driven Development Workflow",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+def _build_epilog() -> str:
+    """Build CLI epilog from canonical sources in state.py."""
+    from galangal.core.state import TaskType, get_workflow_diagram
+
+    # Build task types section from TaskType enum
+    task_lines = []
+    for i, tt in enumerate(TaskType, start=1):
+        task_lines.append(f"    [{i}] {tt.display_name():10} - {tt.short_description()}")
+
+    task_types_section = "\n".join(task_lines)
+
+    # Build workflow diagram from STAGE_ORDER
+    workflow = get_workflow_diagram().replace("→", "->")
+
+    return f"""
 Debug mode:
   galangal --debug start "task"   Enable verbose logging to logs/galangal_debug.log
   GALANGAL_DEBUG=1 galangal ...   Alternative via environment variable
@@ -81,21 +91,22 @@ Examples:
 
 Task Types:
   At task start, you'll select from:
-    [1] Feature   - New functionality (full workflow)
-    [2] Bug Fix   - Fix broken behavior (skip design)
-    [3] Refactor  - Restructure code (skip design, security)
-    [4] Chore     - Dependencies, config, tooling
-    [5] Docs      - Documentation only (minimal stages)
-    [6] Hotfix    - Critical fix (expedited)
+{task_types_section}
 
 Workflow:
-  PM -> DESIGN -> PREFLIGHT -> DEV -> MIGRATION* -> TEST ->
-  CONTRACT* -> QA -> BENCHMARK* -> SECURITY -> REVIEW -> DOCS -> COMPLETE
+  {workflow}
 
   * = Conditional stages (auto-skipped if condition not met)
 
 Tip: Press Ctrl+C during execution to pause gracefully.
-        """,
+        """
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Galangal Orchestrate - AI-Driven Development Workflow",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_build_epilog(),
     )
 
     # Global --debug flag (before subparsers)

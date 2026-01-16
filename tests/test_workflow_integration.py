@@ -95,6 +95,10 @@ class MockStageUI(StageUI):
 class MockAIBackend:
     """Mock AI backend for testing."""
 
+    # Backend properties expected by execute_stage
+    read_only = False
+    name = "mock"
+
     def __init__(
         self,
         responses: dict[Stage, StageResult] | None = None,
@@ -268,6 +272,7 @@ class TestExecuteStageWithMockBackend:
                     ):
                         # Mock validation to pass
                         mock_runner = MagicMock()
+                        mock_runner.should_skip_stage.return_value = False
                         mock_runner.validate_stage.return_value = ValidationResult(
                             True, "Validation passed"
                         )
@@ -300,6 +305,7 @@ class TestExecuteStageWithMockBackend:
                     ):
                         # Mock validation to fail with rollback
                         mock_runner = MagicMock()
+                        mock_runner.should_skip_stage.return_value = False
                         mock_runner.validate_stage.return_value = ValidationResult(
                             False, "QA found issues", rollback_to="DEV"
                         )
@@ -324,6 +330,7 @@ class TestExecuteStageWithMockBackend:
             with patch("galangal.core.workflow.core.get_task_dir", return_value=sample_task):
                 with patch("galangal.core.artifacts.get_task_dir", return_value=sample_task):
                     mock_runner = MagicMock()
+                    mock_runner.should_skip_stage.return_value = False
                     mock_runner.validate_stage.return_value = ValidationResult(
                         True, "Preflight checks passed"
                     )
@@ -434,6 +441,7 @@ class TestRetryBehavior:
                         return_value=mock_backend,
                     ):
                         mock_runner = MagicMock()
+                        mock_runner.should_skip_stage.return_value = False
                         mock_runner.validate_stage.return_value = ValidationResult(
                             True, "passed"
                         )

@@ -6,6 +6,22 @@ from unittest.mock import MagicMock, patch
 from galangal.ai.claude import ClaudeBackend
 from galangal.results import StageResult, StageResultType
 
+# Patch locations - subprocess logic moved to galangal.ai.subprocess module
+SUBPROCESS_POPEN = "galangal.ai.subprocess.subprocess.Popen"
+SUBPROCESS_SELECT = "galangal.ai.subprocess.select.select"
+SUBPROCESS_TIME = "galangal.ai.subprocess.time.time"
+
+
+def make_select_side_effect(mock_stdout, ready_count):
+    """Create a select.select side_effect that returns ready N times then not-ready."""
+    call_count = [0]
+    def side_effect(*args, **kwargs):
+        call_count[0] += 1
+        if call_count[0] <= ready_count:
+            return ([mock_stdout], [], [])
+        return ([], [], [])
+    return side_effect
+
 
 class TestClaudeBackendInvoke:
     """Tests for ClaudeBackend.invoke() StageResult returns."""
@@ -22,8 +38,11 @@ class TestClaudeBackendInvoke:
         mock_process.communicate.return_value = ("", "")
         mock_process.returncode = 0
 
-        with patch("galangal.ai.claude.subprocess.Popen", return_value=mock_process):
-            with patch("galangal.ai.claude.select.select", return_value=([mock_process.stdout], [], [])):
+        # select returns ready twice (for JSON line + empty), then not-ready
+        select_effect = make_select_side_effect(mock_process.stdout, 2)
+
+        with patch(SUBPROCESS_POPEN, return_value=mock_process):
+            with patch(SUBPROCESS_SELECT, side_effect=select_effect):
                 result = backend.invoke("test prompt")
 
         assert isinstance(result, StageResult)
@@ -41,8 +60,10 @@ class TestClaudeBackendInvoke:
         mock_process.communicate.return_value = ("", "")
         mock_process.returncode = 1
 
-        with patch("galangal.ai.claude.subprocess.Popen", return_value=mock_process):
-            with patch("galangal.ai.claude.select.select", return_value=([mock_process.stdout], [], [])):
+        select_effect = make_select_side_effect(mock_process.stdout, 2)
+
+        with patch(SUBPROCESS_POPEN, return_value=mock_process):
+            with patch(SUBPROCESS_SELECT, side_effect=select_effect):
                 result = backend.invoke("test prompt")
 
         assert isinstance(result, StageResult)
@@ -58,9 +79,9 @@ class TestClaudeBackendInvoke:
         mock_process.poll.return_value = None  # Never finishes
         mock_process.kill = MagicMock()
 
-        with patch("galangal.ai.claude.subprocess.Popen", return_value=mock_process):
-            with patch("galangal.ai.claude.select.select", return_value=([], [], [])):
-                with patch("galangal.ai.claude.time.time") as mock_time:
+        with patch(SUBPROCESS_POPEN, return_value=mock_process):
+            with patch(SUBPROCESS_SELECT, return_value=([], [], [])):
+                with patch(SUBPROCESS_TIME) as mock_time:
                     # Simulate timeout - start at 0, then immediately at timeout
                     mock_time.side_effect = [0, 0, 100, 100]
                     result = backend.invoke("test prompt", timeout=50)
@@ -80,8 +101,10 @@ class TestClaudeBackendInvoke:
         mock_process.communicate.return_value = ("", "")
         mock_process.returncode = 0
 
-        with patch("galangal.ai.claude.subprocess.Popen", return_value=mock_process):
-            with patch("galangal.ai.claude.select.select", return_value=([mock_process.stdout], [], [])):
+        select_effect = make_select_side_effect(mock_process.stdout, 2)
+
+        with patch(SUBPROCESS_POPEN, return_value=mock_process):
+            with patch(SUBPROCESS_SELECT, side_effect=select_effect):
                 result = backend.invoke("test prompt")
 
         assert isinstance(result, StageResult)
@@ -100,8 +123,8 @@ class TestClaudeBackendInvoke:
         # Use a callback that returns True (pause requested)
         pause_check = lambda: True
 
-        with patch("galangal.ai.claude.subprocess.Popen", return_value=mock_process):
-            with patch("galangal.ai.claude.select.select", return_value=([], [], [])):
+        with patch(SUBPROCESS_POPEN, return_value=mock_process):
+            with patch(SUBPROCESS_SELECT, return_value=([], [], [])):
                 result = backend.invoke("test prompt", pause_check=pause_check)
 
         assert isinstance(result, StageResult)
@@ -123,8 +146,10 @@ class TestClaudeBackendInvoke:
         # Use a callback that returns False (no pause)
         pause_check = lambda: False
 
-        with patch("galangal.ai.claude.subprocess.Popen", return_value=mock_process):
-            with patch("galangal.ai.claude.select.select", return_value=([mock_process.stdout], [], [])):
+        select_effect = make_select_side_effect(mock_process.stdout, 2)
+
+        with patch(SUBPROCESS_POPEN, return_value=mock_process):
+            with patch(SUBPROCESS_SELECT, side_effect=select_effect):
                 result = backend.invoke("test prompt", pause_check=pause_check)
 
         assert isinstance(result, StageResult)
@@ -135,7 +160,7 @@ class TestClaudeBackendInvoke:
         """Test that exception returns StageResult.error."""
         backend = ClaudeBackend()
 
-        with patch("galangal.ai.claude.subprocess.Popen", side_effect=Exception("Connection failed")):
+        with patch(SUBPROCESS_POPEN, side_effect=Exception("Connection failed")):
             result = backend.invoke("test prompt")
 
         assert isinstance(result, StageResult)
@@ -168,8 +193,10 @@ class TestClaudeBackendTempFilePrompt:
         mock_process.communicate.return_value = ("", "")
         mock_process.returncode = 0
 
-        with patch("galangal.ai.claude.subprocess.Popen", return_value=mock_process) as mock_popen:
-            with patch("galangal.ai.claude.select.select", return_value=([mock_process.stdout], [], [])):
+        select_effect = make_select_side_effect(mock_process.stdout, 2)
+
+        with patch(SUBPROCESS_POPEN, return_value=mock_process) as mock_popen:
+            with patch(SUBPROCESS_SELECT, side_effect=select_effect):
                 backend.invoke("my test prompt")
 
         # Verify shell=True is used (for piping)
@@ -197,8 +224,10 @@ class TestClaudeBackendTempFilePrompt:
         mock_process.communicate.return_value = ("", "")
         mock_process.returncode = 0
 
-        with patch("galangal.ai.claude.subprocess.Popen", return_value=mock_process) as mock_popen:
-            with patch("galangal.ai.claude.select.select", return_value=([mock_process.stdout], [], [])):
+        select_effect = make_select_side_effect(mock_process.stdout, 2)
+
+        with patch(SUBPROCESS_POPEN, return_value=mock_process) as mock_popen:
+            with patch(SUBPROCESS_SELECT, side_effect=select_effect):
                 result = backend.invoke(large_prompt)
 
         # Verify the large prompt is NOT in the command line
@@ -254,8 +283,8 @@ class TestClaudeBackendStderrHandling:
         mock_process.communicate.return_value = ("", "")
         mock_process.returncode = 0
 
-        with patch("galangal.ai.claude.subprocess.Popen", return_value=mock_process) as mock_popen:
-            with patch("galangal.ai.claude.select.select", return_value=([], [], [])):
+        with patch(SUBPROCESS_POPEN, return_value=mock_process) as mock_popen:
+            with patch(SUBPROCESS_SELECT, return_value=([], [], [])):
                 backend.invoke("test prompt", timeout=1)
 
         # Verify stderr=STDOUT was passed to prevent deadlock

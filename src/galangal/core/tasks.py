@@ -78,7 +78,12 @@ def list_tasks() -> list[tuple[str, str, str, str]]:
 
 
 def generate_task_name_ai(description: str) -> str | None:
-    """Use AI to generate a concise, meaningful task name."""
+    """Use AI to generate a concise, meaningful task name.
+
+    Uses the configured AI backend from config.ai.default with fallback support.
+    """
+    from galangal.ai import get_backend_with_fallback
+
     prompt = f"""Generate a short task name for this description. Rules:
 - 2-4 words, kebab-case (e.g., fix-auth-bug, add-user-export)
 - No prefix, just the name itself
@@ -90,16 +95,13 @@ Description: {description}
 Reply with ONLY the task name, nothing else."""
 
     try:
-        result = subprocess.run(
-            ["claude", "-p", prompt, "--max-turns", "1"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=get_project_root(),
-        )
-        if result.returncode == 0 and result.stdout.strip():
+        config = get_config()
+        backend = get_backend_with_fallback(config.ai.default, config=config)
+        result = backend.generate_text(prompt, timeout=30)
+
+        if result:
             # Clean the response - extract just the task name
-            name = result.stdout.strip().lower()
+            name = result.strip().lower()
             # Remove any quotes, backticks, or extra text
             name = re.sub(r"[`\"']", "", name)
             # Take only first line if multiple
@@ -107,7 +109,8 @@ Reply with ONLY the task name, nothing else."""
             # Validate it looks like a task name (kebab-case, reasonable length)
             if re.match(r"^[a-z][a-z0-9-]{2,40}$", name) and name.count("-") <= 5:
                 return name
-    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+    except (ValueError, Exception):
+        # ValueError: no backend available; Exception: other errors
         pass
     return None
 

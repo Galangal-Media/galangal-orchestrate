@@ -32,29 +32,46 @@ if TYPE_CHECKING:
 
 # Stage→artifact schema for read-only backends
 # Maps each stage to its expected artifact files and JSON field sources
-STAGE_ARTIFACT_SCHEMA: dict[Stage, dict[str, str]] = {
-    Stage.REVIEW: {
-        "notes_file": "REVIEW_NOTES.md",
-        "notes_field": "review_notes",
-        "decision_file": "REVIEW_DECISION",
-        "decision_field": "decision",
-        "issues_field": "issues",
-    },
-    Stage.SECURITY: {
-        "notes_file": "SECURITY_NOTES.md",
-        "notes_field": "security_notes",
-        "decision_file": "SECURITY_DECISION",
-        "decision_field": "decision",
-        "issues_field": "issues",
-    },
-    Stage.QA: {
-        "notes_file": "QA_NOTES.md",
-        "notes_field": "qa_notes",
-        "decision_file": "QA_DECISION",
-        "decision_field": "decision",
-        "issues_field": "issues",
-    },
-}
+# Note: decision_file is derived from STAGE_METADATA to stay in sync
+def _get_stage_artifact_schema() -> dict[Stage, dict[str, str | None]]:
+    """Build artifact schema, deriving decision_file from STAGE_METADATA."""
+    from galangal.core.state import get_decision_file_name
+
+    return {
+        Stage.REVIEW: {
+            "notes_file": "REVIEW_NOTES.md",
+            "notes_field": "review_notes",
+            "decision_file": get_decision_file_name(Stage.REVIEW),
+            "decision_field": "decision",
+            "issues_field": "issues",
+        },
+        Stage.SECURITY: {
+            "notes_file": "SECURITY_NOTES.md",
+            "notes_field": "security_notes",
+            "decision_file": get_decision_file_name(Stage.SECURITY),
+            "decision_field": "decision",
+            "issues_field": "issues",
+        },
+        Stage.QA: {
+            "notes_file": "QA_NOTES.md",
+            "notes_field": "qa_notes",
+            "decision_file": get_decision_file_name(Stage.QA),
+            "decision_field": "decision",
+            "issues_field": "issues",
+        },
+    }
+
+
+# Lazy-loaded schema cache
+_STAGE_ARTIFACT_SCHEMA: dict[Stage, dict[str, str | None]] | None = None
+
+
+def get_stage_artifact_schema() -> dict[Stage, dict[str, str | None]]:
+    """Get the stage artifact schema (lazily loaded)."""
+    global _STAGE_ARTIFACT_SCHEMA
+    if _STAGE_ARTIFACT_SCHEMA is None:
+        _STAGE_ARTIFACT_SCHEMA = _get_stage_artifact_schema()
+    return _STAGE_ARTIFACT_SCHEMA
 
 # Get conditional stages from metadata (cached at module load)
 CONDITIONAL_STAGES: dict[Stage, str] = get_conditional_stages()
@@ -108,8 +125,9 @@ def _write_artifacts_from_readonly_output(
         return
 
     # Try schema-based artifact writing first
-    if stage in STAGE_ARTIFACT_SCHEMA:
-        schema = STAGE_ARTIFACT_SCHEMA[stage]
+    schema_dict = get_stage_artifact_schema()
+    if stage in schema_dict:
+        schema = schema_dict[stage]
         _write_schema_artifacts(data, schema, task_name, tui_app)
         return
 

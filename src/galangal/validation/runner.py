@@ -21,10 +21,8 @@ def read_decision_file(stage: str, task_name: str) -> str | None:
     """
     Read a stage decision file and return its normalized content.
 
-    Decision files contain exactly one word indicating the stage result:
-    - SECURITY_DECISION: APPROVED or REJECTED
-    - QA_DECISION: PASS or FAIL
-    - REVIEW_DECISION: APPROVE or REQUEST_CHANGES
+    Decision files contain exactly one word indicating the stage result.
+    Valid decision values are defined in STAGE_METADATA (state.py).
 
     Args:
         stage: Stage name (e.g., "SECURITY", "QA", "REVIEW").
@@ -34,8 +32,16 @@ def read_decision_file(stage: str, task_name: str) -> str | None:
         The decision word (uppercase, stripped) or None if file doesn't exist
         or contains invalid content.
     """
-    decision_file = f"{stage.upper()}_DECISION"
-    if not artifact_exists(decision_file, task_name):
+    from galangal.core.state import Stage, get_decision_file_name
+
+    try:
+        stage_enum = Stage.from_str(stage.upper())
+        decision_file = get_decision_file_name(stage_enum)
+    except ValueError:
+        # Fallback for unknown stages
+        decision_file = f"{stage.upper()}_DECISION"
+
+    if not decision_file or not artifact_exists(decision_file, task_name):
         return None
 
     content = read_artifact(decision_file, task_name)

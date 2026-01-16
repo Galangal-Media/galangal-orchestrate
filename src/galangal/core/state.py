@@ -59,16 +59,26 @@ class TaskType(str, Enum):
             TaskType.HOTFIX: "Hotfix",
         }[self]
 
-    def description(self) -> str:
-        """Short description of this task type."""
+    def short_description(self) -> str:
+        """Brief description of what this task type is for."""
         return {
-            TaskType.FEATURE: "New functionality (full workflow)",
-            TaskType.BUG_FIX: "Fix broken behavior (PM → DEV → TEST → QA)",
-            TaskType.REFACTOR: "Restructure code (PM → DESIGN → DEV → TEST)",
-            TaskType.CHORE: "Dependencies, config (PM → DEV → TEST)",
-            TaskType.DOCS: "Documentation only (PM → DOCS)",
-            TaskType.HOTFIX: "Critical fix (PM → DEV → TEST)",
+            TaskType.FEATURE: "New functionality",
+            TaskType.BUG_FIX: "Fix broken behavior",
+            TaskType.REFACTOR: "Restructure code",
+            TaskType.CHORE: "Dependencies, config, tooling",
+            TaskType.DOCS: "Documentation only",
+            TaskType.HOTFIX: "Critical fix",
         }[self]
+
+    def description(self) -> str:
+        """Full description with pipeline (derived from TASK_TYPE_SKIP_STAGES)."""
+        # Import here to avoid circular dependency (function defined after class)
+        from galangal.core.state import get_task_type_pipeline
+
+        pipeline = get_task_type_pipeline(self)
+        if self == TaskType.FEATURE:
+            return f"{self.short_description()} (full workflow)"
+        return f"{self.short_description()} ({pipeline})"
 
 
 @dataclass(frozen=True)
@@ -92,15 +102,12 @@ class StageMetadata:
     requires_approval: bool = False
     is_skippable: bool = False
     produces_artifacts: tuple[str, ...] = ()
-    requires_artifacts: tuple[str, ...] = ()
     skip_artifact: str | None = None  # e.g., "MIGRATION_SKIP.md"
     approval_artifact: str | None = None  # e.g., "APPROVAL.md" - checked when requires_approval=True
     # Decision file for validation (e.g., "SECURITY_DECISION")
     decision_file: str | None = None
     # Valid decision values and their outcomes: (value, success, message, rollback_to, is_fast_track)
     decision_outcomes: tuple[tuple[str, bool, str, str | None, bool], ...] = ()
-    # Artifacts to include in prompt context for this stage
-    context_artifacts: tuple[str, ...] = ()
 
 
 class Stage(str, Enum):
@@ -164,31 +171,23 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         requires_approval=True,
         approval_artifact="APPROVAL.md",
         produces_artifacts=("SPEC.md", "PLAN.md", "DISCOVERY_LOG.md"),
-        context_artifacts=("DISCOVERY_LOG.md",),
     ),
     Stage.DESIGN: StageMetadata(
         display_name="Design",
         description="Create implementation plan and architecture",
-        requires_approval=False,
-        approval_artifact="DESIGN_REVIEW.md",
         is_skippable=True,
-        requires_artifacts=("SPEC.md",),
         produces_artifacts=("DESIGN.md",),
         skip_artifact="DESIGN_SKIP.md",
-        context_artifacts=("SPEC.md",),
     ),
     Stage.PREFLIGHT: StageMetadata(
         display_name="Preflight",
         description="Verify environment and dependencies",
         produces_artifacts=("PREFLIGHT_REPORT.md",),
-        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md"),
     ),
     Stage.DEV: StageMetadata(
         display_name="Development",
         description="Implement the feature or fix",
-        requires_artifacts=("SPEC.md", "PLAN.md"),
         produces_artifacts=("DEVELOPMENT.md",),
-        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "DEVELOPMENT.md", "ROLLBACK.md"),
     ),
     Stage.MIGRATION: StageMetadata(
         display_name="Migration",
@@ -197,7 +196,6 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         is_skippable=True,
         produces_artifacts=("MIGRATION_REPORT.md",),
         skip_artifact="MIGRATION_SKIP.md",
-        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md"),
     ),
     Stage.TEST: StageMetadata(
         display_name="Test",
@@ -209,7 +207,6 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
             ("FAIL", False, "Tests failed due to implementation issues - needs DEV fix", "DEV", False),
             ("BLOCKED", False, "Tests blocked by implementation issues - needs DEV fix", "DEV", False),
         ),
-        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "TEST_PLAN.md", "ROLLBACK.md"),
     ),
     Stage.CONTRACT: StageMetadata(
         display_name="Contract",
@@ -218,7 +215,6 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         is_skippable=True,
         produces_artifacts=("CONTRACT_REPORT.md",),
         skip_artifact="CONTRACT_SKIP.md",
-        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "TEST_PLAN.md"),
     ),
     Stage.QA: StageMetadata(
         display_name="QA",
@@ -229,7 +225,6 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
             ("PASS", True, "QA passed", None, False),
             ("FAIL", False, "QA failed", "DEV", False),
         ),
-        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "TEST_SUMMARY.md"),
     ),
     Stage.BENCHMARK: StageMetadata(
         display_name="Benchmark",
@@ -238,7 +233,6 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         is_skippable=True,
         produces_artifacts=("BENCHMARK_REPORT.md",),
         skip_artifact="BENCHMARK_SKIP.md",
-        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md"),
     ),
     Stage.SECURITY: StageMetadata(
         display_name="Security",
@@ -252,7 +246,6 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
             ("REJECTED", False, "Security review found blocking issues", "DEV", False),
             ("BLOCKED", False, "Security review found blocking issues", "DEV", False),
         ),
-        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "TEST_SUMMARY.md"),
     ),
     Stage.REVIEW: StageMetadata(
         display_name="Review",
@@ -264,13 +257,11 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
             ("REQUEST_CHANGES", False, "Review requested changes", "DEV", False),
             ("REQUEST_MINOR_CHANGES", False, "Review requested minor changes (fast-track)", "DEV", True),
         ),
-        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "TEST_SUMMARY.md", "QA_REPORT.md", "SECURITY_CHECKLIST.md"),
     ),
     Stage.DOCS: StageMetadata(
         display_name="Docs",
         description="Update documentation",
         produces_artifacts=("DOCS_REPORT.md",),
-        context_artifacts=("SPEC.md", "DESIGN.md", "PLAN.md", "TEST_SUMMARY.md"),
     ),
     Stage.COMPLETE: StageMetadata(
         display_name="Complete",
@@ -347,6 +338,50 @@ def should_skip_for_task_type(stage: Stage, task_type: TaskType) -> bool:
     return stage in TASK_TYPE_SKIP_STAGES.get(task_type, set())
 
 
+def get_task_type_pipeline(task_type: TaskType) -> str:
+    """
+    Get the stage pipeline string for a task type.
+
+    Derives the pipeline from TASK_TYPE_SKIP_STAGES, ensuring it stays
+    in sync with the actual skip configuration.
+
+    Args:
+        task_type: The task type to get the pipeline for.
+
+    Returns:
+        Pipeline string like "PM → DEV → TEST → QA"
+    """
+    skip_stages = TASK_TYPE_SKIP_STAGES.get(task_type, set())
+    stages = [
+        s.value for s in STAGE_ORDER
+        if s not in skip_stages and s != Stage.COMPLETE
+    ]
+    return " → ".join(stages)
+
+
+def get_workflow_diagram() -> str:
+    """
+    Get the full workflow pipeline diagram.
+
+    Returns:
+        Multi-line string showing the stage pipeline with conditional markers.
+    """
+    # Split into two lines for readability
+    first_half = STAGE_ORDER[:6]  # PM through MIGRATION
+    second_half = STAGE_ORDER[6:-1]  # TEST through DOCS (exclude COMPLETE)
+
+    # Mark conditional stages with *
+    def format_stage(s: Stage) -> str:
+        meta = STAGE_METADATA.get(s)
+        marker = "*" if meta and meta.is_conditional else ""
+        return f"{s.value}{marker}"
+
+    line1 = " → ".join(format_stage(s) for s in first_half)
+    line2 = " → ".join(format_stage(s) for s in second_half) + " → COMPLETE"
+
+    return f"{line1} →\n  {line2}"
+
+
 def get_conditional_stages() -> dict[Stage, str]:
     """
     Get mapping of conditional stages to their skip artifact names.
@@ -419,6 +454,104 @@ def get_decision_config(stage: Stage) -> dict[str, tuple[bool, str, str | None, 
         value: (success, message, rollback_to, is_fast_track)
         for value, success, message, rollback_to, is_fast_track in metadata.decision_outcomes
     }
+
+
+def get_decision_file_name(stage: Stage) -> str | None:
+    """
+    Get the decision file name for a stage.
+
+    Args:
+        stage: The stage to get the decision file name for.
+
+    Returns:
+        Decision file name (e.g., "QA_DECISION") or None if stage has no decision file.
+    """
+    metadata = stage.metadata
+    return metadata.decision_file if metadata else None
+
+
+def get_decision_values(stage: Stage) -> list[str]:
+    """
+    Get the valid decision values for a stage.
+
+    Args:
+        stage: The stage to get decision values for.
+
+    Returns:
+        List of valid decision values (e.g., ["PASS", "FAIL"]), empty if no decision file.
+    """
+    metadata = stage.metadata
+    if not metadata or not metadata.decision_outcomes:
+        return []
+    return [value for value, *_ in metadata.decision_outcomes]
+
+
+def get_decision_words(stage: Stage) -> tuple[str | None, str | None]:
+    """
+    Get the approve and reject decision words for a stage.
+
+    Derives the words from STAGE_METADATA.decision_outcomes:
+    - approve_word: First outcome where success=True
+    - reject_word: First outcome where success=False
+
+    Args:
+        stage: The stage to get decision words for.
+
+    Returns:
+        (approve_word, reject_word) tuple, or (None, None) if stage has no decision file.
+    """
+    metadata = stage.metadata
+    if not metadata or not metadata.decision_outcomes:
+        return (None, None)
+
+    approve_word = next(
+        (value for value, success, *_ in metadata.decision_outcomes if success), None
+    )
+    reject_word = next(
+        (value for value, success, *_ in metadata.decision_outcomes if not success), None
+    )
+    return (approve_word, reject_word)
+
+
+def get_decision_info_for_prompt(stage: Stage) -> str | None:
+    """
+    Get formatted decision file info for prompt injection.
+
+    Returns a markdown snippet describing the decision file and valid values,
+    suitable for injection into stage prompts.
+
+    Args:
+        stage: The stage to get decision info for.
+
+    Returns:
+        Markdown-formatted decision file instructions, or None if no decision file.
+    """
+    metadata = stage.metadata
+    if not metadata or not metadata.decision_file or not metadata.decision_outcomes:
+        return None
+
+    decision_file = metadata.decision_file
+    values = [value for value, *_ in metadata.decision_outcomes]
+
+    # Build the prompt snippet
+    lines = [
+        "## CRITICAL: Decision File",
+        "",
+        f"After completing this stage, you MUST create a decision file:",
+        "",
+        f"**File:** `{decision_file}` (no extension)",
+        f"**Contents:** Exactly one of: `{'`, `'.join(values)}`",
+        "",
+        "Example:",
+        "```",
+        values[0],  # Show first value as example
+        "```",
+        "",
+        "This file must contain ONLY the decision word, nothing else.",
+        "The validation system reads this file to determine the stage result.",
+    ]
+
+    return "\n".join(lines)
 
 
 def parse_stage_arg(
@@ -545,7 +678,6 @@ class WorkflowState:
     rollback_history: list[RollbackEvent] = field(default_factory=list)
 
     # PM Discovery Q&A tracking
-    pm_subphase: str | None = None  # "analyzing", "questioning", "answering", "specifying"
     qa_rounds: list[dict[str, Any]] | None = None  # [{"questions": [...], "answers": [...]}]
     qa_complete: bool = False
 
@@ -816,7 +948,6 @@ class WorkflowState:
             task_name=d.get("task_name", ""),
             task_type=TaskType.from_str(d.get("task_type", "feature")),
             rollback_history=rollback_history,
-            pm_subphase=d.get("pm_subphase"),
             qa_rounds=d.get("qa_rounds"),
             qa_complete=d.get("qa_complete", False),
             stage_plan=d.get("stage_plan"),

@@ -64,14 +64,9 @@ Create REVIEW_NOTES.md in the task's artifacts directory:
 3. Look for potential bugs or issues
 4. Document your findings
 
-## CRITICAL: Decision File
+## Decision Guidelines
 
-After creating REVIEW_NOTES.md, you MUST also create a separate decision file:
-
-**File:** `REVIEW_DECISION` (no extension)
-**Contents:** Exactly one of: `APPROVE`, `REQUEST_CHANGES`, or `REQUEST_MINOR_CHANGES`
-
-### Decision Guidelines
+Choose your decision based on these criteria:
 
 - **APPROVE**: Code quality is acceptable, no blocking issues
 - **REQUEST_MINOR_CHANGES**: Only minor issues found (typos, naming, comments, formatting)
@@ -80,23 +75,6 @@ After creating REVIEW_NOTES.md, you MUST also create a separate decision file:
 - **REQUEST_CHANGES**: Significant issues found (logic bugs, design problems, missing error handling)
   - Use this for issues that could affect functionality or maintainability
   - This triggers a full re-run through all validation stages
-
-Example:
-```
-APPROVE
-```
-or
-```
-REQUEST_MINOR_CHANGES
-```
-or
-```
-REQUEST_CHANGES
-```
-
-This file must contain ONLY the decision word, nothing else. No explanation, no markdown, no extra text.
-
-The validation system reads this file to determine if the stage passes. If the file is missing or unclear, the user will be prompted to make the decision manually.
 
 ## Important Rules
 

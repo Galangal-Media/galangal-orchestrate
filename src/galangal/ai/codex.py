@@ -7,12 +7,12 @@ See: https://developers.openai.com/codex/noninteractive
 
 import json
 import os
-import select
 import subprocess
 import time
 from typing import TYPE_CHECKING, Any, Optional
 
 from galangal.ai.base import AIBackend, PauseCheck
+from galangal.ai.subprocess import SubprocessRunner
 from galangal.config.loader import get_project_root
 from galangal.results import StageResult
 
@@ -75,8 +75,10 @@ class CodexBackend(AIBackend):
     DEFAULT_ARGS = [
         "exec",
         "--full-auto",
-        "--output-schema", "{schema_file}",
-        "-o", "{output_file}",
+        "--output-schema",
+        "{schema_file}",
+        "-o",
+        "{output_file}",
     ]
 
     @property
@@ -141,117 +143,88 @@ class CodexBackend(AIBackend):
         Returns:
             StageResult with structured JSON in the output field
         """
+        # Track timing for activity updates
+        start_time = time.time()
+        last_activity_time = start_time
+
+        def on_output(line: str) -> None:
+            """Process each output line."""
+            nonlocal last_activity_time
+            line = line.strip()
+            # Show meaningful output lines, skip raw JSON
+            if line and not line.startswith("{"):
+                if ui:
+                    ui.add_activity(f"codex: {line[:80]}", "💬")
+                last_activity_time = time.time()
+
+        def on_idle(elapsed: float) -> None:
+            """Update status periodically."""
+            nonlocal last_activity_time
+            if not ui:
+                return
+
+            # Update status with elapsed time
+            minutes = int(elapsed // 60)
+            seconds = int(elapsed % 60)
+            time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+            ui.set_status("running", f"Codex reviewing code ({time_str})")
+
+            # Add activity update if no output for 30 seconds
+            current_time = time.time()
+            if current_time - last_activity_time >= 30.0:
+                if minutes > 0:
+                    ui.add_activity(f"Still reviewing... ({minutes}m elapsed)", "⏳")
+                else:
+                    ui.add_activity("Still reviewing...", "⏳")
+                last_activity_time = current_time
+
         try:
             # Create temp files for prompt, schema, and output
             schema_content = json.dumps(REVIEW_OUTPUT_SCHEMA)
-            with self._temp_file(prompt, suffix=".txt") as prompt_file, \
-                 self._temp_file(schema_content, suffix=".json") as schema_file, \
-                 self._temp_file(suffix=".json") as output_file:
-
+            with (
+                self._temp_file(prompt, suffix=".txt") as prompt_file,
+                self._temp_file(schema_content, suffix=".json") as schema_file,
+                self._temp_file(suffix=".json") as output_file,
+            ):
                 if ui:
                     ui.set_status("starting", "initializing Codex")
 
-                # Build command from config (or use defaults)
                 shell_cmd = self._build_command(prompt_file, schema_file, output_file)
-
-                start_time = time.time()
-
-                process = subprocess.Popen(
-                    shell_cmd,
-                    shell=True,
-                    cwd=get_project_root(),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,  # Merge stderr into stdout to prevent deadlock
-                    text=True,
-                )
 
                 if ui:
                     ui.set_status("running", "Codex reviewing code")
                     ui.add_activity("Codex code review started", "🔍")
 
-                # Track timing for progress updates
-                last_status_update = start_time
-                last_activity_time = start_time
-                status_update_interval = 5.0  # Update status every 5 seconds
-                activity_interval = 30.0  # Add activity log entry every 30 seconds
+                runner = SubprocessRunner(
+                    command=shell_cmd,
+                    timeout=timeout,
+                    pause_check=pause_check,
+                    ui=ui,
+                    on_output=on_output,
+                    on_idle=on_idle,
+                    idle_interval=5.0,
+                    poll_interval_active=0.05,
+                    poll_interval_idle=0.5,
+                )
 
-                # Poll for completion, checking for pause and timeout
-                while True:
-                    retcode = process.poll()
+                result = runner.run()
 
-                    if retcode is not None:
-                        break
-
-                    # Check for pause request
-                    if pause_check and pause_check():
-                        process.terminate()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                        if ui:
-                            ui.add_activity("Paused by user request", "⏸️")
-                            ui.finish(success=False)
-                        return StageResult.paused()
-
-                    current_time = time.time()
-                    elapsed = current_time - start_time
-
-                    # Check for timeout
-                    if elapsed > timeout:
-                        process.kill()
-                        if ui:
-                            ui.add_activity(f"Timeout after {timeout}s", "❌")
-                        return StageResult.timeout(timeout)
-
-                    # Read any available stdout/stderr (non-blocking)
-                    if process.stdout:
-                        try:
-                            ready, _, _ = select.select([process.stdout], [], [], 0)
-                            if ready:
-                                line = process.stdout.readline()
-                                if line and ui:
-                                    # Show meaningful output lines
-                                    line = line.strip()
-                                    if line and not line.startswith("{"):  # Skip raw JSON
-                                        ui.add_activity(f"codex: {line[:80]}", "💬")
-                                        last_activity_time = current_time
-                        except (ValueError, TypeError, OSError):
-                            # select() may fail on non-selectable streams (e.g., in tests)
-                            pass
-
-                    # Update status with elapsed time periodically
-                    if ui and current_time - last_status_update >= status_update_interval:
-                        minutes = int(elapsed // 60)
-                        seconds = int(elapsed % 60)
-                        if minutes > 0:
-                            time_str = f"{minutes}m {seconds}s"
-                        else:
-                            time_str = f"{seconds}s"
-                        ui.set_status("running", f"Codex reviewing code ({time_str})")
-                        last_status_update = current_time
-
-                    # Add periodic activity update if no other activity
-                    if ui and current_time - last_activity_time >= activity_interval:
-                        minutes = int(elapsed // 60)
-                        if minutes > 0:
-                            ui.add_activity(f"Still reviewing... ({minutes}m elapsed)", "⏳")
-                        else:
-                            ui.add_activity("Still reviewing...", "⏳")
-                        last_activity_time = current_time
-
-                    time.sleep(0.5)
-
-                # Capture remaining output for debugging (stderr merged into stdout)
-                stdout, _ = process.communicate(timeout=10)
-
-                if process.returncode != 0:
+                if result.paused:
                     if ui:
-                        ui.add_activity(f"Codex failed (exit {process.returncode})", "❌")
+                        ui.finish(success=False)
+                    return StageResult.paused()
+
+                if result.timed_out:
+                    return StageResult.timeout(result.timeout_seconds or timeout)
+
+                # Process completed
+                if result.exit_code != 0:
+                    if ui:
+                        ui.add_activity(f"Codex failed (exit {result.exit_code})", "❌")
                         ui.finish(success=False)
                     return StageResult.error(
-                        message=f"Codex failed (exit {process.returncode})",
-                        output=stdout,
+                        message=f"Codex failed (exit {result.exit_code})",
+                        output=result.output,
                     )
 
                 # Read the structured output
@@ -259,8 +232,7 @@ class CodexBackend(AIBackend):
                     if ui:
                         ui.add_activity("No output file generated", "❌")
                         ui.finish(success=False)
-                    # Include all output for debugging
-                    debug_output = f"Expected output at: {output_file}\nOutput:\n{stdout}"
+                    debug_output = f"Expected output at: {output_file}\nOutput:\n{result.output}"
                     return StageResult.error(
                         message="Codex did not produce output file. Check if --output-schema is supported.",
                         output=debug_output,
@@ -293,8 +265,6 @@ class CodexBackend(AIBackend):
                             )
                         ui.finish(success=True)
 
-                    # Return success with structured JSON output
-                    # The workflow will post-process this to write artifacts
                     return StageResult.create_success(
                         message=f"Codex review complete: {decision}",
                         output=output_content,
@@ -322,8 +292,10 @@ class CodexBackend(AIBackend):
         structured output schema.
         """
         try:
-            with self._temp_file(prompt, suffix=".txt") as prompt_file, \
-                 self._temp_file(suffix=".txt") as output_file:
+            with (
+                self._temp_file(prompt, suffix=".txt") as prompt_file,
+                self._temp_file(suffix=".txt") as output_file,
+            ):
                 # Use config command or default
                 command = self._config.command if self._config else self.DEFAULT_COMMAND
                 shell_cmd = f"cat '{prompt_file}' | {command} exec -o '{output_file}'"

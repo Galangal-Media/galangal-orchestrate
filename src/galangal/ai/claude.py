@@ -3,13 +3,11 @@ Claude CLI backend implementation.
 """
 
 import json
-import os
-import select
 import subprocess
-import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from galangal.ai.base import AIBackend, PauseCheck
+from galangal.ai.subprocess import SubprocessRunner
 from galangal.config.loader import get_project_root
 from galangal.results import StageResult
 
@@ -23,10 +21,13 @@ class ClaudeBackend(AIBackend):
     # Default command and args when no config provided
     DEFAULT_COMMAND = "claude"
     DEFAULT_ARGS = [
-        "--output-format", "stream-json",
+        "--output-format",
+        "stream-json",
         "--verbose",
-        "--max-turns", "{max_turns}",
-        "--permission-mode", "acceptEdits",
+        "--max-turns",
+        "{max_turns}",
+        "--permission-mode",
+        "acceptEdits",
     ]
 
     @property
@@ -73,117 +74,64 @@ class ClaudeBackend(AIBackend):
         pause_check: PauseCheck | None = None,
     ) -> StageResult:
         """Invoke Claude Code with a prompt."""
-        from datetime import datetime
-        debug = os.environ.get("GALANGAL_DEBUG", "").lower() in ("1", "true", "yes")
-        debug_log_file = None
+        # State for output processing
+        pending_tools: list[tuple[str, str]] = []
 
-        if debug:
-            # Create logs directory in project root if it doesn't exist
-            logs_dir = get_project_root() / "logs"
-            logs_dir.mkdir(parents=True, exist_ok=True)
-            debug_log_file = logs_dir / "galangal_debug.log"
+        def on_output(line: str) -> None:
+            """Process each output line."""
+            if ui:
+                ui.add_raw_line(line)
+            self._process_stream_line(line, ui, pending_tools)
 
-        def _debug(msg: str) -> None:
-            if debug and debug_log_file:
-                timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                with open(debug_log_file, "a") as f:
-                    f.write(f"[{timestamp}] {msg}\n")
+        def on_idle(elapsed: float) -> None:
+            """Update status when idle."""
+            if ui:
+                if pending_tools:
+                    tool_name = pending_tools[-1][1]
+                    ui.set_status("waiting", f"{tool_name}...")
+                else:
+                    ui.set_status("waiting", "API response")
 
-        # Write prompt to a temporary file and pipe it to claude via stdin
-        # This avoids "Argument list too long" errors when prompts exceed ~128KB
-        _debug(f"Creating temp file for prompt ({len(prompt)} chars)")
         try:
             with self._temp_file(prompt, suffix=".txt") as prompt_file:
-                _debug(f"Temp file created: {prompt_file}")
-
-                # Build command from config (or use defaults)
                 shell_cmd = self._build_command(prompt_file, max_turns)
-                _debug(f"Starting subprocess: {shell_cmd[:100]}...")
 
-                process = subprocess.Popen(
-                    shell_cmd,
-                    shell=True,
-                    cwd=get_project_root(),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,  # Merge stderr into stdout to prevent deadlock
-                    text=True,
-                )
-                _debug(f"Subprocess started with PID {process.pid}")
-
-                output_lines: list[str] = []
-                last_status_time = time.time()
-                start_time = time.time()
-                pending_tools: list[tuple[str, str]] = []
-
-                _debug("Setting initial UI status")
                 if ui:
                     ui.set_status("starting", "initializing Claude")
-                _debug("Entering main read loop")
 
-                while True:
-                    retcode = process.poll()
+                runner = SubprocessRunner(
+                    command=shell_cmd,
+                    timeout=timeout,
+                    pause_check=pause_check,
+                    ui=ui,
+                    on_output=on_output,
+                    on_idle=on_idle,
+                    idle_interval=3.0,
+                    poll_interval_active=0.05,
+                    poll_interval_idle=0.5,
+                )
 
-                    if process.stdout:
-                        try:
-                            ready, _, _ = select.select([process.stdout], [], [], 0.5)
+                result = runner.run()
 
-                            if ready:
-                                line = process.stdout.readline()
-                                if line:
-                                    output_lines.append(line)
-                                    if ui:
-                                        ui.add_raw_line(line)
-                                    self._process_stream_line(line, ui, pending_tools)
-                            else:
-                                idle_time = time.time() - last_status_time
-                                if idle_time > 3 and ui:
-                                    if pending_tools:
-                                        tool_name = pending_tools[-1][1]
-                                        ui.set_status("waiting", f"{tool_name}...")
-                                    else:
-                                        ui.set_status("waiting", "API response")
-                                    last_status_time = time.time()
-                        except (OSError, ValueError):
-                            # stdout closed or invalid, break out of loop
-                            break
+                if result.paused:
+                    if ui:
+                        ui.finish(success=False)
+                    return StageResult.paused()
 
-                    if retcode is not None:
-                        break
+                if result.timed_out:
+                    return StageResult.timeout(result.timeout_seconds or timeout)
 
-                    # Check for pause request via callback
-                    if pause_check and pause_check():
-                        process.terminate()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                        if ui:
-                            ui.add_activity("Paused by user request", "⏸️")
-                            ui.finish(success=False)
-                        return StageResult.paused()
-
-                    if time.time() - start_time > timeout:
-                        process.kill()
-                        if ui:
-                            ui.add_activity(f"Timeout after {timeout}s", "❌")
-                        return StageResult.timeout(timeout)
-
-                try:
-                    remaining_out, _ = process.communicate(timeout=10)
-                    if remaining_out:
-                        output_lines.append(remaining_out)
-                except (OSError, ValueError):
-                    pass  # Process already terminated or pipe closed
-
-                full_output = "".join(output_lines)
+                # Process completed - analyze output
+                full_output = result.output
 
                 if "max turns" in full_output.lower() or "reached max" in full_output.lower():
                     if ui:
                         ui.add_activity("Max turns reached", "❌")
                     return StageResult.max_turns(full_output)
 
+                # Extract result from JSON stream
                 result_text = ""
-                for line in output_lines:
+                for line in full_output.splitlines():
                     try:
                         data = json.loads(line.strip())
                         if data.get("type") == "result":
@@ -194,23 +142,17 @@ class ClaudeBackend(AIBackend):
                     except (json.JSONDecodeError, KeyError):
                         pass
 
-                if process.returncode == 0:
+                if result.exit_code == 0:
                     return StageResult.create_success(
                         message=result_text or "Stage completed",
                         output=full_output,
                     )
                 return StageResult.error(
-                    message=f"Claude failed (exit {process.returncode})",
+                    message=f"Claude failed (exit {result.exit_code})",
                     output=full_output,
                 )
 
-        except subprocess.TimeoutExpired:
-            process.kill()
-            return StageResult.timeout(timeout)
         except Exception as e:
-            import traceback
-            _debug(f"Exception caught: {type(e).__name__}: {e}")
-            _debug(f"Traceback:\n{traceback.format_exc()}")
             return StageResult.error(f"Claude invocation error: {e}")
 
     def _process_stream_line(
@@ -236,7 +178,7 @@ class ClaudeBackend(AIBackend):
 
     def _handle_assistant_message(
         self,
-        data: dict,
+        data: dict[str, Any],
         ui: Optional["StageUI"],
         pending_tools: list[tuple[str, str]],
     ) -> None:
@@ -292,7 +234,7 @@ class ClaudeBackend(AIBackend):
 
     def _handle_user_message(
         self,
-        data: dict,
+        data: dict[str, Any],
         ui: Optional["StageUI"],
         pending_tools: list[tuple[str, str]],
     ) -> None:
@@ -303,13 +245,11 @@ class ClaudeBackend(AIBackend):
             if item.get("type") == "tool_result":
                 tool_id = item.get("tool_use_id", "")
                 is_error = item.get("is_error", False)
-                pending_tools[:] = [
-                    (tid, tname) for tid, tname in pending_tools if tid != tool_id
-                ]
+                pending_tools[:] = [(tid, tname) for tid, tname in pending_tools if tid != tool_id]
                 if is_error and ui:
                     ui.set_status("error", "tool failed")
 
-    def _handle_system_message(self, data: dict, ui: Optional["StageUI"]) -> None:
+    def _handle_system_message(self, data: dict[str, Any], ui: Optional["StageUI"]) -> None:
         """Handle system messages."""
         message = data.get("message", "")
         subtype = data.get("subtype", "")

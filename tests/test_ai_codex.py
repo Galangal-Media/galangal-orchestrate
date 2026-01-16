@@ -16,6 +16,11 @@ from galangal.ai.claude import ClaudeBackend
 from galangal.ai.codex import CodexBackend
 from galangal.results import StageResult, StageResultType
 
+# Patch locations - subprocess logic moved to galangal.ai.subprocess module
+SUBPROCESS_POPEN = "galangal.ai.subprocess.subprocess.Popen"
+SUBPROCESS_SELECT = "galangal.ai.subprocess.select.select"
+SUBPROCESS_TIME = "galangal.ai.subprocess.time.time"
+
 
 class TestCodexBackendInvoke:
     """Tests for CodexBackend.invoke() StageResult returns."""
@@ -35,9 +40,9 @@ class TestCodexBackendInvoke:
         mock_process.communicate.return_value = ("", "")
         mock_process.returncode = 0
 
-        with patch("galangal.ai.codex.subprocess.Popen", return_value=mock_process):
-            with patch("galangal.ai.codex.os.path.exists", return_value=True):
-                with patch("builtins.open", MagicMock()):
+        with patch(SUBPROCESS_POPEN, return_value=mock_process):
+            with patch(SUBPROCESS_SELECT, return_value=([], [], [])):
+                with patch("galangal.ai.codex.os.path.exists", return_value=True):
                     with patch(
                         "galangal.ai.codex.open",
                         MagicMock(
@@ -67,8 +72,9 @@ class TestCodexBackendInvoke:
         mock_process.communicate.return_value = ("", "some error")
         mock_process.returncode = 1
 
-        with patch("galangal.ai.codex.subprocess.Popen", return_value=mock_process):
-            result = backend.invoke("test prompt")
+        with patch(SUBPROCESS_POPEN, return_value=mock_process):
+            with patch(SUBPROCESS_SELECT, return_value=([], [], [])):
+                result = backend.invoke("test prompt")
 
         assert isinstance(result, StageResult)
         assert result.success is False
@@ -83,11 +89,12 @@ class TestCodexBackendInvoke:
         mock_process.poll.return_value = None  # Never finishes
         mock_process.kill = MagicMock()
 
-        with patch("galangal.ai.codex.subprocess.Popen", return_value=mock_process):
-            with patch("galangal.ai.codex.time.time") as mock_time:
-                # Simulate timeout
-                mock_time.side_effect = [0, 100]
-                result = backend.invoke("test prompt", timeout=50)
+        with patch(SUBPROCESS_POPEN, return_value=mock_process):
+            with patch(SUBPROCESS_SELECT, return_value=([], [], [])):
+                with patch(SUBPROCESS_TIME) as mock_time:
+                    # Simulate timeout
+                    mock_time.side_effect = [0, 0, 100, 100]
+                    result = backend.invoke("test prompt", timeout=50)
 
         assert isinstance(result, StageResult)
         assert result.success is False
@@ -106,8 +113,9 @@ class TestCodexBackendInvoke:
         def pause_check():
             return True
 
-        with patch("galangal.ai.codex.subprocess.Popen", return_value=mock_process):
-            result = backend.invoke("test prompt", pause_check=pause_check)
+        with patch(SUBPROCESS_POPEN, return_value=mock_process):
+            with patch(SUBPROCESS_SELECT, return_value=([], [], [])):
+                result = backend.invoke("test prompt", pause_check=pause_check)
 
         assert isinstance(result, StageResult)
         assert result.success is False
@@ -122,9 +130,10 @@ class TestCodexBackendInvoke:
         mock_process.communicate.return_value = ("", "")
         mock_process.returncode = 0
 
-        with patch("galangal.ai.codex.subprocess.Popen", return_value=mock_process):
-            with patch("galangal.ai.codex.os.path.exists", return_value=False):
-                result = backend.invoke("test prompt")
+        with patch(SUBPROCESS_POPEN, return_value=mock_process):
+            with patch(SUBPROCESS_SELECT, return_value=([], [], [])):
+                with patch("galangal.ai.codex.os.path.exists", return_value=False):
+                    result = backend.invoke("test prompt")
 
         assert isinstance(result, StageResult)
         assert result.success is False
@@ -139,20 +148,21 @@ class TestCodexBackendInvoke:
         mock_process.communicate.return_value = ("", "")
         mock_process.returncode = 0
 
-        with patch("galangal.ai.codex.subprocess.Popen", return_value=mock_process):
-            with patch("galangal.ai.codex.os.path.exists", return_value=True):
-                with patch(
-                    "galangal.ai.codex.open",
-                    MagicMock(
-                        return_value=MagicMock(
-                            __enter__=MagicMock(
-                                return_value=MagicMock(read=MagicMock(return_value="not json"))
-                            ),
-                            __exit__=MagicMock(return_value=False),
-                        )
-                    ),
-                ):
-                    result = backend.invoke("test prompt")
+        with patch(SUBPROCESS_POPEN, return_value=mock_process):
+            with patch(SUBPROCESS_SELECT, return_value=([], [], [])):
+                with patch("galangal.ai.codex.os.path.exists", return_value=True):
+                    with patch(
+                        "galangal.ai.codex.open",
+                        MagicMock(
+                            return_value=MagicMock(
+                                __enter__=MagicMock(
+                                    return_value=MagicMock(read=MagicMock(return_value="not json"))
+                                ),
+                                __exit__=MagicMock(return_value=False),
+                            )
+                        ),
+                    ):
+                        result = backend.invoke("test prompt")
 
         assert isinstance(result, StageResult)
         assert result.success is False
@@ -237,7 +247,7 @@ class TestGetBackendWithFallback:
     def test_returns_fallback_when_primary_unavailable(self):
         """Test that fallback is returned when primary is unavailable."""
 
-        def mock_available(name):
+        def mock_available(name, config=None):
             return name == "claude"
 
         with patch("galangal.ai.is_backend_available", side_effect=mock_available):
@@ -352,24 +362,25 @@ class TestCodexBackendStderrHandling:
         mock_process.returncode = 0
         mock_process.stdout = MagicMock()
 
-        with patch("galangal.ai.codex.subprocess.Popen", return_value=mock_process) as mock_popen:
-            with patch("galangal.ai.codex.os.path.exists", return_value=True):
-                with patch(
-                    "galangal.ai.codex.open",
-                    MagicMock(
-                        return_value=MagicMock(
-                            __enter__=MagicMock(
-                                return_value=MagicMock(
-                                    read=MagicMock(
-                                        return_value='{"review_notes": "ok", "decision": "APPROVE", "issues": []}'
+        with patch(SUBPROCESS_POPEN, return_value=mock_process) as mock_popen:
+            with patch(SUBPROCESS_SELECT, return_value=([], [], [])):
+                with patch("galangal.ai.codex.os.path.exists", return_value=True):
+                    with patch(
+                        "galangal.ai.codex.open",
+                        MagicMock(
+                            return_value=MagicMock(
+                                __enter__=MagicMock(
+                                    return_value=MagicMock(
+                                        read=MagicMock(
+                                            return_value='{"review_notes": "ok", "decision": "APPROVE", "issues": []}'
+                                        )
                                     )
-                                )
-                            ),
-                            __exit__=MagicMock(return_value=False),
-                        )
-                    ),
-                ):
-                    backend.invoke("test prompt", timeout=1)
+                                ),
+                                __exit__=MagicMock(return_value=False),
+                            )
+                        ),
+                    ):
+                        backend.invoke("test prompt", timeout=1)
 
         # Verify stderr=STDOUT was passed to prevent deadlock
         call_kwargs = mock_popen.call_args[1]

@@ -87,9 +87,9 @@ Choose the right workflow for your task:
 | Type | Stages | When to Use |
 |------|--------|-------------|
 | **Feature** | All stages | New functionality |
-| **Bug Fix** | PM → DEV → TEST → QA | Fixing bugs |
-| **Refactor** | PM → DESIGN → DEV → TEST | Code restructuring |
-| **Chore** | PM → DEV → TEST | Config, dependencies |
+| **Bug Fix** | PM → PREFLIGHT → DEV → TEST → QA | Fixing bugs |
+| **Refactor** | PM → DESIGN → PREFLIGHT → DEV → TEST | Code restructuring |
+| **Chore** | PM → PREFLIGHT → DEV → TEST | Config, dependencies |
 | **Docs** | PM → DOCS | Documentation only |
 | **Hotfix** | PM → DEV → TEST | Critical fixes |
 

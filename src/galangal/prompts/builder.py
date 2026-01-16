@@ -300,14 +300,21 @@ class PromptBuilder:
 Only update documentation types marked as YES above.""")
 
         context = "\n".join(context_parts)
-        return f"{context}\n\n---\n\n{base_prompt}"
+
+        # Add decision file info at the END of the prompt for emphasis
+        # This ensures the AI sees the critical file creation requirement last
+        from galangal.core.state import get_decision_info_for_prompt
+
+        decision_info = get_decision_info_for_prompt(stage)
+        decision_suffix = f"\n\n---\n\n{decision_info}" if decision_info else ""
+
+        return f"{context}\n\n---\n\n{base_prompt}{decision_suffix}"
 
     def _get_artifact_context(self, stage: Stage, task_name: str) -> list[str]:
         """
         Get relevant artifact content for inclusion in the stage prompt.
 
-        The artifacts each stage needs are documented in STAGE_METADATA.context_artifacts.
-        This method implements the actual inclusion logic with conditional handling:
+        Each stage receives context from earlier artifacts based on what it needs:
         - DESIGN.md supersedes PLAN.md when present
         - If DESIGN was skipped, PLAN.md is included instead
         - Only includes artifacts that exist

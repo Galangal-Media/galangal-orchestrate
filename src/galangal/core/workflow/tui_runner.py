@@ -351,15 +351,19 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
 
                             if choice == "approve":
                                 # Write decision file and continue as success
-                                decision_file = f"{state.stage.value.upper()}_DECISION"
-                                # Match DECISION_CONFIGS expected values per stage
-                                if state.stage == Stage.SECURITY:
-                                    decision_word = "APPROVED"
-                                elif state.stage in (Stage.QA, Stage.TEST):
-                                    decision_word = "PASS"
+                                from galangal.core.state import (
+                                    get_decision_file_name,
+                                    get_decision_words,
+                                )
+
+                                decision_file = get_decision_file_name(state.stage)
+                                approve_word, _ = get_decision_words(state.stage)
+                                if decision_file and approve_word:
+                                    write_artifact(decision_file, approve_word, state.task_name)
                                 else:
-                                    decision_word = "APPROVE"
-                                write_artifact(decision_file, decision_word, state.task_name)
+                                    # Fallback for stages without decision metadata
+                                    decision_file = f"{state.stage.value.upper()}_DECISION"
+                                    write_artifact(decision_file, "APPROVE", state.task_name)
                                 app.add_activity(f"User approved - wrote {decision_file}", "✓")
 
                                 # Audit log
@@ -393,15 +397,19 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                             if choice == "reject":
                                 # Write decision file and rollback to DEV
                                 original_stage = state.stage.value
-                                decision_file = f"{original_stage.upper()}_DECISION"
-                                # Match DECISION_CONFIGS expected values per stage
-                                if state.stage == Stage.SECURITY:
-                                    decision_word = "REJECTED"
-                                elif state.stage in (Stage.QA, Stage.TEST):
-                                    decision_word = "FAIL"
+                                from galangal.core.state import (
+                                    get_decision_file_name,
+                                    get_decision_words,
+                                )
+
+                                decision_file = get_decision_file_name(state.stage)
+                                _, reject_word = get_decision_words(state.stage)
+                                if decision_file and reject_word:
+                                    write_artifact(decision_file, reject_word, state.task_name)
                                 else:
-                                    decision_word = "REQUEST_CHANGES"
-                                write_artifact(decision_file, decision_word, state.task_name)
+                                    # Fallback for stages without decision metadata
+                                    decision_file = f"{original_stage.upper()}_DECISION"
+                                    write_artifact(decision_file, "REQUEST_CHANGES", state.task_name)
                                 app.add_activity(f"User rejected - wrote {decision_file}", "✗")
 
                                 # Audit log
@@ -718,7 +726,6 @@ async def _run_pm_discovery(
 
     # Mark discovery complete
     state.qa_complete = True
-    state.pm_subphase = "specifying"
     save_state(state)
 
     if qa_rounds:
