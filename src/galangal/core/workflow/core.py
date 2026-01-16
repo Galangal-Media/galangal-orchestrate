@@ -361,10 +361,11 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     tui_app.add_activity(f"Using {backend.name} backend", "🤖")
 
     ui = TUIAdapter(tui_app)
+    max_turns = backend.config.max_turns if backend.config else 200
     invoke_result = backend.invoke(
         prompt=prompt,
         timeout=config.stages.timeout,
-        max_turns=200,
+        max_turns=max_turns,
         ui=ui,
         pause_check=pause_check,
         stage=stage.value,

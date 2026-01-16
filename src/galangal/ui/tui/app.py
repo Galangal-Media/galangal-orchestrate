@@ -890,11 +890,12 @@ class StageTUIApp(WorkflowTUIApp):
         config = get_config()
         backend = get_backend_with_fallback(config.ai.default, config=config)
         ui = TUIAdapter(self)
+        max_turns = backend.config.max_turns if backend.config else 200
 
         self.result = backend.invoke(
             prompt=self.prompt,
             timeout=14400,
-            max_turns=200,
+            max_turns=max_turns,
             ui=ui,
         )
 

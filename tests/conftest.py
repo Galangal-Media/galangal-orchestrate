@@ -50,6 +50,7 @@ class MockAIBackend(AIBackend):
             default_response: Default response if stage not in responses.
             artifact_callback: Optional callback(stage, task_name) to create artifacts.
         """
+        super().__init__(config=None)  # No config for mock
         self.responses = responses or {}
         self.default_response = default_response or StageResult.create_success("Mock success")
         self.artifact_callback = artifact_callback

@@ -98,6 +98,7 @@ class MockAIBackend:
     # Backend properties expected by execute_stage
     read_only = False
     name = "mock"
+    config = None  # No config for mock backend
 
     def __init__(
         self,
