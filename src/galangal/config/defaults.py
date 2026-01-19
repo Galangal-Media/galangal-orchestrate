@@ -107,7 +107,7 @@ ai:
   backends:
     claude:
       command: "claude"
-      args: ["-p", "{{prompt}}", "--output-format", "stream-json", "--verbose"]
+      args: ["--output-format", "stream-json", "--verbose", "--max-turns", "{{max_turns}}", "--permission-mode", "bypassPermissions"]
       max_turns: 200
 
 # =============================================================================

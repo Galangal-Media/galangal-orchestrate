@@ -171,7 +171,8 @@ def get_next_stage(current: Stage, state: WorkflowState) -> Stage | None:
     3. Fast-track skipping (minor rollback - skip stages that already passed)
     4. PM-driven stage plan (STAGE_PLAN.md recommendations)
     5. Manual skip artifacts (e.g., MIGRATION_SKIP.md from galangal skip-*)
-    6. skip_if conditions from validation config (glob-based skipping for all stages)
+    6. TEST_GATE: skip if not enabled or no tests configured
+    7. skip_if conditions from validation config (glob-based skipping for all stages)
 
     This is the single source of truth for skip logic. All skip decisions
     happen here during planning, ensuring the progress bar accurately
@@ -217,13 +218,18 @@ def get_next_stage(current: Stage, state: WorkflowState) -> Stage | None:
         ):
             continue
 
-        # Check 6: for conditional stages, if PM explicitly said "run", skip the glob check
+        # Check 6: TEST_GATE - skip if not enabled or no tests configured
+        if next_stage == Stage.TEST_GATE:
+            if not config.test_gate.enabled or not config.test_gate.tests:
+                continue
+
+        # Check 7: for conditional stages, if PM explicitly said "run", skip the glob check
         if next_stage in CONDITIONAL_STAGES:
             if state.stage_plan and next_stage.value in state.stage_plan:
                 if state.stage_plan[next_stage.value].get("action") == "run":
                     return next_stage  # PM says run, skip the glob check
 
-        # Check 7: skip_if conditions for ALL stages (glob-based skipping)
+        # Check 8: skip_if conditions for ALL stages (glob-based skipping)
         # This is the single place where skip_if is evaluated
         if runner.should_skip_stage(next_stage.value.upper(), task_name):
             continue
@@ -231,6 +237,164 @@ def get_next_stage(current: Stage, state: WorkflowState) -> Stage | None:
         return next_stage
 
     return None
+
+
+def _execute_test_gate(
+    state: WorkflowState,
+    tui_app: WorkflowTUIApp,
+    config: Any,
+) -> StageResult:
+    """
+    Execute the TEST_GATE stage - run configured test commands mechanically.
+
+    This is a non-AI stage that runs shell commands to verify tests pass.
+    All configured tests must pass for the stage to succeed.
+
+    Args:
+        state: Current workflow state.
+        tui_app: TUI app for progress display.
+        config: Galangal configuration with test_gate settings.
+
+    Returns:
+        StageResult indicating success or failure with rollback to DEV.
+    """
+    import subprocess
+
+    from galangal.config.loader import get_project_root
+    from galangal.logging import workflow_logger
+
+    task_name = state.task_name
+    test_config = config.test_gate
+    project_root = get_project_root()
+
+    tui_app.add_activity("Running test gate checks...", "🧪")
+
+    # Track results for each test suite
+    results: list[dict[str, Any]] = []
+    all_passed = True
+    failed_tests: list[str] = []
+
+    for test in test_config.tests:
+        tui_app.add_activity(f"Running: {test.name}", "▶")
+        tui_app.show_message(f"Test Gate: {test.name}", "info")
+
+        try:
+            result = subprocess.run(
+                test.command,
+                shell=True,
+                cwd=project_root,
+                capture_output=True,
+                text=True,
+                timeout=test.timeout,
+            )
+
+            passed = result.returncode == 0
+            output = result.stdout + result.stderr
+
+            # Truncate output for display
+            output_preview = output[:2000] if len(output) > 2000 else output
+
+            results.append({
+                "name": test.name,
+                "command": test.command,
+                "passed": passed,
+                "exit_code": result.returncode,
+                "output": output_preview,
+            })
+
+            if passed:
+                tui_app.add_activity(f"✓ {test.name} passed", "✅")
+            else:
+                tui_app.add_activity(f"✗ {test.name} failed (exit code {result.returncode})", "❌")
+                all_passed = False
+                failed_tests.append(test.name)
+
+                # Stop on first failure if fail_fast is enabled
+                if test_config.fail_fast:
+                    tui_app.add_activity("Stopping (fail_fast enabled)", "⚠")
+                    break
+
+        except subprocess.TimeoutExpired:
+            results.append({
+                "name": test.name,
+                "command": test.command,
+                "passed": False,
+                "exit_code": -1,
+                "output": f"Command timed out after {test.timeout} seconds",
+            })
+            tui_app.add_activity(f"✗ {test.name} timed out", "⏱️")
+            all_passed = False
+            failed_tests.append(test.name)
+
+            if test_config.fail_fast:
+                break
+
+        except Exception as e:
+            results.append({
+                "name": test.name,
+                "command": test.command,
+                "passed": False,
+                "exit_code": -1,
+                "output": f"Error running command: {e}",
+            })
+            tui_app.add_activity(f"✗ {test.name} error: {e}", "❌")
+            all_passed = False
+            failed_tests.append(test.name)
+
+            if test_config.fail_fast:
+                break
+
+    # Build TEST_GATE_RESULTS.md artifact
+    passed_count = sum(1 for r in results if r["passed"])
+    total_count = len(results)
+    status = "PASS" if all_passed else "FAIL"
+
+    artifact_lines = [
+        "# Test Gate Results\n",
+        f"\n**Status:** {status}",
+        f"\n**Passed:** {passed_count}/{total_count}\n",
+    ]
+
+    if not all_passed:
+        artifact_lines.append(f"\n**Failed Tests:** {', '.join(failed_tests)}\n")
+
+    artifact_lines.append("\n## Test Results\n")
+
+    for r in results:
+        status_icon = "✅" if r["passed"] else "❌"
+        artifact_lines.append(f"\n### {status_icon} {r['name']}\n")
+        artifact_lines.append(f"\n**Command:** `{r['command']}`\n")
+        artifact_lines.append(f"**Exit Code:** {r['exit_code']}\n")
+        if r["output"]:
+            artifact_lines.append(f"\n<details>\n<summary>Output</summary>\n\n```\n{r['output']}\n```\n\n</details>\n")
+
+    write_artifact("TEST_GATE_RESULTS.md", "".join(artifact_lines), task_name)
+    tui_app.add_activity("Wrote TEST_GATE_RESULTS.md", "📝")
+
+    # Write decision file
+    decision = "PASS" if all_passed else "FAIL"
+    write_artifact("TEST_GATE_DECISION", decision, task_name)
+
+    # Log result
+    workflow_logger.stage_completed(
+        stage="TEST_GATE",
+        task_name=task_name,
+        success=all_passed,
+        duration=0,  # Duration tracked by caller
+    )
+
+    if all_passed:
+        message = f"All {total_count} test suite(s) passed"
+        tui_app.show_message(f"Test Gate: {message}", "success")
+        return StageResult.create_success(message)
+    else:
+        message = f"Test gate failed: {len(failed_tests)} test suite(s) failed"
+        tui_app.show_message(f"Test Gate: {message}", "error")
+        return StageResult.rollback_required(
+            message=message,
+            rollback_to=Stage.DEV,
+            output="\n".join(f"- {t}" for t in failed_tests),
+        )
 
 
 def execute_stage(
@@ -311,6 +475,10 @@ def execute_stage(
                 message=result.message,
                 details=result.output or "",
             )
+
+    # TEST_GATE runs configured test commands mechanically (no AI)
+    if stage == Stage.TEST_GATE:
+        return _execute_test_gate(state, tui_app, config)
 
     # Get backend first (needed for backend-specific prompts)
     backend = get_backend_for_stage(stage, config, use_fallback=True)

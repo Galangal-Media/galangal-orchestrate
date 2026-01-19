@@ -62,6 +62,7 @@ galangal status
 | **DEV** | Implementation | Code changes |
 | **MIGRATION*** | Database migration checks | MIGRATION_REPORT.md |
 | **TEST** | Test implementation | TEST_PLAN.md, TEST_SUMMARY.md |
+| **TEST_GATE*** | Verify configured test suites pass | TEST_GATE_RESULTS.md |
 | **CONTRACT*** | API contract validation | CONTRACT_REPORT.md |
 | **QA** | Quality assurance | QA_REPORT.md |
 | **BENCHMARK*** | Performance validation | BENCHMARK_REPORT.md |
@@ -79,6 +80,47 @@ When validation commands run (tests, linters, etc.), Galangal creates debugging 
 - **TEST_SUMMARY.md** - Concise test results (pass/fail counts, failed test names, coverage) included in downstream stage prompts
 
 These artifacts help you understand what failed without digging through logs, and give downstream stages (QA, REVIEW) context about test results without bloating prompts with verbose output.
+
+### Test Gate
+
+The **TEST_GATE** stage is an optional quality gate that runs configured test suites mechanically (no AI). It runs after the TEST stage and before QA. All configured tests must pass for the workflow to proceed.
+
+**Why use Test Gate?**
+- Ensures specific test suites always pass before QA
+- Separates "writing tests" (TEST stage) from "verifying tests pass" (TEST_GATE)
+- QA can skip running automated tests and focus on exploratory testing
+- Provides a clear, repeatable verification step
+
+**Configuration:**
+
+```yaml
+# .galangal/config.yaml
+test_gate:
+  enabled: true
+  fail_fast: true  # Stop on first failure (default: true)
+  tests:
+    - name: "unit tests"
+      command: "npm test"
+      timeout: 300  # Optional, defaults to 5 minutes
+    - name: "integration tests"
+      command: "pytest tests/integration -v"
+    - name: "e2e tests"
+      command: "cd frontend && npm run e2e"
+      timeout: 600  # 10 minutes for slower tests
+```
+
+**Behavior:**
+- Runs each test command in sequence
+- Creates `TEST_GATE_RESULTS.md` with detailed output
+- On success: proceeds to CONTRACT/QA stages
+- On failure: rolls back to DEV with context about which tests failed
+- QA prompt is automatically updated to skip re-running these tests
+
+**Skip conditions:**
+- `test_gate.enabled: false` (default)
+- No tests configured in `test_gate.tests`
+- DOCS task type (no code changes)
+- Manual skip artifact (`TEST_GATE_SKIP.md`)
 
 ## Task Types
 
@@ -357,6 +399,28 @@ stages:
 
   # Maximum retries per stage before rollback (default: 5)
   max_retries: 5
+
+# =============================================================================
+# TEST GATE CONFIGURATION
+# Mechanical test verification stage (no AI) - runs after TEST, before QA
+# =============================================================================
+test_gate:
+  # Enable the test gate stage (default: false)
+  enabled: true
+
+  # Stop on first test failure instead of running all tests (default: true)
+  fail_fast: true
+
+  # Test suites to run - all must pass for the stage to succeed
+  tests:
+    - name: "unit tests"
+      command: "npm test"
+      timeout: 300           # Timeout in seconds (default: 300)
+    - name: "integration tests"
+      command: "pytest tests/integration -v"
+    - name: "e2e tests"
+      command: "cd frontend && npm run e2e"
+      timeout: 600           # Longer timeout for e2e tests
 
 # =============================================================================
 # VALIDATION CONFIGURATION

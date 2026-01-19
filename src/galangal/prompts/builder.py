@@ -396,11 +396,20 @@ Only update documentation types marked as YES above.""")
             if artifact_exists("TEST_PLAN.md", task_name):
                 parts.append(f"\n# TEST_PLAN.md\n{read_artifact('TEST_PLAN.md', task_name)}")
 
-        # QA stage: include test summary for context on what was tested
+        # QA stage: include test summary and test gate results for context
         if stage == Stage.QA:
             if artifact_exists("TEST_SUMMARY.md", task_name):
                 parts.append(
                     f"\n# TEST_SUMMARY.md (Test results summary)\n{read_artifact('TEST_SUMMARY.md', task_name)}"
+                )
+            # Include TEST_GATE_RESULTS.md if test gate ran
+            if artifact_exists("TEST_GATE_RESULTS.md", task_name):
+                test_gate_content = read_artifact("TEST_GATE_RESULTS.md", task_name)
+                parts.append(
+                    f"\n# TEST_GATE_RESULTS.md (Automated tests already verified)\n"
+                    f"**IMPORTANT:** The following tests have already been run and passed in the TEST_GATE stage. "
+                    f"Do NOT re-run these tests - focus on exploratory testing, edge cases, and code quality.\n\n"
+                    f"{test_gate_content}"
                 )
 
         # SECURITY stage: include test summary for coverage context

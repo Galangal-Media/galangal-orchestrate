@@ -122,6 +122,12 @@ def main() -> int:
 
     # init
     init_parser = subparsers.add_parser("init", help="Initialize galangal in current project")
+    init_parser.add_argument(
+        "--quick",
+        "-q",
+        action="store_true",
+        help="Quick init without interactive wizard (for CI/automation)",
+    )
     init_parser.set_defaults(func=_cmd_init)
 
     # start

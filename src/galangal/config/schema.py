@@ -35,6 +35,31 @@ class PreflightCheck(BaseModel):
     warn_only: bool = Field(default=False, description="Warn but don't fail the stage")
 
 
+class TestGateTest(BaseModel):
+    """A single test suite configuration for the test gate."""
+
+    name: str = Field(description="Name of the test suite for display")
+    command: str = Field(description="Command to run the test suite")
+    timeout: int = Field(default=300, description="Timeout in seconds (default: 5 minutes)")
+
+
+class TestGateConfig(BaseModel):
+    """Configuration for the TEST_GATE stage.
+
+    The TEST_GATE stage runs configured test suites and requires all to pass
+    before proceeding. This is a mechanical stage (no AI) that acts as a
+    quality gate.
+    """
+
+    enabled: bool = Field(default=False, description="Enable the test gate stage")
+    tests: list[TestGateTest] = Field(
+        default_factory=list, description="Test suites to run"
+    )
+    fail_fast: bool = Field(
+        default=True, description="Stop on first test failure instead of running all"
+    )
+
+
 class ValidationCommand(BaseModel):
     """A validation command configuration.
 
@@ -104,6 +129,7 @@ class ValidationConfig(BaseModel):
     preflight: StageValidation = Field(default_factory=StageValidation)
     migration: StageValidation = Field(default_factory=StageValidation)
     test: StageValidation = Field(default_factory=StageValidation)
+    test_gate: StageValidation = Field(default_factory=StageValidation)
     contract: StageValidation = Field(default_factory=StageValidation)
     qa: StageValidation = Field(default_factory=StageValidation)
     security: StageValidation = Field(default_factory=StageValidation)
@@ -284,6 +310,10 @@ class GalangalConfig(BaseModel):
     tasks_dir: str = Field(default="galangal-tasks", description="Task storage directory")
     branch_pattern: str = Field(default="task/{task_name}", description="Git branch naming pattern")
     stages: StageConfig = Field(default_factory=StageConfig)
+    test_gate: TestGateConfig = Field(
+        default_factory=TestGateConfig,
+        description="Test gate configuration - mechanical test verification stage",
+    )
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
     pr: PRConfig = Field(default_factory=PRConfig)

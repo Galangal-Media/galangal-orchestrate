@@ -127,6 +127,7 @@ class Stage(str, Enum):
     DEV = "DEV"
     MIGRATION = "MIGRATION"
     TEST = "TEST"
+    TEST_GATE = "TEST_GATE"
     CONTRACT = "CONTRACT"
     QA = "QA"
     BENCHMARK = "BENCHMARK"
@@ -161,6 +162,7 @@ STAGE_ORDER = [
     Stage.DEV,
     Stage.MIGRATION,
     Stage.TEST,
+    Stage.TEST_GATE,
     Stage.CONTRACT,
     Stage.QA,
     Stage.BENCHMARK,
@@ -223,6 +225,25 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
                 "BLOCKED",
                 False,
                 "Tests blocked by implementation issues - needs DEV fix",
+                "DEV",
+                False,
+            ),
+        ),
+    ),
+    Stage.TEST_GATE: StageMetadata(
+        display_name="Test Gate",
+        description="Verify configured test suites pass",
+        is_conditional=True,
+        is_skippable=True,
+        produces_artifacts=("TEST_GATE_RESULTS.md",),
+        skip_artifact="TEST_GATE_SKIP.md",
+        decision_file="TEST_GATE_DECISION",
+        decision_outcomes=(
+            ("PASS", True, "All configured tests passed", None, False),
+            (
+                "FAIL",
+                False,
+                "Test gate failed - tests did not pass",
                 "DEV",
                 False,
             ),
@@ -359,6 +380,7 @@ TASK_TYPE_SKIP_STAGES: dict[TaskType, set[Stage]] = {
         Stage.DEV,
         Stage.MIGRATION,
         Stage.TEST,
+        Stage.TEST_GATE,
         Stage.CONTRACT,
         Stage.QA,
         Stage.BENCHMARK,

@@ -27,6 +27,54 @@ from galangal.core.workflow import run_workflow
 from galangal.ui.tui import PromptType, WorkflowTUIApp
 
 
+def _check_config_updates() -> bool:
+    """Check for missing config sections and prompt user.
+
+    Returns True if user wants to continue, False if they want to quit and configure.
+    """
+    try:
+        import yaml
+        from rich.prompt import Confirm
+
+        from galangal.commands.init_wizard import check_missing_sections
+        from galangal.config.loader import get_project_root
+        from galangal.ui.console import console, print_info
+
+        config_path = get_project_root() / ".galangal" / "config.yaml"
+        if not config_path.exists():
+            return True
+
+        existing_config = yaml.safe_load(config_path.read_text())
+        if not existing_config:
+            return True
+
+        missing = check_missing_sections(existing_config)
+        if not missing:
+            return True
+
+        # Show message about new config options
+        console.print()
+        print_info(f"New config options available: [cyan]{', '.join(missing)}[/cyan]")
+        console.print("[dim]  Run 'galangal init' to configure them.[/dim]\n")
+
+        # Ask if they want to continue or quit to configure
+        continue_anyway = Confirm.ask(
+            "Continue without configuring?",
+            default=True,
+        )
+
+        if not continue_anyway:
+            console.print("\n[dim]Run 'galangal init' to configure new options.[/dim]")
+            return False
+
+        console.print()  # Add spacing before TUI starts
+        return True
+
+    except Exception:
+        # Non-critical, don't interrupt task creation
+        return True
+
+
 def create_task(
     task_name: str,
     description: str,
@@ -81,6 +129,10 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     if not require_initialized():
         return 1
+
+    # Check for new/missing config sections - prompt user if any found
+    if not _check_config_updates():
+        return 0  # User chose to quit and configure
 
     description = " ".join(args.description) if args.description else ""
     task_name = args.name or ""
