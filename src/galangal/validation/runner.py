@@ -239,31 +239,34 @@ class ValidationRunner:
                 rollback_to="DEV",
             )
 
-        # Check for pass/fail markers in artifacts (for AI-driven stages)
-        if stage_config.artifact and stage_config.pass_marker:
-            result = self._check_artifact_markers(stage_config, task_name)
-            if not result.success:
-                return result
+        # Decision file checks - these take precedence over artifact markers
+        # because backends (like Codex) write explicit decision files
 
-        # TEST stage: always check TEST_DECISION file
+        # TEST stage: check TEST_DECISION file
         if stage_lower == "test":
             result = validate_stage_decision("TEST", task_name, "TEST_PLAN.md")
             if not result.success:
                 return result
 
-        # QA stage: always check QA_DECISION file first
+        # QA stage: check QA_DECISION file
         if stage_lower == "qa":
             result = self._check_qa_report(task_name)
             if not result.success:
                 return result
 
-        # REVIEW stage: check REVIEW_DECISION file first (for Codex/independent reviews)
+        # REVIEW stage: check REVIEW_DECISION file (for Codex/independent reviews)
         if stage_lower == "review":
             result = validate_stage_decision("REVIEW", task_name, "REVIEW_NOTES.md")
             if result.success or result.rollback_to:
-                # Either passed or has a clear rollback target - return this result
+                # Valid decision found - use it
                 return result
             # Fall through to artifact marker check if decision file missing/unclear
+
+        # Check for pass/fail markers in artifacts (fallback for AI-driven stages)
+        if stage_config.artifact and stage_config.pass_marker:
+            result = self._check_artifact_markers(stage_config, task_name)
+            if not result.success:
+                return result
 
         # Check required artifacts
         for artifact_name in stage_config.artifacts_required:
