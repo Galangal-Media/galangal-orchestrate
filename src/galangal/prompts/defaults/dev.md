@@ -12,10 +12,12 @@ Implement all changes described in PLAN.md while satisfying the acceptance crite
 
 ### If ROLLBACK.md exists (Rollback Run):
 1. Read ROLLBACK.md - contains issues that MUST be fixed
-2. Read the relevant report (QA_REPORT.md, SECURITY_CHECKLIST.md, or REVIEW_NOTES.md)
+2. Read the relevant report (QA_REPORT.md, SECURITY_CHECKLIST.md, REVIEW_NOTES.md, or TEST_GATE_RESULTS.md)
 3. Fix ALL issues documented in ROLLBACK.md
 4. Update DEVELOPMENT.md with fixes made
 5. Done - workflow continues to re-run validation
+
+**CRITICAL - TEST_GATE Rollbacks:** If rolling back from TEST_GATE, you MUST fix ALL failing tests listed in TEST_GATE_RESULTS.md, **even if the tests were not modified by this task and appear to be pre-existing failures**. The workflow cannot proceed until all tests pass. Do not skip fixing a test because it seems "unrelated" - fix it anyway to unblock the pipeline.
 
 ### If DEVELOPMENT.md exists (Resuming):
 1. Read DEVELOPMENT.md to understand progress so far
@@ -73,7 +75,7 @@ Update DEVELOPMENT.md after completing each significant piece of work:
 ## Important Rules
 
 - ONLY implement what's in PLAN.md - nothing more
-- Do NOT fix pre-existing issues unrelated to your task
+- Do NOT fix pre-existing issues unrelated to your task (EXCEPTION: TEST_GATE failures - see above)
 - Follow existing patterns in the codebase
 - Keep changes minimal and focused
 - Do NOT write tests - the TEST stage handles that
