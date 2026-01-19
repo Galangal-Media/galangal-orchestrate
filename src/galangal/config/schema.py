@@ -2,7 +2,7 @@
 Configuration schema using Pydantic models.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ProjectConfig(BaseModel):
@@ -58,6 +58,12 @@ class TestGateConfig(BaseModel):
     fail_fast: bool = Field(
         default=True, description="Stop on first test failure instead of running all"
     )
+
+    @field_validator("tests", mode="before")
+    @classmethod
+    def tests_none_to_list(cls, v: list[TestGateTest] | None) -> list[TestGateTest]:
+        """Convert None to empty list (YAML 'tests:' with only comments becomes null)."""
+        return v if v is not None else []
 
 
 class ValidationCommand(BaseModel):
