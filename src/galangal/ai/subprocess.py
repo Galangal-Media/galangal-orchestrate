@@ -7,6 +7,7 @@ from __future__ import annotations
 import select
 import subprocess
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -88,6 +89,8 @@ class SubprocessRunner:
         idle_interval: float = 3.0,
         poll_interval_active: float = 0.05,
         poll_interval_idle: float = 0.5,
+        max_output_chars: int | None = 1_000_000,
+        output_file: str | None = None,
     ):
         """
         Initialize the subprocess runner.
@@ -102,6 +105,8 @@ class SubprocessRunner:
             idle_interval: Seconds between idle callbacks
             poll_interval_active: Sleep between polls when receiving output
             poll_interval_idle: Sleep between polls when idle
+            max_output_chars: Max output chars kept in memory (None for unlimited)
+            output_file: Optional file path to stream full output
         """
         self.command = command
         self.timeout = timeout
@@ -112,6 +117,8 @@ class SubprocessRunner:
         self.idle_interval = idle_interval
         self.poll_interval_active = poll_interval_active
         self.poll_interval_idle = poll_interval_idle
+        self.max_output_chars = max_output_chars
+        self.output_file = output_file
 
     def run(self) -> RunResult:
         """
@@ -129,16 +136,39 @@ class SubprocessRunner:
             text=True,
         )
 
-        output_lines: list[str] = []
+        output_buffer: deque[str] = deque()
+        output_chars = 0
+        output_handle = None
         start_time = time.time()
         last_idle_callback = start_time
+
+        if self.output_file:
+            try:
+                output_handle = open(self.output_file, "a", encoding="utf-8", buffering=1)
+            except OSError:
+                output_handle = None
+
+        def record_output(chunk: str) -> None:
+            nonlocal output_chars, output_handle
+            if output_handle:
+                try:
+                    output_handle.write(chunk)
+                except OSError:
+                    output_handle = None
+
+            output_buffer.append(chunk)
+            output_chars += len(chunk)
+            if self.max_output_chars is not None:
+                while output_chars > self.max_output_chars and output_buffer:
+                    removed = output_buffer.popleft()
+                    output_chars -= len(removed)
 
         try:
             while True:
                 retcode = process.poll()
 
                 # Read available output (non-blocking)
-                had_output = self._read_output(process, output_lines)
+                had_output = self._read_output(process, record_output)
 
                 # Update last idle callback time if we had output
                 if had_output:
@@ -151,24 +181,30 @@ class SubprocessRunner:
                 # Check for pause request
                 if self.pause_check and self.pause_check():
                     self._terminate_gracefully(process)
+                    self._capture_remaining(process, record_output)
                     if self.ui:
                         self.ui.add_activity("Paused by user request", "⏸️")
                     return RunResult(
                         outcome=RunOutcome.PAUSED,
                         exit_code=None,
-                        output="".join(output_lines),
+                        output="".join(output_buffer),
                     )
 
                 # Check for timeout
                 elapsed = time.time() - start_time
                 if elapsed > self.timeout:
                     process.kill()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    self._capture_remaining(process, record_output)
                     if self.ui:
                         self.ui.add_activity(f"Timeout after {self.timeout}s", "❌")
                     return RunResult(
                         outcome=RunOutcome.TIMEOUT,
                         exit_code=None,
-                        output="".join(output_lines),
+                        output="".join(output_buffer),
                         timeout_seconds=self.timeout,
                     )
 
@@ -182,28 +218,33 @@ class SubprocessRunner:
                 time.sleep(self.poll_interval_active if had_output else self.poll_interval_idle)
 
             # Capture any remaining output
-            remaining = self._capture_remaining(process)
-            if remaining:
-                output_lines.append(remaining)
+            self._capture_remaining(process, record_output)
 
             return RunResult(
                 outcome=RunOutcome.COMPLETED,
                 exit_code=process.returncode,
-                output="".join(output_lines),
+                output="".join(output_buffer),
             )
 
         except Exception:
             # Ensure process is terminated on any error
             try:
                 process.kill()
+                process.wait(timeout=5)
             except Exception:
                 pass
             raise
+        finally:
+            if output_handle:
+                try:
+                    output_handle.close()
+                except OSError:
+                    pass
 
     def _read_output(
         self,
         process: subprocess.Popen[str],
-        output_lines: list[str],
+        record_output: Callable[[str], None],
     ) -> bool:
         """
         Read all available output lines (non-blocking).
@@ -225,7 +266,7 @@ class SubprocessRunner:
                 if not line:
                     break
 
-                output_lines.append(line)
+                record_output(line)
                 had_output = True
 
                 if self.on_output:
@@ -245,10 +286,15 @@ class SubprocessRunner:
         except subprocess.TimeoutExpired:
             process.kill()
 
-    def _capture_remaining(self, process: subprocess.Popen[str]) -> str:
+    def _capture_remaining(
+        self,
+        process: subprocess.Popen[str],
+        record_output: Callable[[str], None],
+    ) -> None:
         """Capture any remaining output after process completes."""
         try:
             remaining, _ = process.communicate(timeout=10)
-            return remaining or ""
+            if remaining:
+                record_output(remaining)
         except (OSError, ValueError, subprocess.TimeoutExpired):
-            return ""
+            return

@@ -80,12 +80,16 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
 
     # Compute hidden stages based on task type and config
     hidden_stages = frozenset(get_hidden_stages_for_task_type(state.task_type, config.stages.skip))
+    activity_log_path = None
+    if config.logging.activity_file:
+        activity_log_path = config.logging.activity_file.format(task_name=state.task_name)
 
     app = WorkflowTUIApp(
         state.task_name,
         state.stage.value,
         hidden_stages=hidden_stages,
         stage_durations=state.stage_durations,
+        activity_log_path=activity_log_path,
     )
 
     # Create workflow engine

@@ -189,6 +189,8 @@ class CurrentActionWidget(Static):
 class FilesPanelWidget(Static):
     """Panel showing files that have been read/written."""
 
+    MAX_FILES_HISTORY = 100
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._files: list[tuple[str, str]] = []
@@ -198,6 +200,8 @@ class FilesPanelWidget(Static):
         entry = (action, path)
         if entry not in self._files:
             self._files.append(entry)
+            if len(self._files) > self.MAX_FILES_HISTORY:
+                self._files = self._files[-self.MAX_FILES_HISTORY :]
             self.refresh()
 
     def render(self) -> Text:

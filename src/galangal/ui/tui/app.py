@@ -22,6 +22,7 @@ Layout:
 import asyncio
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
@@ -86,6 +87,8 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         _paused: Set to True when user requests pause.
         _workflow_result: Result string set by workflow thread.
     """
+    ACTIVITY_LOG_MAX_ENTRIES = 5000
+    RICH_LOG_MAX_LINES = 1000
 
     TITLE = "Galangal"
     CSS_PATH = "styles/app.tcss"
@@ -107,6 +110,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         max_retries: int = 5,
         hidden_stages: frozenset[str] | None = None,
         stage_durations: dict[str, int] | None = None,
+        activity_log_path: str | Path | None = None,
     ) -> None:
         super().__init__()
         self.task_name = task_name
@@ -121,7 +125,19 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
 
         # Raw lines storage for verbose replay
         self._raw_lines: list[str] = []
-        self._activity_entries: list[ActivityEntry] = []
+        self._activity_entries: deque[ActivityEntry] = deque(
+            maxlen=self.ACTIVITY_LOG_MAX_ENTRIES
+        )
+        self._activity_log_handle = None
+        if activity_log_path:
+            try:
+                log_path = Path(activity_log_path)
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                self._activity_log_handle = open(
+                    log_path, "a", encoding="utf-8", buffering=1
+                )
+            except OSError:
+                self._activity_log_handle = None
 
         # Workflow control
         self._paused = False
@@ -147,7 +163,12 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
                 yield ErrorPanelWidget(id="error-panel", classes="hidden")
                 with Horizontal(id="content-area"):
                     with VerticalScroll(id="activity-container"):
-                        yield RichLog(id="activity-log", highlight=True, markup=True)
+                        yield RichLog(
+                            id="activity-log",
+                            highlight=True,
+                            markup=True,
+                            max_lines=self.RICH_LOG_MAX_LINES,
+                        )
                     yield FilesPanelWidget(id="files-container")
             yield CurrentActionWidget(id="current-action")
             yield Footer()
@@ -274,7 +295,11 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
             details=details,
         )
         self._activity_entries.append(entry)
-
+        if self._activity_log_handle:
+            try:
+                self._activity_log_handle.write(entry.format_export() + "\n")
+            except OSError:
+                self._activity_log_handle = None
         def _add() -> None:
             # Only show activity in compact (non-verbose) mode
             if not self.verbose:
@@ -804,7 +829,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         else:
             log.write("[#b8bb26]Switched to COMPACT mode[/]")
             # Replay recent activity entries
-            for entry in self._activity_entries[-30:]:
+            for entry in list(self._activity_entries)[-30:]:
                 log.write(entry.format_display())
 
     def action_toggle_files(self) -> None:
@@ -827,7 +852,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
     @property
     def activity_entries(self) -> list[ActivityEntry]:
         """Get all activity entries for filtering or export."""
-        return self._activity_entries.copy()
+        return list(self._activity_entries)
 
     def export_activity_log(self, path: str | Path) -> None:
         """
@@ -836,7 +861,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         Args:
             path: File path to write the log to.
         """
-        export_activity_log(self._activity_entries, Path(path))
+        export_activity_log(list(self._activity_entries), Path(path))
 
     def get_entries_by_level(self, level: ActivityLevel) -> list[ActivityEntry]:
         """Filter entries by severity level."""
@@ -845,6 +870,13 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
     def get_entries_by_category(self, category: ActivityCategory) -> list[ActivityEntry]:
         """Filter entries by category."""
         return [e for e in self._activity_entries if e.category == category]
+
+    def on_shutdown(self) -> None:
+        if self._activity_log_handle:
+            try:
+                self._activity_log_handle.close()
+            except OSError:
+                pass
 
 
 class StageTUIApp(WorkflowTUIApp):

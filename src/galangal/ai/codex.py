@@ -188,7 +188,7 @@ class CodexBackend(AIBackend):
             ui: Optional TUI for progress display
             pause_check: Optional callback for pause detection
             stage: Stage name for schema customization (e.g., "QA", "SECURITY")
-            log_file: Optional path to log file (unused for Codex read-only)
+            log_file: Optional path to log file for streaming raw output
 
         Returns:
             StageResult with structured JSON in the output field
@@ -256,6 +256,7 @@ class CodexBackend(AIBackend):
                     idle_interval=5.0,
                     poll_interval_active=0.05,
                     poll_interval_idle=0.5,
+                    output_file=log_file,
                 )
 
                 result = runner.run()

@@ -83,55 +83,11 @@ class ClaudeBackend(AIBackend):
         """Invoke Claude Code with a prompt."""
         # State for output processing
         pending_tools: list[tuple[str, str]] = []
-        log_handle = None
-
-        # Open log file for streaming if provided
-        if log_file:
-            try:
-                log_handle = open(log_file, "a")
-            except OSError as e:
-                logger.warning("failed_to_open_log_file", path=log_file, error=str(e))
-
-        def should_log_line(line: str) -> bool:
-            """Determine if a line should be logged (errors, warnings, results)."""
-            if not line.strip():
-                return False
-            try:
-                data = json.loads(line.strip())
-                msg_type = data.get("type", "")
-
-                # Always log errors and results
-                if msg_type in ("error", "result"):
-                    return True
-
-                # Log system messages (rate limiting, etc.)
-                if msg_type == "system":
-                    return True
-
-                # Log tool errors
-                if msg_type == "user":
-                    content = data.get("message", {}).get("content", [])
-                    for item in content:
-                        if item.get("type") == "tool_result" and item.get("is_error"):
-                            return True
-
-                return False
-            except (json.JSONDecodeError, KeyError, TypeError):
-                # Log non-JSON lines that look like errors
-                lower = line.lower()
-                return "error" in lower or "warning" in lower or "failed" in lower
 
         def on_output(line: str) -> None:
             """Process each output line."""
             if ui:
                 ui.add_raw_line(line)
-            # Only log errors, warnings, and results to file
-            if log_handle and should_log_line(line):
-                try:
-                    log_handle.write(line + "\n")
-                    log_handle.flush()  # Ensure immediate write
-                except OSError:
-                    pass
             self._process_stream_line(line, ui, pending_tools)
 
         def on_idle(elapsed: float) -> None:
@@ -160,6 +116,7 @@ class ClaudeBackend(AIBackend):
                     idle_interval=3.0,
                     poll_interval_active=0.05,
                     poll_interval_idle=0.5,
+                    output_file=log_file,
                 )
 
                 result = runner.run()
@@ -209,13 +166,6 @@ class ClaudeBackend(AIBackend):
 
         except Exception as e:
             return StageResult.error(f"Claude invocation error: {e}")
-        finally:
-            # Close log file handle
-            if log_handle:
-                try:
-                    log_handle.close()
-                except OSError:
-                    pass
 
     def _process_stream_line(
         self,

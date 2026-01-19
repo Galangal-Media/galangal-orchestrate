@@ -303,6 +303,11 @@ def finalize_task(
     if dest.exists():
         dest = done_dir / f"{task_name}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
+    # Remove logs directory before moving (not needed after completion)
+    logs_dir = task_dir / "logs"
+    if logs_dir.exists():
+        shutil.rmtree(logs_dir)
+
     report(f"Moving task to {dest.relative_to(project_root)}/...")
     shutil.move(str(task_dir), str(dest))
     clear_active_task()

@@ -130,6 +130,12 @@ def cmd_start(args: argparse.Namespace) -> int:
     if not require_initialized():
         return 1
 
+    # Check for newer version on PyPI
+    from galangal.core.version_check import check_and_prompt_update
+
+    if not check_and_prompt_update():
+        return 0  # User chose to quit to update
+
     # Check for new/missing config sections - prompt user if any found
     if not _check_config_updates():
         return 0  # User chose to quit and configure

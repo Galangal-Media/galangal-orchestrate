@@ -250,6 +250,8 @@ def _execute_test_gate(
     This is a non-AI stage that runs shell commands to verify tests pass.
     All configured tests must pass for the stage to succeed.
 
+    Output is streamed line-by-line to the TUI for real-time visibility.
+
     Args:
         state: Current workflow state.
         tui_app: TUI app for progress display.
@@ -259,6 +261,9 @@ def _execute_test_gate(
         StageResult indicating success or failure with rollback to DEV.
     """
     import subprocess
+    import threading
+    from collections import deque
+    from queue import Empty, Full, Queue
 
     from galangal.config.loader import get_project_root
     from galangal.logging import workflow_logger
@@ -266,6 +271,15 @@ def _execute_test_gate(
     task_name = state.task_name
     test_config = config.test_gate
     project_root = get_project_root()
+    logs_dir = get_task_dir(task_name) / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    max_output_chars = 200_000
+    output_queue_size = 200
+
+    def _sanitize_filename(name: str) -> str:
+        cleaned = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in name.lower())
+        return cleaned.strip("_") or "test"
 
     tui_app.add_activity("Running test gate checks...", "🧪")
 
@@ -274,38 +288,165 @@ def _execute_test_gate(
     all_passed = True
     failed_tests: list[str] = []
 
+    def stream_output(
+        proc: subprocess.Popen,
+        output_tail: deque[str],
+        queue: Queue,
+        log_handle: Any | None,
+        truncated_flag: list[bool],
+    ) -> None:
+        """Read process output, stream to queue, and keep a bounded tail."""
+        output_chars = 0
+        try:
+            for line in iter(proc.stdout.readline, ""):
+                if not line:
+                    break
+                if log_handle:
+                    try:
+                        log_handle.write(line)
+                    except OSError:
+                        log_handle = None
+
+                output_tail.append(line)
+                output_chars += len(line)
+                while output_chars > max_output_chars and output_tail:
+                    truncated_flag[0] = True
+                    removed = output_tail.popleft()
+                    output_chars -= len(removed)
+
+                try:
+                    queue.put(line.rstrip("\n"), timeout=1)
+                except Full:
+                    pass
+        finally:
+            try:
+                queue.put_nowait(None)  # Signal completion
+            except Full:
+                pass
+
     for test in test_config.tests:
         tui_app.add_activity(f"Running: {test.name}", "▶")
         tui_app.show_message(f"Test Gate: {test.name}", "info")
 
+        output_tail: deque[str] = deque()
+        output_truncated = [False]
+        exit_code = -1
+        timed_out = False
+        log_handle = None
+        log_path = logs_dir / f"test_gate_{_sanitize_filename(test.name)}.log"
+
         try:
-            result = subprocess.run(
+            try:
+                log_handle = open(log_path, "w", encoding="utf-8")
+            except OSError:
+                log_handle = None
+
+            # Start process with stdout/stderr combined and piped
+            proc = subprocess.Popen(
                 test.command,
                 shell=True,
                 cwd=project_root,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
-                timeout=test.timeout,
+                bufsize=1,  # Line buffered
             )
 
-            passed = result.returncode == 0
-            output = result.stdout + result.stderr
+            # Stream output in background thread
+            output_queue: Queue = Queue(maxsize=output_queue_size)
+            reader_thread = threading.Thread(
+                target=stream_output,
+                args=(proc, output_tail, output_queue, log_handle, output_truncated),
+                daemon=True,
+            )
+            reader_thread.start()
 
-            # Truncate output for display
-            output_preview = output[:2000] if len(output) > 2000 else output
+            # Read from queue and display in TUI until process completes or timeout
+            start_time = time.time()
+            while True:
+                try:
+                    line = output_queue.get(timeout=0.1)
+                    if line is None:
+                        break  # Reader finished
+                    # Stream each line to TUI (prefix with test name for context)
+                    tui_app.add_activity(f"  {line[:200]}", "│")
+                except Empty:
+                    pass
 
-            results.append({
-                "name": test.name,
-                "command": test.command,
-                "passed": passed,
-                "exit_code": result.returncode,
-                "output": output_preview,
-            })
+                # Check timeout
+                if time.time() - start_time > test.timeout:
+                    proc.kill()
+                    timed_out = True
+                    break
+
+                # Check if process finished
+                if proc.poll() is not None and output_queue.empty():
+                    break
+
+            # Wait for reader thread to finish
+            reader_thread.join(timeout=1.0)
+
+            # Get exit code - must call wait() to ensure returncode is populated
+            if timed_out:
+                exit_code = -1
+            else:
+                try:
+                    proc.wait(timeout=5)  # Ensure process fully terminated
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                exit_code = proc.returncode if proc.returncode is not None else -1
+
+        except Exception as e:
+            output_tail.append(f"Error running command: {e}")
+            exit_code = -1
+        finally:
+            if log_handle:
+                try:
+                    log_handle.close()
+                except OSError:
+                    pass
+
+        # Process results - include bounded tail for artifact
+        output = "".join(output_tail)
+        if output_truncated[0]:
+            output = (
+                f"[Output truncated to last {max_output_chars} characters. "
+                f"Full log: {log_path}]\n\n{output}"
+            )
+
+        if timed_out:
+            results.append(
+                {
+                    "name": test.name,
+                    "command": test.command,
+                    "passed": False,
+                    "exit_code": -1,
+                    "output": f"Command timed out after {test.timeout} seconds\n\n{output}",
+                }
+            )
+            tui_app.add_activity(f"✗ {test.name} timed out", "⏱️")
+            all_passed = False
+            failed_tests.append(test.name)
+
+            if test_config.fail_fast:
+                break
+        else:
+            passed = exit_code == 0
+            results.append(
+                {
+                    "name": test.name,
+                    "command": test.command,
+                    "passed": passed,
+                    "exit_code": exit_code,
+                    "output": output,
+                }
+            )
 
             if passed:
                 tui_app.add_activity(f"✓ {test.name} passed", "✅")
             else:
-                tui_app.add_activity(f"✗ {test.name} failed (exit code {result.returncode})", "❌")
+                tui_app.add_activity(f"✗ {test.name} failed (exit code {exit_code})", "❌")
                 all_passed = False
                 failed_tests.append(test.name)
 
@@ -313,36 +454,6 @@ def _execute_test_gate(
                 if test_config.fail_fast:
                     tui_app.add_activity("Stopping (fail_fast enabled)", "⚠")
                     break
-
-        except subprocess.TimeoutExpired:
-            results.append({
-                "name": test.name,
-                "command": test.command,
-                "passed": False,
-                "exit_code": -1,
-                "output": f"Command timed out after {test.timeout} seconds",
-            })
-            tui_app.add_activity(f"✗ {test.name} timed out", "⏱️")
-            all_passed = False
-            failed_tests.append(test.name)
-
-            if test_config.fail_fast:
-                break
-
-        except Exception as e:
-            results.append({
-                "name": test.name,
-                "command": test.command,
-                "passed": False,
-                "exit_code": -1,
-                "output": f"Error running command: {e}",
-            })
-            tui_app.add_activity(f"✗ {test.name} error: {e}", "❌")
-            all_passed = False
-            failed_tests.append(test.name)
-
-            if test_config.fail_fast:
-                break
 
     # Build TEST_GATE_RESULTS.md artifact
     passed_count = sum(1 for r in results if r["passed"])
@@ -366,7 +477,9 @@ def _execute_test_gate(
         artifact_lines.append(f"\n**Command:** `{r['command']}`\n")
         artifact_lines.append(f"**Exit Code:** {r['exit_code']}\n")
         if r["output"]:
-            artifact_lines.append(f"\n<details>\n<summary>Output</summary>\n\n```\n{r['output']}\n```\n\n</details>\n")
+            artifact_lines.append(
+                f"\n<details>\n<summary>Output</summary>\n\n```\n{r['output']}\n```\n\n</details>\n"
+            )
 
     write_artifact("TEST_GATE_RESULTS.md", "".join(artifact_lines), task_name)
     tui_app.add_activity("Wrote TEST_GATE_RESULTS.md", "📝")

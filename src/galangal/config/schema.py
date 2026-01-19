@@ -228,6 +228,12 @@ class LoggingConfig(BaseModel):
         default=None,
         description="Log file path (e.g., 'logs/galangal.jsonl'). If not set, logs only to console.",
     )
+    activity_file: str | None = Field(
+        default=None,
+        description=(
+            "Optional activity log file path. Supports {task_name} placeholder for per-task logs."
+        ),
+    )
     json_format: bool = Field(
         default=True, description="Output JSON format (False for pretty console format)"
     )

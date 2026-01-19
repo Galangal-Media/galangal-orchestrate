@@ -245,6 +245,12 @@ class ValidationRunner:
             if not result.success:
                 return result
 
+        # TEST stage: always check TEST_DECISION file
+        if stage_lower == "test":
+            result = validate_stage_decision("TEST", task_name, "TEST_PLAN.md")
+            if not result.success:
+                return result
+
         # QA stage: always check QA_DECISION file first
         if stage_lower == "qa":
             result = self._check_qa_report(task_name)

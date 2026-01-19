@@ -884,6 +884,7 @@ class WorkflowState:
 
         Called when validation fails and triggers a rollback to an earlier stage.
         The history is used to detect rollback loops and prevent infinite retries.
+        Keeps only the last 50 events to prevent state growth.
 
         Args:
             from_stage: Stage that failed and triggered the rollback.
@@ -892,6 +893,9 @@ class WorkflowState:
         """
         event = RollbackEvent.create(from_stage, to_stage, reason)
         self.rollback_history.append(event)
+        # Keep only the last 50 events - plenty for the 1-hour window check
+        if len(self.rollback_history) > 50:
+            self.rollback_history = self.rollback_history[-50:]
 
     def should_allow_rollback(self, target_stage: Stage) -> bool:
         """
