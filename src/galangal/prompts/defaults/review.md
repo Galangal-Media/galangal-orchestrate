@@ -68,13 +68,39 @@ Create REVIEW_NOTES.md in the task's artifacts directory:
 
 Choose your decision based on these criteria:
 
-- **APPROVE**: Code quality is acceptable, no blocking issues
-- **REQUEST_MINOR_CHANGES**: Only minor issues found (typos, naming, comments, formatting)
-  - Use this when fixes are trivial and don't affect functionality
-  - This triggers a fast-track re-review (skips TEST/QA stages)
-- **REQUEST_CHANGES**: Significant issues found (logic bugs, design problems, missing error handling)
-  - Use this for issues that could affect functionality or maintainability
-  - This triggers a full re-run through all validation stages
+### APPROVE
+Use when code quality is acceptable with no blocking issues.
+
+### REQUEST_MINOR_CHANGES (Preferred for small fixes)
+Use for issues that are **quick to fix and low-risk**. This triggers **fast-track mode** which skips TEST/QA/SECURITY stages and goes directly back to REVIEW after DEV fixes the issues.
+
+**Use REQUEST_MINOR_CHANGES for:**
+- Typos, spelling errors, grammar issues
+- Variable/function naming improvements
+- Missing or incorrect comments
+- Code formatting issues
+- Missing or incorrect translations/i18n strings
+- Small test fixes (wrong assertion value, missing mock, test typo)
+- Unused imports or dead code removal
+- Missing type hints or incorrect types
+- Documentation updates or corrections
+- Log message improvements
+- Constant value corrections
+- Any fix that is **< 20 lines of changes** and **doesn't change program behavior**
+
+### REQUEST_CHANGES (Use sparingly)
+Use **only** for significant issues that affect functionality or require substantial rework. This triggers a **full re-run** through all validation stages (TEST, QA, SECURITY, REVIEW).
+
+**Use REQUEST_CHANGES only for:**
+- Logic bugs that affect program correctness
+- Design problems requiring architectural changes
+- Missing error handling for critical paths
+- Security vulnerabilities
+- Performance issues requiring algorithmic changes
+- Missing functionality from the spec
+- Changes that require new tests to be written
+
+**Important:** If in doubt between REQUEST_MINOR_CHANGES and REQUEST_CHANGES, prefer REQUEST_MINOR_CHANGES. The fast-track saves significant time and the REVIEW stage will catch any issues on the next pass.
 
 ## Important Rules
 
@@ -82,8 +108,8 @@ Choose your decision based on these criteria:
 - Distinguish between blockers and suggestions
 - Focus on maintainability and readability
 - APPROVE if changes are acceptable
-- Use REQUEST_MINOR_CHANGES for trivial fixes (typos, naming, formatting)
-- Use REQUEST_CHANGES only for significant issues that affect functionality
+- **Prefer REQUEST_MINOR_CHANGES** for any fix that doesn't change program behavior
+- Use REQUEST_CHANGES **only** for significant issues affecting functionality or security
 
 ## Git Status Note
 

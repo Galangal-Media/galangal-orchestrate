@@ -293,6 +293,8 @@ class WorkflowLogger:
         to_stage: str,
         task_name: str,
         reason: str,
+        fast_track: bool = False,
+        fast_track_skip: list[str] | None = None,
     ) -> None:
         """Log rollback event."""
         self._logger.warning(
@@ -301,6 +303,8 @@ class WorkflowLogger:
             to_stage=to_stage,
             task=task_name,
             reason=reason,
+            fast_track=fast_track,
+            fast_track_skip=fast_track_skip or [],
         )
 
     def approval_requested(

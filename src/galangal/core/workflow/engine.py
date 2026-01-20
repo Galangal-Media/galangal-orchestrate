@@ -302,12 +302,19 @@ class WorkflowEngine:
         if result.type == StageResultType.ROLLBACK_REQUIRED:
             # Try to process rollback
             if handle_rollback(self.state, result):
+                # Include fast-track info in message for visibility
+                fast_track_msg = ""
+                if result.is_fast_track:
+                    skipped = sorted(self.state.fast_track_skip)
+                    if skipped:
+                        fast_track_msg = f" [FAST-TRACK: skipping {', '.join(skipped)}]"
                 return event(
                     EventType.ROLLBACK_TRIGGERED,
                     stage=stage,
-                    message=result.message,
+                    message=result.message + fast_track_msg,
                     from_stage=stage,
                     to_stage=result.rollback_to,
+                    is_fast_track=result.is_fast_track,
                 )
             else:
                 # Rollback was blocked (loop detection)

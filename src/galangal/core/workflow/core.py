@@ -875,7 +875,18 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
         reason=reason,
     )
 
-    # Log rollback event
+    # Handle fast-track vs full rollback
+    if result.is_fast_track:
+        # Minor rollback: skip stages that already passed
+        state.setup_fast_track()
+        fast_track_skip_list = sorted(state.fast_track_skip)
+    else:
+        # Full rollback: re-run all stages
+        state.clear_fast_track()
+        state.clear_passed_stages()
+        fast_track_skip_list = []
+
+    # Log rollback event with fast-track info
     from galangal.logging import workflow_logger
 
     workflow_logger.rollback(
@@ -883,16 +894,9 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
         to_stage=target_stage.value,
         task_name=task_name,
         reason=reason,
+        fast_track=result.is_fast_track,
+        fast_track_skip=fast_track_skip_list,
     )
-
-    # Handle fast-track vs full rollback
-    if result.is_fast_track:
-        # Minor rollback: skip stages that already passed
-        state.setup_fast_track()
-    else:
-        # Full rollback: re-run all stages
-        state.clear_fast_track()
-        state.clear_passed_stages()
 
     state.stage = target_stage
     state.last_failure = f"Rollback from {from_stage.value}: {reason}"
