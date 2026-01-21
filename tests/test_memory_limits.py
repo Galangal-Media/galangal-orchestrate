@@ -5,11 +5,11 @@ from galangal.ui.tui.widgets import FilesPanelWidget
 from galangal.core.state import WorkflowState, Stage, RollbackEvent
 
 def test_tui_activity_log_truncation():
-    """Verify that activity log is truncated at MAX_ACTIVITY_ENTRIES."""
+    """Verify that activity log is truncated at ACTIVITY_LOG_MAX_ENTRIES."""
     app = WorkflowTUIApp("test-task", "PM")
-    
+
     # Add entries beyond the limit
-    limit = app.MAX_ACTIVITY_ENTRIES
+    limit = app.ACTIVITY_LOG_MAX_ENTRIES
     excess = 100
     total = limit + excess
     

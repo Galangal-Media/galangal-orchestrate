@@ -213,11 +213,62 @@ def create_pull_request(
     return True, pr_url
 
 
+def _squash_stage_commits(
+    task_name: str,
+    description: str,
+    state,
+    spec: str | None = None,
+    plan: str | None = None,
+) -> tuple[bool, str]:
+    """Squash all stage commits into one clean commit.
+
+    Called when commit_per_stage is enabled and there are stage commits to squash.
+
+    Args:
+        task_name: Name of the task
+        description: Task description
+        state: WorkflowState with base_commit_sha and stage_commits
+        spec: Pre-read SPEC.md content (optional)
+        plan: Pre-read PLAN.md content (optional)
+
+    Returns:
+        Tuple of (success, message)
+    """
+    from galangal.core.git_utils import squash_to_base
+
+    if not state.base_commit_sha:
+        return False, "No base commit SHA found - cannot squash"
+
+    if not state.stage_commits:
+        return False, "No stage commits to squash"
+
+    # Generate commit message
+    console.print("[dim]Generating commit summary...[/dim]")
+    summary = generate_commit_summary(task_name, description, spec=spec, plan=plan)
+
+    # Build final commit message
+    stages = [c["stage"] for c in state.stage_commits]
+    commit_msg = f"""{summary}
+
+Task: {task_name}
+Stages: {', '.join(stages)}"""
+
+    # Show progress
+    console.print(f"[dim]Squashing {len(stages)} commits ({', '.join(stages)})...[/dim]")
+
+    # Perform the squash
+    success = squash_to_base(state.base_commit_sha, commit_msg, cwd=None)
+    if success:
+        return True, f"Squashed {len(stages)} stage commits"
+    return False, "Squash failed - try manual commit"
+
+
 def commit_changes(
     task_name: str,
     description: str,
     spec: str | None = None,
     plan: str | None = None,
+    state=None,
 ) -> tuple[bool, str]:
     """Commit all changes for a task.
 
@@ -226,7 +277,20 @@ def commit_changes(
         description: Task description
         spec: Pre-read SPEC.md content (optional)
         plan: Pre-read PLAN.md content (optional)
+        state: Optional WorkflowState for commit_per_stage squashing
     """
+    config = get_config()
+
+    # If commit_per_stage is enabled and we have stage commits, squash instead
+    if (
+        config.stages.commit_per_stage
+        and state
+        and state.stage_commits
+        and state.base_commit_sha
+    ):
+        return _squash_stage_commits(task_name, description, state, spec=spec, plan=plan)
+
+    # Standard commit logic (no stage commits or commit_per_stage disabled)
     code, status_out, _ = run_command(["git", "status", "--porcelain"])
     if code != 0:
         return False, "Failed to check git status"
@@ -314,7 +378,7 @@ def finalize_task(
 
     # 2. Commit changes (pass pre-read artifacts since task dir was moved)
     report("Committing changes...")
-    success, msg = commit_changes(task_name, state.task_description, spec=spec, plan=plan)
+    success, msg = commit_changes(task_name, state.task_description, spec=spec, plan=plan, state=state)
     if success:
         report(msg, "success")
     else:

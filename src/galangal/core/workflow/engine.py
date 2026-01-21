@@ -150,6 +150,10 @@ def action(action_type: ActionType, **kwargs: Any) -> UserAction:
 # Workflow Engine
 # =============================================================================
 
+# Stages that modify code and should trigger WIP commits when commit_per_stage is enabled
+# Note: REVIEW is read-only and doesn't modify code
+CODE_MODIFYING_STAGES = {Stage.DEV, Stage.TEST, Stage.DOCS}
+
 
 class WorkflowEngine:
     """
@@ -458,6 +462,10 @@ class WorkflowEngine:
         duration = self.state.record_stage_duration()
         self.state.record_passed_stage(current)
 
+        # Create stage commit if enabled and this is a code-modifying stage
+        if self.config.stages.commit_per_stage and current in CODE_MODIFYING_STAGES:
+            self._create_stage_commit(current, tui_app)
+
         # Archive rollback after successful DEV
         if current == Stage.DEV and tui_app:
             archive_rollback_if_exists(self.state.task_name, tui_app)
@@ -499,6 +507,36 @@ class WorkflowEngine:
         if next_idx > current_idx + 1:
             return STAGE_ORDER[current_idx + 1 : next_idx]
         return []
+
+    def _create_stage_commit(self, stage: Stage, tui_app: WorkflowTUIApp | None) -> None:
+        """Create a WIP commit for a code-modifying stage.
+
+        Args:
+            stage: The stage that just completed.
+            tui_app: Optional TUI app for activity notifications.
+        """
+        from galangal.config.loader import get_project_root
+        from galangal.core.git_utils import create_wip_commit
+
+        # Don't commit task artifacts (galangal-tasks/)
+        exclude_patterns = [self.config.tasks_dir]
+
+        sha = create_wip_commit(
+            stage=stage.value,
+            task_name=self.state.task_name,
+            cwd=get_project_root(),
+            exclude_patterns=exclude_patterns,
+        )
+
+        if sha:
+            # Track the commit in state
+            if self.state.stage_commits is None:
+                self.state.stage_commits = []
+            self.state.stage_commits.append({"stage": stage.value, "sha": sha})
+            save_state(self.state)
+
+            if tui_app:
+                tui_app.add_activity(f"Committed {stage.value}: {sha[:7]}", "📝")
 
     def _handle_skip(self) -> WorkflowEvent:
         """Handle skip stage action (Ctrl+N)."""

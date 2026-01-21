@@ -881,9 +881,9 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
         state.setup_fast_track()
         fast_track_skip_list = sorted(state.fast_track_skip)
     else:
-        # Full rollback: re-run all stages
+        # Full rollback: re-run all stages (but preserve stages marked preserve_on_rollback)
         state.clear_fast_track()
-        state.clear_passed_stages()
+        state.clear_passed_stages(preserve_marked=True)
         fast_track_skip_list = []
 
     # Log rollback event with fast-track info

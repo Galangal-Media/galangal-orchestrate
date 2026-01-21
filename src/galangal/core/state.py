@@ -116,6 +116,9 @@ class StageMetadata:
     #   "issues_field": "issues"
     # }
     artifact_schema: dict[str, str | None] | None = None
+    # If True, this stage remains in passed_stages during rollback
+    # (e.g., TEST stage - tests don't need to be rewritten after rollback)
+    preserve_on_rollback: bool = False
 
 
 class Stage(str, Enum):
@@ -209,26 +212,9 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
     ),
     Stage.TEST: StageMetadata(
         display_name="Test",
-        description="Write and run tests",
+        description="Write tests (does not run them)",
         produces_artifacts=("TEST_PLAN.md",),
-        decision_file="TEST_DECISION",
-        decision_outcomes=(
-            ("PASS", True, "Tests passed", None, False),
-            (
-                "FAIL",
-                False,
-                "Tests failed due to implementation issues - needs DEV fix",
-                "DEV",
-                False,
-            ),
-            (
-                "BLOCKED",
-                False,
-                "Tests blocked by implementation issues - needs DEV fix",
-                "DEV",
-                False,
-            ),
-        ),
+        preserve_on_rollback=True,  # Tests don't need to be rewritten after rollback
     ),
     Stage.TEST_GATE: StageMetadata(
         display_name="Test Gate",
@@ -768,6 +754,10 @@ class WorkflowState:
     # Stages to skip on this iteration (set from passed_stages on minor rollback)
     fast_track_skip: set[str] = field(default_factory=set)
 
+    # Per-stage commit tracking
+    base_commit_sha: str | None = None  # Commit SHA at task start (squash target)
+    stage_commits: list[dict[str, str]] | None = None  # [{"stage": "DEV", "sha": "abc123"}]
+
     # -------------------------------------------------------------------------
     # Retry management methods
     # -------------------------------------------------------------------------
@@ -958,14 +948,27 @@ class WorkflowState:
         """
         self.passed_stages.add(stage.value)
 
-    def clear_passed_stages(self) -> None:
+    def clear_passed_stages(self, preserve_marked: bool = False) -> None:
         """
         Clear the passed stages tracking.
 
         Called when entering DEV stage to start fresh tracking,
         or on a full rollback (REQUEST_CHANGES).
+
+        Args:
+            preserve_marked: If True, keep stages that have preserve_on_rollback=True
+                in their metadata (e.g., TEST stage - tests don't need rewriting).
         """
-        self.passed_stages = set()
+        if preserve_marked:
+            # Keep stages marked with preserve_on_rollback=True
+            preserved = {
+                stage.value
+                for stage in Stage
+                if STAGE_METADATA.get(stage, StageMetadata("", "")).preserve_on_rollback
+            }
+            self.passed_stages = self.passed_stages & preserved
+        else:
+            self.passed_stages = set()
 
     def setup_fast_track(self) -> None:
         """
@@ -1034,6 +1037,8 @@ class WorkflowState:
             screenshots=d.get("screenshots"),
             passed_stages=set(d.get("passed_stages", [])),
             fast_track_skip=set(d.get("fast_track_skip", [])),
+            base_commit_sha=d.get("base_commit_sha"),
+            stage_commits=d.get("stage_commits"),
         )
 
     @classmethod

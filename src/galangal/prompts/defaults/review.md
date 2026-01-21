@@ -111,6 +111,15 @@ Use **only** for significant issues that affect functionality or require substan
 - **Prefer REQUEST_MINOR_CHANGES** for any fix that doesn't change program behavior
 - Use REQUEST_CHANGES **only** for significant issues affecting functionality or security
 
+## Git Diff Strategy
+
+When reviewing code changes, use the appropriate git diff command based on context:
+
+- **First review**: Use `git diff {base_branch}...HEAD` to see all task changes
+- **On retry** (after REQUEST_CHANGES/REQUEST_MINOR_CHANGES): Use `git diff HEAD~1` to see just the fixes since last review
+
+This helps you focus on what changed since your previous review, rather than re-reviewing everything.
+
 ## Git Status Note
 
 **Untracked/uncommitted files are expected.** The galangal workflow does not commit changes until all stages pass. New files created during DEV will appear as untracked in `git status` - this is normal and NOT a problem. Do not flag "files need to be committed" or "untracked files" as issues.

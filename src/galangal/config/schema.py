@@ -20,6 +20,10 @@ class StageConfig(BaseModel):
     skip: list[str] = Field(default_factory=list, description="Stages to always skip")
     timeout: int = Field(default=14400, description="Stage timeout in seconds (default: 4 hours)")
     max_retries: int = Field(default=5, description="Max retries per stage")
+    commit_per_stage: bool = Field(
+        default=False,
+        description="Create WIP commits after each code-modifying stage, squash at finalization",
+    )
 
 
 class PreflightCheck(BaseModel):

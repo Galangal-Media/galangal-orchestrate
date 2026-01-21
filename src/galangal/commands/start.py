@@ -96,6 +96,8 @@ def create_task(
     Returns:
         Tuple of (success, message)
     """
+    from galangal.config.loader import get_config
+
     # Check if task already exists
     if task_name_exists(task_name):
         return False, f"Task '{task_name}' already exists"
@@ -115,6 +117,14 @@ def create_task(
     state = WorkflowState.new(
         description, task_name, task_type, github_issue, github_repo, screenshots
     )
+
+    # Capture base commit SHA if commit_per_stage is enabled
+    config = get_config()
+    if config.stages.commit_per_stage:
+        from galangal.core.git_utils import get_current_head
+
+        state.base_commit_sha = get_current_head()
+
     save_state(state)
 
     # Set as active task
