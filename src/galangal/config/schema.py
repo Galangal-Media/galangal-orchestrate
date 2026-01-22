@@ -21,7 +21,7 @@ class StageConfig(BaseModel):
     timeout: int = Field(default=14400, description="Stage timeout in seconds (default: 4 hours)")
     max_retries: int = Field(default=5, description="Max retries per stage")
     commit_per_stage: bool = Field(
-        default=False,
+        default=True,
         description="Create WIP commits after each code-modifying stage, squash at finalization",
     )
 
