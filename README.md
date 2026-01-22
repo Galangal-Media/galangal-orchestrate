@@ -28,12 +28,25 @@ If anything fails, the workflow automatically rolls back to the appropriate fix 
 ## Installation
 
 ```bash
-# With pip
+# Lite install (recommended) - core features, fast install
 pip install galangal-orchestrate
 
+# Full install - includes mistake tracking with vector search (~2GB, includes PyTorch)
+pip install galangal-orchestrate[full]
+
 # With pipx (recommended for CLI tools)
-pipx install galangal-orchestrate
+pipx install galangal-orchestrate              # lite
+pipx install galangal-orchestrate[full]        # full with mistake tracking
 ```
+
+### Installation Options
+
+| Option | Size | Features |
+|--------|------|----------|
+| `galangal-orchestrate` | ~50MB | Core workflow, all stages, artifact context filtering |
+| `galangal-orchestrate[full]` | ~2GB | + Mistake tracking with vector similarity search |
+
+The full install adds **mistake tracking** - a feature that remembers common AI errors in your repo and warns about them in future tasks. It requires PyTorch for local embeddings, hence the larger size.
 
 ## Quick Start
 
@@ -930,6 +943,60 @@ Create any of these in `.galangal/prompts/`:
 | `security.md` | Security review |
 | `review.md` | Code review |
 | `docs.md` | Documentation |
+
+## Mistake Tracking
+
+**Requires:** `pip install galangal-orchestrate[full]`
+
+Mistake tracking helps prevent the AI from repeating common errors in your codebase. It uses vector similarity search to identify patterns and inject warnings into prompts.
+
+### How It Works
+
+1. **Automatic Logging** - When a stage fails and rolls back, or when you interrupt with feedback (Ctrl+I), the mistake is logged to `.galangal/mistakes.db`
+
+2. **Semantic Deduplication** - Similar mistakes are merged using vector embeddings, preventing the database from growing unbounded
+
+3. **Prompt Injection** - When a stage starts, relevant mistakes are retrieved and injected as warnings:
+
+```markdown
+# Common Mistakes in This Repo - AVOID THESE
+
+## 1. Forgot null check on user object
+**Occurrences:** 4 times
+**Files:** src/services/*
+**Prevention:** Always check if user exists before accessing user.email
+```
+
+### CLI Commands
+
+```bash
+galangal mistakes list              # View all tracked mistakes
+galangal mistakes list --stage DEV  # Filter by stage
+galangal mistakes stats             # Show statistics
+galangal mistakes search "null"     # Semantic search
+galangal mistakes delete 5          # Remove a mistake by ID
+```
+
+### Example Output
+
+```
+$ galangal mistakes stats
+
+Mistake Tracking Statistics
+
+Unique mistakes     12
+Total occurrences   34
+Vector search       Enabled
+
+By Stage:
+  DEV     8
+  TEST    3
+  REVIEW  1
+```
+
+### Storage
+
+Mistakes are stored in `.galangal/mistakes.db` (SQLite with vector search). The database uses local embeddings via `sentence-transformers` - no API calls required.
 
 ## Troubleshooting
 

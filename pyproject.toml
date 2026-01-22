@@ -32,11 +32,19 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.0.0",
     "structlog>=24.0.0",
-    "sentence-transformers>=2.2.0",
-    "sqlite-vss>=0.1.2",
 ]
 
 [project.optional-dependencies]
+# Full installation with mistake tracking (adds ~2GB due to PyTorch)
+full = [
+    "sentence-transformers>=2.2.0",
+    "sqlite-vss>=0.1.2",
+]
+# Alias for clarity
+mistakes = [
+    "sentence-transformers>=2.2.0",
+    "sqlite-vss>=0.1.2",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
