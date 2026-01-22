@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from galangal.ai.base import AIBackend
 from galangal.ai.claude import ClaudeBackend
 from galangal.ai.codex import CodexBackend
+from galangal.ai.gemini import GeminiBackend
 from galangal.exceptions import AIError, ExitCode
 
 if TYPE_CHECKING:
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
 BACKEND_REGISTRY: dict[str, type[AIBackend]] = {
     "claude": ClaudeBackend,
     "codex": CodexBackend,
+    "gemini": GeminiBackend,
 }
 
 # Default fallback chain: backend -> fallback
@@ -163,6 +165,7 @@ __all__ = [
     "AIBackend",
     "ClaudeBackend",
     "CodexBackend",
+    "GeminiBackend",
     "BACKEND_REGISTRY",
     "get_backend",
     "get_backend_for_stage",
