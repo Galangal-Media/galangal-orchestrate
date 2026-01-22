@@ -26,9 +26,9 @@ def _check_dependencies() -> bool:
         return True
     except ImportError as e:
         console.print(
-            "[yellow]Mistake tracking requires additional dependencies.[/yellow]\n"
-            "Install with: [bold]pip install galangal-orchestrate[mistakes][/bold]\n"
-            f"\nDetails: {e}"
+            "[yellow]Mistake tracking dependencies not available.[/yellow]\n"
+            f"Details: {e}\n\n"
+            "Try reinstalling: [bold]pip install --upgrade galangal-orchestrate[/bold]"
         )
         return False
 
