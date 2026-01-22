@@ -626,6 +626,13 @@ class WorkflowEngine:
         self.state.reset_attempts(clear_failure=False)
         save_state(self.state)
 
+        # Log mistake for future reference (user interrupts are valuable feedback)
+        self._log_interrupt_mistake(
+            task_name=self.state.task_name,
+            stage=interrupted_stage.value,
+            feedback=feedback,
+        )
+
         return event(
             EventType.ROLLBACK_TRIGGERED,
             stage=interrupted_stage,
@@ -633,6 +640,32 @@ class WorkflowEngine:
             from_stage=interrupted_stage,
             to_stage=target_stage,
         )
+
+    def _log_interrupt_mistake(self, task_name: str, stage: str, feedback: str) -> None:
+        """Log an interrupt as a mistake for future learning."""
+        try:
+            from galangal.mistakes import MistakeTracker
+
+            if not feedback:
+                return  # No feedback means nothing to learn from
+
+            tracker = MistakeTracker()
+
+            # Extract description from feedback
+            description = feedback.split(".")[0].strip()
+            if len(description) > 100:
+                description = description[:100] + "..."
+
+            tracker.log(
+                description=description,
+                feedback=feedback,
+                stage=stage,
+                task=task_name,
+            )
+        except ImportError:
+            pass
+        except Exception:
+            pass
 
     def _handle_approval(
         self, approved: bool, approver: str = "", reason: str = ""

@@ -283,6 +283,11 @@ class PromptBuilder:
         # Add relevant artifacts based on stage
         context_parts.extend(self._get_artifact_context(stage, task_name))
 
+        # Add mistake warnings if tracking is available
+        mistake_warnings = self._get_mistake_warnings(stage, state)
+        if mistake_warnings:
+            context_parts.append(mistake_warnings)
+
         # Add global prompt context from config
         if self.config.prompt_context:
             context_parts.append(f"\n# Project Context\n{self.config.prompt_context}")
@@ -531,6 +536,36 @@ Only update documentation types marked as YES above.""")
                 )
 
         return parts
+
+    def _get_mistake_warnings(self, stage: Stage, state: WorkflowState) -> str:
+        """
+        Get mistake warnings for inclusion in the prompt.
+
+        Retrieves common mistakes from the vector database that are relevant
+        to the current stage and task. Returns empty string if mistake tracking
+        is not available or no relevant mistakes found.
+
+        Args:
+            stage: Current workflow stage.
+            state: Current workflow state with task info.
+
+        Returns:
+            Formatted warnings string, or empty string if none.
+        """
+        try:
+            from galangal.mistakes import MistakeTracker
+
+            tracker = MistakeTracker()
+            return tracker.format_warnings_for_prompt(
+                stage=stage.value,
+                task_description=state.task_description,
+            )
+        except ImportError:
+            # sentence-transformers not installed
+            return ""
+        except Exception:
+            # Don't fail prompt building if mistake tracking fails
+            return ""
 
     def build_minimal_review_prompt(self, state: WorkflowState, backend_name: str) -> str:
         """

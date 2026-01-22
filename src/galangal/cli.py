@@ -260,6 +260,30 @@ def main() -> int:
     )
     github_run.set_defaults(func=_cmd_github_run)
 
+    # mistakes
+    mistakes_parser = subparsers.add_parser(
+        "mistakes", help="View and manage tracked mistakes"
+    )
+    mistakes_subparsers = mistakes_parser.add_subparsers(dest="mistakes_command")
+    mistakes_list = mistakes_subparsers.add_parser("list", help="List tracked mistakes")
+    mistakes_list.add_argument(
+        "--limit", "-n", type=int, default=20, help="Maximum number of mistakes to show"
+    )
+    mistakes_list.add_argument(
+        "--stage", "-s", help="Filter by stage (e.g., DEV, TEST)"
+    )
+    mistakes_list.set_defaults(func=_cmd_mistakes_list)
+    mistakes_stats = mistakes_subparsers.add_parser("stats", help="Show mistake statistics")
+    mistakes_stats.set_defaults(func=_cmd_mistakes_stats)
+    mistakes_search = mistakes_subparsers.add_parser(
+        "search", help="Search for similar mistakes"
+    )
+    mistakes_search.add_argument("query", help="Search query")
+    mistakes_search.set_defaults(func=_cmd_mistakes_search)
+    mistakes_delete = mistakes_subparsers.add_parser("delete", help="Delete a mistake by ID")
+    mistakes_delete.add_argument("id", type=int, help="Mistake ID to delete")
+    mistakes_delete.set_defaults(func=_cmd_mistakes_delete)
+
     args = parser.parse_args()
 
     # Enable debug mode if requested
@@ -365,6 +389,30 @@ def _cmd_github_run(args: argparse.Namespace) -> int:
     from galangal.commands.github import cmd_github_run
 
     return cmd_github_run(args)
+
+
+def _cmd_mistakes_list(args: argparse.Namespace) -> int:
+    from galangal.commands.mistakes import cmd_mistakes_list
+
+    return cmd_mistakes_list(args)
+
+
+def _cmd_mistakes_stats(args: argparse.Namespace) -> int:
+    from galangal.commands.mistakes import cmd_mistakes_stats
+
+    return cmd_mistakes_stats(args)
+
+
+def _cmd_mistakes_search(args: argparse.Namespace) -> int:
+    from galangal.commands.mistakes import cmd_mistakes_search
+
+    return cmd_mistakes_search(args)
+
+
+def _cmd_mistakes_delete(args: argparse.Namespace) -> int:
+    from galangal.commands.mistakes import cmd_mistakes_delete
+
+    return cmd_mistakes_delete(args)
 
 
 if __name__ == "__main__":
