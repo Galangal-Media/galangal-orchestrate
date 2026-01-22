@@ -242,11 +242,13 @@ class ValidationRunner:
         # Decision file checks - these take precedence over artifact markers
         # because backends (like Codex) write explicit decision files
 
-        # TEST stage: check TEST_DECISION file
+        # TEST stage: just check TEST_PLAN.md exists
+        # (TEST stage only writes tests, TEST_GATE or QA runs them)
         if stage_lower == "test":
-            result = validate_stage_decision("TEST", task_name, "TEST_PLAN.md")
-            if not result.success:
-                return result
+            if not artifact_exists("TEST_PLAN.md", task_name):
+                return ValidationResult(False, "TEST_PLAN.md not found")
+            # TEST stage passed - tests will be run by TEST_GATE or QA
+            return ValidationResult(True, "Tests written successfully")
 
         # QA stage: check QA_DECISION file
         if stage_lower == "qa":
@@ -1006,53 +1008,12 @@ class ValidationRunner:
         if stage_upper == "DEV":
             return ValidationResult(True, "DEV stage completed - QA will validate")
 
-        # TEST stage - check TEST_DECISION file for pass/fail/blocked
+        # TEST stage - just check TEST_PLAN.md exists
+        # (TEST stage only writes tests, TEST_GATE or QA runs them)
         if stage_upper == "TEST":
-            from galangal.core.state import Stage, get_decision_config
-
             if not artifact_exists("TEST_PLAN.md", task_name):
                 return ValidationResult(False, "TEST_PLAN.md not found")
-
-            # Check for decision file first using centralized config
-            decision = read_decision_file("TEST", task_name)
-            test_decision_config = get_decision_config(Stage.TEST) or {}
-            if decision and decision in test_decision_config:
-                success, message, rollback_to, is_fast_track = test_decision_config[decision]
-                return ValidationResult(
-                    success, message, rollback_to=rollback_to, is_fast_track=is_fast_track
-                )
-
-            # No decision file - check TEST_PLAN.md content for markers
-            report = read_artifact("TEST_PLAN.md", task_name) or ""
-            report_upper = report.upper()
-
-            # Check for explicit BLOCKED marker (implementation bugs)
-            if "##BLOCKED##" in report or "## BLOCKED" in report_upper:
-                return ValidationResult(
-                    False,
-                    "Tests blocked by implementation issues - needs DEV fix",
-                    rollback_to="DEV",
-                )
-
-            # Check for FAIL status in the report
-            if "**STATUS:** FAIL" in report or "STATUS: FAIL" in report_upper:
-                return ValidationResult(
-                    False,
-                    "Tests failed - needs DEV fix",
-                    rollback_to="DEV",
-                )
-
-            # Check for PASS status
-            if "**STATUS:** PASS" in report or "STATUS: PASS" in report_upper:
-                return ValidationResult(True, "Tests passed")
-
-            # No clear status - require user decision
-            return ValidationResult(
-                False,
-                "TEST_DECISION file missing - confirm test results",
-                output=truncate_text(report, 2000),
-                needs_user_decision=True,
-            )
+            return ValidationResult(True, "Tests written successfully")
 
         # QA stage - use generic decision validation
         if stage_upper == "QA":
