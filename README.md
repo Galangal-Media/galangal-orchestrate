@@ -18,6 +18,53 @@ When you ask an AI to "add user authentication", you get whatever the AI decides
 
 If anything fails, the workflow automatically rolls back to the appropriate fix point with context about what went wrong.
 
+## Workflow Architecture
+
+```mermaid
+flowchart TD
+    START([Start Task]) --> PM[PM Stage]
+    PM --> PM_GATE{Plan<br/>Approved?}
+    PM_GATE -->|Yes| DESIGN[Design Stage]
+    PM_GATE -->|No| PM
+
+    DESIGN --> DESIGN_GATE{Design<br/>Approved?}
+    DESIGN_GATE -->|Yes| PREFLIGHT[Preflight]
+    DESIGN_GATE -->|No| DESIGN
+
+    PREFLIGHT --> DEV[Development]
+    DEV --> DEV_VAL{Validation<br/>Passes?}
+    DEV_VAL -->|Yes| MIGRATION
+    DEV_VAL -->|No| DEV
+
+    MIGRATION[Migration*] --> TEST[Test Stage]
+    TEST --> TEST_VAL{Tests<br/>Pass?}
+    TEST_VAL -->|Yes| TEST_GATE
+    TEST_VAL -->|No| DEV
+
+    TEST_GATE[Test Gate*] --> CONTRACT[Contract*]
+    CONTRACT --> QA[QA Stage]
+    QA --> BENCHMARK[Benchmark*]
+    BENCHMARK --> SECURITY[Security]
+    SECURITY --> REVIEW[Review]
+    REVIEW --> DOCS[Documentation]
+    DOCS --> COMPLETE([Complete])
+
+    %% Rollback paths
+    QA -.->|Fail| DEV
+    SECURITY -.->|Fail| DEV
+    REVIEW -.->|Fail| DEV
+
+    style PM fill:#e1f5fe
+    style DESIGN fill:#e1f5fe
+    style DEV fill:#fff3e0
+    style TEST fill:#fff3e0
+    style QA fill:#e8f5e9
+    style REVIEW fill:#e8f5e9
+    style DOCS fill:#e8f5e9
+```
+
+*Conditional stages - skipped automatically if not relevant to the task.
+
 ## Requirements
 
 - Python 3.10+
