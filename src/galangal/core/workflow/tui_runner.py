@@ -1011,6 +1011,8 @@ async def _handle_stage_approval(
 
 async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -> None:
     """Handle workflow completion - finalization and post-completion options."""
+    from galangal.core.artifacts import read_artifact
+
     # Clear fast-track state on completion
     state.clear_fast_track()
     state.clear_passed_stages()
@@ -1020,7 +1022,18 @@ async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -
     app.update_stage("COMPLETE")
     app.set_status("complete", "workflow finished")
 
-    choice = await app.prompt_async(PromptType.COMPLETION, "Workflow complete!")
+    # Build completion message with summary if available
+    summary_content = read_artifact("SUMMARY.md", state.task_name)
+    if summary_content:
+        # Truncate if too long for modal display
+        summary_preview = summary_content[:2000]
+        if len(summary_content) > 2000:
+            summary_preview += "\n\n[... truncated]"
+        completion_message = f"Workflow complete!\n\n{summary_preview}"
+    else:
+        completion_message = "Workflow complete!"
+
+    choice = await app.prompt_async(PromptType.COMPLETION, completion_message)
 
     if choice == "yes":
         # Run finalization

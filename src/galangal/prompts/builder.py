@@ -439,6 +439,27 @@ Only update documentation types marked as YES above.""")
                     f"\n# TEST_SUMMARY.md (Test results)\n{read_artifact('TEST_SUMMARY.md', task_name)}"
                 )
 
+        # SUMMARY stage: needs all artifacts to synthesize a comprehensive summary
+        if stage == Stage.SUMMARY:
+            # Include test summary
+            if artifact_exists("TEST_SUMMARY.md", task_name):
+                parts.append(
+                    f"\n# TEST_SUMMARY.md (Test results)\n{read_artifact('TEST_SUMMARY.md', task_name)}"
+                )
+            # Include QA report
+            if artifact_exists("QA_REPORT.md", task_name):
+                parts.append(f"\n# QA_REPORT.md\n{read_artifact('QA_REPORT.md', task_name)}")
+            # Include security checklist
+            if artifact_exists("SECURITY_CHECKLIST.md", task_name):
+                parts.append(
+                    f"\n# SECURITY_CHECKLIST.md\n{read_artifact('SECURITY_CHECKLIST.md', task_name)}"
+                )
+            # Include review notes
+            if artifact_exists("REVIEW_NOTES.md", task_name):
+                parts.append(
+                    f"\n# REVIEW_NOTES.md\n{read_artifact('REVIEW_NOTES.md', task_name)}"
+                )
+
         return parts
 
     def build_minimal_review_prompt(self, state: WorkflowState, backend_name: str) -> str:

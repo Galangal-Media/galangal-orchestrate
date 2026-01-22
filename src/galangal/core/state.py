@@ -137,6 +137,7 @@ class Stage(str, Enum):
     SECURITY = "SECURITY"
     REVIEW = "REVIEW"
     DOCS = "DOCS"
+    SUMMARY = "SUMMARY"
     COMPLETE = "COMPLETE"
 
     @classmethod
@@ -172,6 +173,7 @@ STAGE_ORDER = [
     Stage.SECURITY,
     Stage.REVIEW,
     Stage.DOCS,
+    Stage.SUMMARY,
     Stage.COMPLETE,
 ]
 
@@ -316,6 +318,13 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         display_name="Docs",
         description="Update documentation",
         produces_artifacts=("DOCS_REPORT.md",),
+    ),
+    Stage.SUMMARY: StageMetadata(
+        display_name="Summary",
+        description="Generate workflow summary for PR",
+        is_skippable=True,
+        produces_artifacts=("SUMMARY.md",),
+        skip_artifact="SUMMARY_SKIP.md",
     ),
     Stage.COMPLETE: StageMetadata(
         display_name="Complete",

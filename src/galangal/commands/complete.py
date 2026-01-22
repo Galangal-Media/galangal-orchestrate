@@ -145,6 +145,7 @@ def create_pull_request(
             return False, f"Failed to push branch: {err or out}"
 
     spec_content = read_artifact("SPEC.md", task_name) or description
+    summary_content = read_artifact("SUMMARY.md", task_name)
 
     console.print("[dim]Generating PR title...[/dim]")
     pr_title = generate_pr_title(task_name, description, task_type)
@@ -153,8 +154,16 @@ def create_pull_request(
     if github_issue:
         pr_title = f"Issue #{github_issue}: {pr_title}"
 
-    # Build PR body
-    pr_body = f"""## Summary
+    # Build PR body - prefer summary if available, fall back to spec
+    if summary_content:
+        # Use summary (truncate if needed)
+        summary_truncated = summary_content[:2000] if len(summary_content) > 2000 else summary_content
+        pr_body = f"""{summary_truncated}
+
+"""
+    else:
+        # Fall back to spec content
+        pr_body = f"""## Summary
 {spec_content[:1500] if len(spec_content) > 1500 else spec_content}
 
 """

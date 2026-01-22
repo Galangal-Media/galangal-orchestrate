@@ -170,6 +170,7 @@ class TestWorkflowStageProgression:
         assert Stage.QA in visited_stages
         assert Stage.REVIEW in visited_stages
         assert Stage.DOCS in visited_stages
+        assert Stage.SUMMARY in visited_stages
         assert Stage.COMPLETE in visited_stages
 
     def test_docs_task_type_skips_stages(self):
@@ -195,8 +196,8 @@ class TestWorkflowStageProgression:
                         visited_stages.append(next_stage)
                         current = next_stage
 
-        # DOCS task type goes directly PM → DOCS → COMPLETE
-        # Should skip everything except PM and DOCS
+        # DOCS task type goes PM → DOCS → SUMMARY → COMPLETE
+        # Should skip everything except PM, DOCS, and SUMMARY
         assert Stage.DESIGN not in visited_stages
         assert Stage.PREFLIGHT not in visited_stages
         assert Stage.DEV not in visited_stages
@@ -204,10 +205,11 @@ class TestWorkflowStageProgression:
         assert Stage.QA not in visited_stages
         assert Stage.SECURITY not in visited_stages
         assert Stage.REVIEW not in visited_stages
-        # Should only have: PM, DOCS, COMPLETE
+        # Should only have: PM, DOCS, SUMMARY, COMPLETE
         assert Stage.PM in visited_stages
         assert Stage.DOCS in visited_stages
-        assert visited_stages == [Stage.PM, Stage.DOCS, Stage.COMPLETE]
+        assert Stage.SUMMARY in visited_stages
+        assert visited_stages == [Stage.PM, Stage.DOCS, Stage.SUMMARY, Stage.COMPLETE]
 
     def test_config_skip_stages(self):
         """Test that config-level skip removes stages from workflow."""
