@@ -516,15 +516,24 @@ class WorkflowEngine:
             tui_app: Optional TUI app for activity notifications.
         """
         from galangal.config.loader import get_project_root
-        from galangal.core.git_utils import create_wip_commit
+        from galangal.core.git_utils import create_wip_commit, has_changes_to_commit
 
         # Don't commit task artifacts (galangal-tasks/)
         exclude_patterns = [self.config.tasks_dir]
+        project_root = get_project_root()
+
+        # Check if there are changes first (for better logging)
+        has_changes = has_changes_to_commit(project_root, exclude_patterns)
+
+        if not has_changes:
+            if tui_app:
+                tui_app.add_activity(f"No code changes to commit for {stage.value}", "ℹ️")
+            return
 
         sha = create_wip_commit(
             stage=stage.value,
             task_name=self.state.task_name,
-            cwd=get_project_root(),
+            cwd=project_root,
             exclude_patterns=exclude_patterns,
         )
 
@@ -537,6 +546,10 @@ class WorkflowEngine:
 
             if tui_app:
                 tui_app.add_activity(f"Committed {stage.value}: {sha[:7]}", "📝")
+        else:
+            # Commit failed for some reason
+            if tui_app:
+                tui_app.add_activity(f"Failed to commit {stage.value} changes", "⚠️")
 
     def _handle_skip(self) -> WorkflowEvent:
         """Handle skip stage action (Ctrl+N)."""
