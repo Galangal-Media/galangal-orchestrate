@@ -104,13 +104,21 @@ Tip: Press Ctrl+C during execution to pause gracefully.
 
 
 def main() -> int:
+    from galangal import __version__
+
     parser = argparse.ArgumentParser(
         description="Galangal Orchestrate - AI-Driven Development Workflow",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_build_epilog(),
     )
 
-    # Global --debug flag (before subparsers)
+    # Global flags (before subparsers)
+    parser.add_argument(
+        "--version",
+        "-V",
+        action="version",
+        version=f"galangal {__version__}",
+    )
     parser.add_argument(
         "--debug",
         "-d",
@@ -260,6 +268,27 @@ def main() -> int:
     )
     github_run.set_defaults(func=_cmd_github_run)
 
+    # config
+    config_parser = subparsers.add_parser("config", help="Configuration management")
+    config_subparsers = config_parser.add_subparsers(dest="config_command")
+    config_edit = config_subparsers.add_parser(
+        "edit", help="Launch interactive config editor"
+    )
+    config_edit.set_defaults(func=_cmd_config_edit)
+    config_show = config_subparsers.add_parser("show", help="Show current configuration")
+    config_show.add_argument(
+        "--json", "-j", action="store_true", help="Output as JSON"
+    )
+    config_show.set_defaults(func=_cmd_config_show)
+    config_schema = config_subparsers.add_parser(
+        "schema", help="Export JSON Schema for config.yaml"
+    )
+    config_schema.set_defaults(func=_cmd_config_schema)
+    config_validate = config_subparsers.add_parser(
+        "validate", help="Validate current configuration"
+    )
+    config_validate.set_defaults(func=_cmd_config_validate)
+
     # mistakes
     mistakes_parser = subparsers.add_parser(
         "mistakes", help="View and manage tracked mistakes"
@@ -389,6 +418,30 @@ def _cmd_github_run(args: argparse.Namespace) -> int:
     from galangal.commands.github import cmd_github_run
 
     return cmd_github_run(args)
+
+
+def _cmd_config_edit(args: argparse.Namespace) -> int:
+    from galangal.commands.config import cmd_config_edit
+
+    return cmd_config_edit(args)
+
+
+def _cmd_config_show(args: argparse.Namespace) -> int:
+    from galangal.commands.config import cmd_config_show
+
+    return cmd_config_show(args)
+
+
+def _cmd_config_schema(args: argparse.Namespace) -> int:
+    from galangal.commands.config import cmd_config_schema
+
+    return cmd_config_schema(args)
+
+
+def _cmd_config_validate(args: argparse.Namespace) -> int:
+    from galangal.commands.config import cmd_config_validate
+
+    return cmd_config_validate(args)
 
 
 def _cmd_mistakes_list(args: argparse.Namespace) -> int:
