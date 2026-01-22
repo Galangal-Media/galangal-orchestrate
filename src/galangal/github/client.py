@@ -9,13 +9,13 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
-from galangal.exceptions import GalangalError
+from galangal.exceptions import ExitCode, GalangalError
 
 
 class GitHubError(GalangalError):
     """Raised when GitHub operations fail."""
 
-    pass
+    exit_code = ExitCode.GITHUB_ERROR
 
 
 @dataclass

@@ -6,7 +6,9 @@ structured development stages: PM -> DESIGN -> DEV -> TEST -> QA -> REVIEW -> DO
 """
 
 from galangal.exceptions import (
+    AIError,
     ConfigError,
+    ExitCode,
     GalangalError,
     TaskError,
     ValidationError,
@@ -28,6 +30,8 @@ __all__ = [
     "ValidationError",
     "WorkflowError",
     "TaskError",
+    "AIError",
+    "ExitCode",
     # Logging
     "configure_logging",
     "get_logger",

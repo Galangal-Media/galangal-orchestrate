@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from galangal.ai.base import AIBackend
 from galangal.ai.claude import ClaudeBackend
 from galangal.ai.codex import CodexBackend
+from galangal.exceptions import AIError, ExitCode
 
 if TYPE_CHECKING:
     from galangal.config.schema import AIBackendConfig, GalangalConfig
@@ -41,12 +42,12 @@ def get_backend(
         Instantiated backend with configuration
 
     Raises:
-        ValueError: If backend name is unknown
+        AIError: If backend name is unknown
     """
     backend_class = BACKEND_REGISTRY.get(name.lower())
     if not backend_class:
         available = list(BACKEND_REGISTRY.keys())
-        raise ValueError(f"Unknown backend: {name}. Available: {available}")
+        raise AIError(f"Unknown backend: {name}. Available: {available}")
 
     # Get backend-specific config if available
     backend_config: AIBackendConfig | None = None
@@ -121,7 +122,10 @@ def get_backend_with_fallback(
     if name.lower() != "claude" and is_backend_available("claude", config):
         return get_backend("claude", config)
 
-    raise ValueError(f"Backend '{name}' not available and no fallback found")
+    raise AIError(
+        f"Backend '{name}' not available and no fallback found",
+        exit_code=ExitCode.AI_NOT_FOUND,
+    )
 
 
 def get_backend_for_stage(
