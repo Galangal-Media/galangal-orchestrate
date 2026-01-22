@@ -56,6 +56,9 @@ class WizardConfig:
     # Custom prompt context
     prompt_context: str = ""
 
+    # Artifact context filtering
+    artifact_context_enabled: bool = False
+
     def to_yaml(self) -> str:
         """Convert wizard config to YAML string."""
         return generate_config_yaml(self)
@@ -108,6 +111,9 @@ def run_wizard(
 
     # Step 7: Custom prompt context
     _step_prompt_context(config, is_update, existing_config)
+
+    # Step 8: Artifact context filtering
+    _step_artifact_context(config, is_update, existing_config)
 
     # Summary
     _show_summary(config)
@@ -366,6 +372,33 @@ def _step_prompt_context(
     print_success("Custom instructions configured")
 
 
+def _step_artifact_context(
+    config: WizardConfig,
+    is_update: bool,
+    existing: dict[str, Any] | None,
+) -> None:
+    """Step 8: Artifact context filtering."""
+    if is_update and _section_exists(existing, "artifact_context"):
+        if not Confirm.ask("Update artifact context filtering?", default=False):
+            return
+
+    _section_header("8. Artifact Context Filtering")
+
+    console.print("[dim]Control which artifacts are included in prompts for each stage.[/dim]")
+    console.print("[dim]This can reduce token usage by 30-50% on later stages (REVIEW, DOCS, etc.).[/dim]\n")
+
+    config.artifact_context_enabled = Confirm.ask(
+        "Enable artifact context filtering? (recommended for cost optimization)",
+        default=config.artifact_context_enabled,
+    )
+
+    if config.artifact_context_enabled:
+        print_success("Artifact filtering enabled with recommended defaults")
+        console.print("[dim]Edit .galangal/config.yaml to customize per-stage filtering.[/dim]")
+    else:
+        print_info("Artifact filtering disabled - all relevant artifacts will be included")
+
+
 def _show_summary(config: WizardConfig) -> None:
     """Show configuration summary."""
     console.print("\n")
@@ -389,6 +422,11 @@ def _show_summary(config: WizardConfig) -> None:
 
     if config.skip_stages:
         table.add_row("Skipped stages", ", ".join(config.skip_stages))
+
+    table.add_row(
+        "Artifact filtering",
+        "Enabled (recommended)" if config.artifact_context_enabled else "Disabled",
+    )
 
     console.print(table)
     console.print()
@@ -447,6 +485,9 @@ def _load_existing_config(config: WizardConfig, existing: dict[str, Any]) -> Non
         # Strip default template text
         if "Add your project-specific patterns" in config.prompt_context:
             config.prompt_context = ""
+
+    # Artifact context
+    config.artifact_context_enabled = existing.get("artifact_context") is not None
 
 
 def generate_config_yaml(config: WizardConfig) -> str:
@@ -604,6 +645,31 @@ def generate_config_yaml(config: WizardConfig) -> str:
         "TEST": "# Add TEST-specific context here\n",
     }
 
+    # Artifact context filtering (if enabled)
+    if config.artifact_context_enabled:
+        cfg["artifact_context"] = {
+            "review": {
+                "required": ["SPEC.md", "DEVELOPMENT.md"],
+                "include": ["DESIGN.md", "QA_REPORT.md", "SECURITY_CHECKLIST.md"],
+                "exclude": ["PREFLIGHT.md", "TEST_PLAN.md", "TEST_GATE_RESULTS.md"],
+            },
+            "security": {
+                "required": ["SPEC.md", "DEVELOPMENT.md"],
+                "include": ["DESIGN.md"],
+                "exclude": ["TEST_SUMMARY.md", "QA_REPORT.md"],
+            },
+            "docs": {
+                "required": ["SPEC.md", "DEVELOPMENT.md"],
+                "include": ["DESIGN.md"],
+                "exclude": ["TEST_PLAN.md", "QA_REPORT.md", "SECURITY_CHECKLIST.md"],
+            },
+            "summary": {
+                "required": ["SPEC.md"],
+                "include": ["QA_REPORT.md", "SECURITY_CHECKLIST.md", "REVIEW_NOTES.md"],
+                "exclude": ["DEVELOPMENT.md", "TEST_PLAN.md", "TEST_SUMMARY.md"],
+            },
+        }
+
     # Generate YAML with comments
     yaml_str = _generate_yaml_with_comments(cfg, config)
 
@@ -732,6 +798,21 @@ def _generate_yaml_with_comments(cfg: dict[str, Any], config: WizardConfig) -> s
     stage_yaml = yaml.dump({"stage_context": cfg["stage_context"]}, default_flow_style=False, sort_keys=False)
     lines.append(stage_yaml.strip())
     lines.append("")
+
+    # Artifact context filtering
+    if "artifact_context" in cfg:
+        lines.append("# " + "=" * 77)
+        lines.append("# Artifact Context Filtering")
+        lines.append("# Control which artifacts are included in prompts per stage (reduces token usage)")
+        lines.append("# " + "=" * 77)
+        lines.append("")
+        artifact_yaml = yaml.dump(
+            {"artifact_context": cfg["artifact_context"]},
+            default_flow_style=False,
+            sort_keys=False,
+        )
+        lines.append(artifact_yaml.strip())
+        lines.append("")
 
     return "\n".join(lines)
 

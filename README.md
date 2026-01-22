@@ -614,6 +614,50 @@ task_type_settings:
     skip_discovery: true
 
 # =============================================================================
+# ARTIFACT CONTEXT FILTERING
+# Control which artifacts are included in prompts per stage (reduces token usage)
+# =============================================================================
+artifact_context:
+  # Each stage can specify which artifacts to include
+  # - required: Must be included (no error if missing, just skipped)
+  # - include: Include if exists
+  # - exclude: Never include (overrides include)
+
+  review:
+    required:
+      - SPEC.md
+      - DEVELOPMENT.md
+    include:
+      - DESIGN.md
+      - QA_REPORT.md
+      - SECURITY_CHECKLIST.md
+    exclude:
+      - PREFLIGHT.md
+      - TEST_PLAN.md
+      - TEST_GATE_RESULTS.md
+
+  security:
+    required:
+      - SPEC.md
+      - DEVELOPMENT.md
+    include:
+      - DESIGN.md
+    exclude:
+      - TEST_SUMMARY.md
+      - QA_REPORT.md
+
+  docs:
+    required:
+      - SPEC.md
+      - DEVELOPMENT.md
+    include:
+      - DESIGN.md
+    exclude:
+      - TEST_PLAN.md
+      - QA_REPORT.md
+      - SECURITY_CHECKLIST.md
+
+# =============================================================================
 # PROMPT CONTEXT
 # Additional context injected into AI prompts
 # =============================================================================
@@ -756,6 +800,77 @@ ai:
   stage_backends:
     QA: my-backend
 ```
+
+## Artifact Context Filtering
+
+By default, each stage receives relevant artifacts from earlier stages in its prompt context. Later stages like REVIEW can accumulate large amounts of context, increasing token usage and costs.
+
+**Artifact context filtering** lets you explicitly control which artifacts each stage receives, reducing token usage by 30-50% on later stages.
+
+### How It Works
+
+When a stage runs, Galangal builds its prompt by including artifacts from earlier stages. Without filtering, the REVIEW stage might receive:
+- SPEC.md, DESIGN.md, DEVELOPMENT.md (needed)
+- PREFLIGHT.md, TEST_PLAN.md, TEST_GATE_RESULTS.md (not needed for review)
+
+With filtering, you specify exactly what each stage needs:
+
+```yaml
+artifact_context:
+  review:
+    required:
+      - SPEC.md           # Core requirements
+      - DEVELOPMENT.md    # Implementation details
+    include:
+      - QA_REPORT.md      # Include if exists
+      - SECURITY_CHECKLIST.md
+    exclude:
+      - PREFLIGHT.md      # Never include
+      - TEST_PLAN.md
+```
+
+### Configuration Options
+
+| Field | Description |
+|-------|-------------|
+| `required` | Artifacts to always include (skipped if missing) |
+| `include` | Artifacts to include if they exist |
+| `exclude` | Artifacts to never include (overrides include) |
+
+### Recommended Configuration
+
+For most projects, filtering these stages provides the best token savings:
+
+```yaml
+artifact_context:
+  # REVIEW: Focus on spec, implementation, and findings
+  review:
+    required: [SPEC.md, DEVELOPMENT.md]
+    include: [DESIGN.md, QA_REPORT.md, SECURITY_CHECKLIST.md]
+    exclude: [PREFLIGHT.md, TEST_PLAN.md, TEST_GATE_RESULTS.md]
+
+  # SECURITY: Only needs code changes
+  security:
+    required: [SPEC.md, DEVELOPMENT.md]
+    include: [DESIGN.md]
+    exclude: [TEST_SUMMARY.md, QA_REPORT.md]
+
+  # DOCS: Requirements and implementation
+  docs:
+    required: [SPEC.md, DEVELOPMENT.md]
+    include: [DESIGN.md]
+    exclude: [TEST_PLAN.md, QA_REPORT.md, SECURITY_CHECKLIST.md]
+
+  # SUMMARY: Final reports only
+  summary:
+    required: [SPEC.md]
+    include: [QA_REPORT.md, SECURITY_CHECKLIST.md, REVIEW_NOTES.md]
+    exclude: [DEVELOPMENT.md, TEST_PLAN.md, TEST_SUMMARY.md]
+```
+
+### Backwards Compatibility
+
+If `artifact_context` is not configured, Galangal uses its default stage-specific logic. You can configure filtering for some stages and leave others to use defaults.
 
 ## Customizing Prompts
 

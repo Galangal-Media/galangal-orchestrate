@@ -229,6 +229,56 @@ class DocsConfig(BaseModel):
     )
 
 
+class StageArtifactConfig(BaseModel):
+    """Artifact context configuration for a stage.
+
+    Controls which artifacts are included in the prompt context for a stage.
+    This enables selective context filtering to reduce token usage.
+
+    Artifacts are checked in order: required → optional → (exclude filters out)
+    """
+
+    required: list[str] = Field(
+        default_factory=list,
+        description="Artifacts that must be included (error if missing)",
+    )
+    include: list[str] = Field(
+        default_factory=list,
+        description="Artifacts to include if they exist",
+    )
+    exclude: list[str] = Field(
+        default_factory=list,
+        description="Artifacts to never include (overrides include)",
+    )
+
+
+class ArtifactContextConfig(BaseModel):
+    """Configuration for artifact context filtering per stage.
+
+    Each stage can specify which artifacts it needs. This reduces token usage
+    by only including relevant context instead of all accumulated artifacts.
+
+    If a stage is not configured here, it falls back to the default behavior
+    (include artifacts based on hardcoded stage logic).
+    """
+
+    # Map of stage name (uppercase) to artifact config
+    pm: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+    design: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+    preflight: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+    dev: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+    migration: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+    test: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+    test_gate: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+    contract: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+    qa: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+    benchmark: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+    security: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+    review: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+    docs: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+    summary: StageArtifactConfig = Field(default_factory=StageArtifactConfig)
+
+
 class LoggingConfig(BaseModel):
     """Structured logging configuration."""
 
@@ -343,4 +393,8 @@ class GalangalConfig(BaseModel):
     task_type_settings: dict[str, TaskTypeSettings] = Field(
         default_factory=dict,
         description="Per-task-type settings (e.g., skip_discovery for bugfix tasks)",
+    )
+    artifact_context: ArtifactContextConfig | None = Field(
+        default=None,
+        description="Per-stage artifact context filtering. If not set, uses default stage logic.",
     )

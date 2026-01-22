@@ -324,6 +324,76 @@ Only update documentation types marked as YES above.""")
         """
         Get relevant artifact content for inclusion in the stage prompt.
 
+        Uses config-driven selective filtering if artifact_context is configured,
+        otherwise falls back to default stage-specific logic.
+
+        Args:
+            stage: Current stage to get context for.
+            task_name: Task name for artifact lookups.
+
+        Returns:
+            List of formatted artifact sections (e.g., "# SPEC.md\\n{content}").
+        """
+        # Check if artifact_context is configured for this stage
+        if self.config.artifact_context is not None:
+            stage_config = getattr(
+                self.config.artifact_context, stage.value.lower(), None
+            )
+            if stage_config and (stage_config.required or stage_config.include):
+                return self._get_configured_artifact_context(
+                    stage_config, task_name
+                )
+
+        # Fall back to default hardcoded logic
+        return self._get_default_artifact_context(stage, task_name)
+
+    def _get_configured_artifact_context(
+        self, config: "StageArtifactConfig", task_name: str
+    ) -> list[str]:
+        """
+        Get artifact context based on explicit configuration.
+
+        This enables selective context filtering to reduce token usage.
+
+        Args:
+            config: Stage artifact configuration with required/include/exclude lists.
+            task_name: Task name for artifact lookups.
+
+        Returns:
+            List of formatted artifact sections.
+        """
+        from galangal.config.schema import StageArtifactConfig
+
+        parts = []
+        included = set()
+
+        # Process required artifacts (must exist)
+        for artifact in config.required:
+            if artifact in config.exclude:
+                continue
+            if artifact_exists(artifact, task_name):
+                content = read_artifact(artifact, task_name)
+                parts.append(f"\n# {artifact}\n{content}")
+                included.add(artifact)
+
+        # Process optional includes (if they exist)
+        for artifact in config.include:
+            if artifact in included or artifact in config.exclude:
+                continue
+            if artifact_exists(artifact, task_name):
+                content = read_artifact(artifact, task_name)
+                parts.append(f"\n# {artifact}\n{content}")
+                included.add(artifact)
+
+        return parts
+
+    def _get_default_artifact_context(self, stage: Stage, task_name: str) -> list[str]:
+        """
+        Get artifact context using default stage-specific logic.
+
+        This is the original hardcoded logic, preserved for backwards compatibility
+        when artifact_context is not configured.
+
         Each stage receives context from earlier artifacts based on what it needs:
         - DESIGN.md supersedes PLAN.md when present
         - If DESIGN was skipped, PLAN.md is included instead
