@@ -317,6 +317,45 @@ def main() -> int:
     mistakes_delete.add_argument("id", type=int, help="Mistake ID to delete")
     mistakes_delete.set_defaults(func=_cmd_mistakes_delete)
 
+    # archive
+    archive_parser = subparsers.add_parser(
+        "archive", help="Archive old completed tasks"
+    )
+    archive_subparsers = archive_parser.add_subparsers(dest="archive_command")
+
+    # archive (default action - archive tasks)
+    archive_run = archive_subparsers.add_parser(
+        "run", help="Archive completed tasks (default action)"
+    )
+    archive_run.add_argument(
+        "--before", "-b",
+        help="Only archive tasks completed before this duration (e.g., 30d, 2w, 6m)"
+    )
+    archive_run.add_argument(
+        "--compress", "-c", action="store_true",
+        help="Compress archived tasks as .tar.gz"
+    )
+    archive_run.add_argument(
+        "--force", "-f", action="store_true",
+        help="Skip confirmation"
+    )
+    archive_run.set_defaults(func=_cmd_archive)
+
+    archive_list = archive_subparsers.add_parser("list", help="List archived tasks")
+    archive_list.add_argument(
+        "--search", "-s", help="Filter by name or description"
+    )
+    archive_list.set_defaults(func=_cmd_archive_list)
+
+    archive_restore = archive_subparsers.add_parser(
+        "restore", help="Restore an archived task"
+    )
+    archive_restore.add_argument("task_name", help="Name of task to restore")
+    archive_restore.set_defaults(func=_cmd_archive_restore)
+
+    # Set default subcommand for archive (show help if no subcommand)
+    archive_parser.set_defaults(func=lambda args: archive_parser.print_help() or 0)
+
     args = parser.parse_args()
 
     # Enable debug mode if requested
@@ -476,6 +515,24 @@ def _cmd_mistakes_delete(args: argparse.Namespace) -> int:
     from galangal.commands.mistakes import cmd_mistakes_delete
 
     return cmd_mistakes_delete(args)
+
+
+def _cmd_archive(args: argparse.Namespace) -> int:
+    from galangal.commands.archive import cmd_archive
+
+    return cmd_archive(args)
+
+
+def _cmd_archive_list(args: argparse.Namespace) -> int:
+    from galangal.commands.archive import cmd_archive_list
+
+    return cmd_archive_list(args)
+
+
+def _cmd_archive_restore(args: argparse.Namespace) -> int:
+    from galangal.commands.archive import cmd_archive_restore
+
+    return cmd_archive_restore(args)
 
 
 if __name__ == "__main__":
