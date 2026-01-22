@@ -138,6 +138,10 @@ def main() -> int:
     )
     init_parser.set_defaults(func=_cmd_init)
 
+    # doctor
+    doctor_parser = subparsers.add_parser("doctor", help="Verify environment setup")
+    doctor_parser.set_defaults(func=_cmd_doctor)
+
     # start
     start_parser = subparsers.add_parser("start", help="Start new task")
     start_parser.add_argument(
@@ -328,6 +332,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
     from galangal.commands.init import cmd_init
 
     return cmd_init(args)
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    from galangal.commands.doctor import cmd_doctor
+
+    return cmd_doctor(args)
 
 
 def _cmd_start(args: argparse.Namespace) -> int:

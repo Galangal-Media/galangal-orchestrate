@@ -55,6 +55,9 @@ The full install adds **mistake tracking** - a feature that remembers common AI 
 cd your-project
 galangal init
 
+# Verify your setup (optional but recommended)
+galangal doctor
+
 # Start a task
 galangal start "Add user authentication with JWT tokens"
 
@@ -64,6 +67,29 @@ galangal resume
 # Check current status
 galangal status
 ```
+
+### Verifying Your Setup
+
+Run `galangal doctor` to verify your environment is properly configured:
+
+```
+$ galangal doctor
+
+Galangal Doctor v0.17.1
+
+  ✓ Python 3.10+: 3.12.1
+  ✓ Git installed: 2.43.0
+  ✓ Git configured: Your Name <you@example.com>
+  ✓ Claude CLI: claude-code 1.0.0
+  ⚠ GitHub CLI: Not installed (optional)
+  ✓ Config file: Valid (my-project)
+  ✓ Tasks directory: Writable (galangal-tasks/)
+  ⚠ Mistake tracking: Not installed (pip install galangal-orchestrate[full])
+
+All required checks passed (2 optional warnings)
+```
+
+This checks Python version, Claude CLI, Git configuration, and optional features like GitHub CLI and mistake tracking.
 
 ## Workflow Stages
 
