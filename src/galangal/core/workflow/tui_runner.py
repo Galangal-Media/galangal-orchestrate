@@ -360,6 +360,17 @@ async def _handle_workflow_event(
     if event.type == EventType.MAX_RETRIES_EXCEEDED:
         app.show_stage_complete(state.stage.value, False)
         max_retries = event.data.get("max_retries", config.stages.max_retries)
+
+        # Show error context if available
+        error_ctx = event.data.get("error_context")
+        if error_ctx:
+            # Show last output lines
+            for line in error_ctx.last_output_lines[-3:]:
+                app.add_activity(f"> {line[:80]}", "📋")
+            # Show suggestions
+            for suggestion in error_ctx.suggestions:
+                app.add_activity(f"Suggestion: {suggestion}", "💡")
+
         choice = await _handle_max_retries_exceeded(app, state, event.message, max_retries)
 
         if choice == "retry":
@@ -377,6 +388,14 @@ async def _handle_workflow_event(
 
     if event.type == EventType.STAGE_FAILED:
         app.show_stage_complete(state.stage.value, False)
+
+        # Show error context if available
+        error_ctx = event.data.get("error_context")
+        if error_ctx:
+            # Show suggestions in activity log
+            for suggestion in error_ctx.suggestions[:2]:  # First 2 suggestions
+                app.add_activity(f"Tip: {suggestion}", "💡")
+
         app.show_message(
             f"Retrying (attempt {state.attempt}/{engine.max_retries})...",
             "warning",

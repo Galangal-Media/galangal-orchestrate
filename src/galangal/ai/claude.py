@@ -9,6 +9,7 @@ import subprocess
 from typing import TYPE_CHECKING, Any
 
 from galangal.ai.base import AIBackend, PauseCheck
+from galangal.ai.errors import analyze_error
 from galangal.ai.subprocess import SubprocessRunner
 from galangal.config.loader import get_project_root
 from galangal.logging import get_logger
@@ -159,13 +160,32 @@ class ClaudeBackend(AIBackend):
                         message=result_text or "Stage completed",
                         output=full_output,
                     )
-                return StageResult.error(
-                    message=f"Claude failed (exit {result.exit_code})",
+
+                # Analyze the error for better diagnostics
+                error_ctx = analyze_error(
                     output=full_output,
+                    exit_code=result.exit_code,
+                    error_message=f"Claude failed (exit {result.exit_code})",
+                    backend=self.name,
+                )
+                return StageResult.error(
+                    message=error_ctx.message,
+                    output=full_output,
+                    error_context=error_ctx,
                 )
 
         except Exception as e:
-            return StageResult.error(f"Claude invocation error: {e}")
+            # Analyze exception-based errors too
+            error_ctx = analyze_error(
+                output=str(e),
+                error_message=f"Claude invocation error: {e}",
+                backend=self.name,
+            )
+            return StageResult.error(
+                message=error_ctx.message,
+                output=str(e),
+                error_context=error_ctx,
+            )
 
     def _process_stream_line(
         self,

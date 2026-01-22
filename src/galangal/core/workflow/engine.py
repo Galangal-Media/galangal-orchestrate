@@ -353,6 +353,7 @@ class WorkflowEngine:
                 message=error_message,
                 attempts=self.state.attempt,
                 max_retries=self.max_retries,
+                error_context=result.error_context,
             )
 
         return event(
@@ -361,6 +362,7 @@ class WorkflowEngine:
             message=error_message,
             attempt=self.state.attempt,
             max_retries=self.max_retries,
+            error_context=result.error_context,
         )
 
     def _parse_questions(self) -> list[str]:

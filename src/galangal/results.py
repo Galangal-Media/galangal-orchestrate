@@ -7,11 +7,12 @@ with magic string prefixes like "PREFLIGHT_FAILED:" or "ROLLBACK:".
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from galangal.ai.errors import ErrorContext
     from galangal.core.state import Stage
 
 
@@ -58,6 +59,7 @@ class StageResult(Result):
     rollback_to: Stage | None = None
     output: str | None = None
     is_fast_track: bool = False  # True for minor rollbacks (skip passed stages)
+    error_context: ErrorContext | None = None  # Structured error details
 
     @classmethod
     def create_success(cls, message: str = "", output: str | None = None) -> StageResult:
@@ -152,13 +154,19 @@ class StageResult(Result):
         )
 
     @classmethod
-    def error(cls, message: str, output: str | None = None) -> StageResult:
-        """Create a general error result."""
+    def error(
+        cls,
+        message: str,
+        output: str | None = None,
+        error_context: ErrorContext | None = None,
+    ) -> StageResult:
+        """Create a general error result with optional structured error context."""
         return cls(
             success=False,
             message=message,
             type=StageResultType.ERROR,
             output=output,
+            error_context=error_context,
         )
 
     @classmethod
