@@ -465,8 +465,11 @@ class WorkflowEngine:
         self.state.record_passed_stage(current)
 
         # Create stage commit if enabled and this is a code-modifying stage
-        if self.config.stages.commit_per_stage and current in CODE_MODIFYING_STAGES:
-            self._create_stage_commit(current, tui_app)
+        if current in CODE_MODIFYING_STAGES:
+            if self.config.stages.commit_per_stage:
+                self._create_stage_commit(current, tui_app)
+            elif tui_app:
+                tui_app.add_activity(f"Skipping commit (commit_per_stage=False)", "ℹ️")
 
         # Archive rollback after successful DEV
         if current == Stage.DEV and tui_app:
@@ -523,6 +526,9 @@ class WorkflowEngine:
         # Don't commit task artifacts (galangal-tasks/)
         exclude_patterns = [self.config.tasks_dir]
         project_root = get_project_root()
+
+        if tui_app:
+            tui_app.add_activity(f"Checking for changes (excluding {exclude_patterns})", "🔍")
 
         # Check if there are changes first (for better logging)
         has_changes = has_changes_to_commit(project_root, exclude_patterns)
