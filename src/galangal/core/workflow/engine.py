@@ -523,15 +523,13 @@ class WorkflowEngine:
         from galangal.config.loader import get_project_root
         from galangal.core.git_utils import create_wip_commit, has_changes_to_commit
 
-        # Don't commit task artifacts (galangal-tasks/)
-        exclude_patterns = [self.config.tasks_dir]
         project_root = get_project_root()
 
         if tui_app:
-            tui_app.add_activity(f"Checking for changes (excluding {exclude_patterns})", "🔍")
+            tui_app.add_activity("Checking for changes", "🔍")
 
         # Check if there are changes first (for better logging)
-        has_changes = has_changes_to_commit(project_root, exclude_patterns)
+        has_changes = has_changes_to_commit(project_root)
 
         if not has_changes:
             if tui_app:
@@ -542,7 +540,6 @@ class WorkflowEngine:
             stage=stage.value,
             task_name=self.state.task_name,
             cwd=project_root,
-            exclude_patterns=exclude_patterns,
         )
 
         if sha:

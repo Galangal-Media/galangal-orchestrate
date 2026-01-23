@@ -18,25 +18,16 @@ def get_current_head(cwd: Path | None = None) -> str | None:
     return out.strip() if code == 0 and out.strip() else None
 
 
-def has_changes_to_commit(cwd: Path | None = None, exclude_patterns: list[str] | None = None) -> bool:
-    """Check if there are uncommitted changes (excluding specified patterns).
+def has_changes_to_commit(cwd: Path | None = None) -> bool:
+    """Check if there are uncommitted changes.
 
     Args:
         cwd: Working directory, defaults to project root.
-        exclude_patterns: List of pathspecs to exclude (e.g., ["galangal-tasks/"]).
 
     Returns:
         True if there are uncommitted changes to commit.
     """
-    # Build command with pathspec excludes
-    cmd = ["git", "status", "--porcelain", "--"]
-
-    # Add pathspec excludes
-    if exclude_patterns:
-        for pattern in exclude_patterns:
-            cmd.append(f":!{pattern}")
-
-    code, out, _ = run_command(cmd, cwd=cwd)
+    code, out, _ = run_command(["git", "status", "--porcelain"], cwd=cwd)
     return code == 0 and bool(out.strip())
 
 
@@ -44,7 +35,6 @@ def create_wip_commit(
     stage: str,
     task_name: str,
     cwd: Path | None = None,
-    exclude_patterns: list[str] | None = None,
 ) -> tuple[str | None, str | None]:
     """Create a WIP commit for a stage.
 
@@ -52,25 +42,17 @@ def create_wip_commit(
         stage: Stage name (e.g., "DEV", "TEST").
         task_name: Task name for commit message.
         cwd: Working directory, defaults to project root.
-        exclude_patterns: List of pathspecs to exclude from commit.
 
     Returns:
         Tuple of (sha, error): sha is the new HEAD SHA if commit was created,
         error is an error message if commit failed. Both None means no changes.
     """
-    exclude_patterns = exclude_patterns or []
-
     # Check if there are changes to commit
-    if not has_changes_to_commit(cwd, exclude_patterns):
+    if not has_changes_to_commit(cwd):
         return None, None
 
-    # Build the add command with pathspec excludes
-    # git add -A -- . ':!galangal-tasks/'
-    add_cmd = ["git", "add", "-A", "--", "."]
-    for pattern in exclude_patterns:
-        add_cmd.append(f":!{pattern}")
-
-    code, out, err = run_command(add_cmd, cwd=cwd)
+    # Stage all changes (respects .gitignore)
+    code, out, err = run_command(["git", "add", "-A"], cwd=cwd)
     if code != 0:
         return None, f"git add failed: {err or out}"
 

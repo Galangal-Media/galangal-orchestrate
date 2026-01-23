@@ -16,6 +16,7 @@ This guide covers setting up and testing galangal-orchestrate locally without af
 | [State Management](state-management.md) | WorkflowState, persistence, task types |
 | [Prompt System](prompt-system.md) | Prompt building, overrides, context injection |
 | [Validation System](validation-system.md) | ValidationRunner, checks, artifact markers |
+| [Mistake Tracking](mistake-tracking.md) | Learning from failures, vector search, CLI |
 | [Configuration](configuration.md) | Config schema and all options |
 | **Reference** | |
 | [CLI Commands](cli-commands.md) | Complete command reference |
