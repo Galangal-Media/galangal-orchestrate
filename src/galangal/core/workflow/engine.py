@@ -538,7 +538,7 @@ class WorkflowEngine:
                 tui_app.add_activity(f"No code changes to commit for {stage.value}", "ℹ️")
             return
 
-        sha = create_wip_commit(
+        sha, error = create_wip_commit(
             stage=stage.value,
             task_name=self.state.task_name,
             cwd=project_root,
@@ -554,10 +554,19 @@ class WorkflowEngine:
 
             if tui_app:
                 tui_app.add_activity(f"Committed {stage.value}: {sha[:7]}", "📝")
-        else:
-            # Commit failed for some reason
+        elif error:
+            # Commit failed with a specific error (likely pre-commit hook)
+            from galangal.logging import get_logger
+
+            logger = get_logger(__name__)
+            logger.warning(
+                "commit_failed",
+                stage=stage.value,
+                task=self.state.task_name,
+                error=error,
+            )
             if tui_app:
-                tui_app.add_activity(f"Failed to commit {stage.value} changes", "⚠️")
+                tui_app.add_activity(f"Failed to commit {stage.value}: {error[:100]}", "⚠️")
 
     def _handle_skip(self) -> WorkflowEvent:
         """Handle skip stage action (Ctrl+N)."""

@@ -75,25 +75,13 @@ flowchart TD
 ## Installation
 
 ```bash
-# Lite install (recommended) - core features, fast install
 pip install galangal-orchestrate
 
-# Full install - includes mistake tracking with vector search (~2GB, includes PyTorch)
-pip install galangal-orchestrate[full]
-
 # With pipx (recommended for CLI tools)
-pipx install galangal-orchestrate              # lite
-pipx install galangal-orchestrate[full]        # full with mistake tracking
+pipx install galangal-orchestrate
 ```
 
-### Installation Options
-
-| Option | Size | Features |
-|--------|------|----------|
-| `galangal-orchestrate` | ~50MB | Core workflow, all stages, artifact context filtering |
-| `galangal-orchestrate[full]` | ~2GB | + Mistake tracking with vector similarity search |
-
-The full install adds **mistake tracking** - a feature that remembers common AI errors in your repo and warns about them in future tasks. It requires PyTorch for local embeddings, hence the larger size.
+The install includes **mistake tracking** - a feature that remembers common AI errors in your repo and warns about them in future tasks. It uses PyTorch for local embeddings (~2GB total install size).
 
 ## Quick Start
 
@@ -131,12 +119,12 @@ Galangal Doctor v0.17.1
   ⚠ GitHub CLI: Not installed (optional)
   ✓ Config file: Valid (my-project)
   ✓ Tasks directory: Writable (galangal-tasks/)
-  ⚠ Mistake tracking: Not installed (pip install galangal-orchestrate[full])
+  ✓ Mistake tracking: Enabled
 
-All required checks passed (2 optional warnings)
+All required checks passed (1 optional warning)
 ```
 
-This checks Python version, Claude CLI, Git configuration, and optional features like GitHub CLI and mistake tracking.
+This checks Python version, Claude CLI, Git configuration, and optional features like GitHub CLI.
 
 ## Workflow Stages
 
@@ -1018,8 +1006,6 @@ Create any of these in `.galangal/prompts/`:
 | `docs.md` | Documentation |
 
 ## Mistake Tracking
-
-**Requires:** `pip install galangal-orchestrate[full]`
 
 Mistake tracking helps prevent the AI from repeating common errors in your codebase. It uses vector similarity search to identify patterns and inject warnings into prompts.
 

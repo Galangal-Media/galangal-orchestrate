@@ -45,7 +45,7 @@ def create_wip_commit(
     task_name: str,
     cwd: Path | None = None,
     exclude_patterns: list[str] | None = None,
-) -> str | None:
+) -> tuple[str | None, str | None]:
     """Create a WIP commit for a stage.
 
     Args:
@@ -55,13 +55,14 @@ def create_wip_commit(
         exclude_patterns: List of pathspecs to exclude from commit.
 
     Returns:
-        New HEAD SHA if commit was created, None if no changes to commit.
+        Tuple of (sha, error): sha is the new HEAD SHA if commit was created,
+        error is an error message if commit failed. Both None means no changes.
     """
     exclude_patterns = exclude_patterns or []
 
     # Check if there are changes to commit
     if not has_changes_to_commit(cwd, exclude_patterns):
-        return None
+        return None, None
 
     # Build the add command with pathspec excludes
     # git add -A -- . ':!galangal-tasks/'
@@ -69,25 +70,27 @@ def create_wip_commit(
     for pattern in exclude_patterns:
         add_cmd.append(f":!{pattern}")
 
-    code, _, err = run_command(add_cmd, cwd=cwd)
+    code, out, err = run_command(add_cmd, cwd=cwd)
     if code != 0:
-        return None
+        return None, f"git add failed: {err or out}"
 
     # Check if anything was staged
     code, staged_out, _ = run_command(["git", "diff", "--cached", "--name-only"], cwd=cwd)
     if code != 0 or not staged_out.strip():
         # Nothing staged, reset and return
         run_command(["git", "reset", "HEAD"], cwd=cwd)
-        return None
+        return None, None
 
     # Create commit
     commit_msg = f"wip({stage}): stage changes for {task_name}"
-    code, _, err = run_command(["git", "commit", "-m", commit_msg], cwd=cwd)
+    code, out, err = run_command(["git", "commit", "-m", commit_msg], cwd=cwd)
     if code != 0:
-        return None
+        # Reset staged changes so we don't leave dirty state
+        run_command(["git", "reset", "HEAD"], cwd=cwd)
+        return None, f"git commit failed: {err or out}"
 
     # Return new HEAD SHA
-    return get_current_head(cwd)
+    return get_current_head(cwd), None
 
 
 def squash_to_base(base_sha: str, commit_msg: str, cwd: Path | None = None) -> bool:
