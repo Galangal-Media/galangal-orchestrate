@@ -46,7 +46,10 @@ from galangal.validation.runner import ValidationRunner
 console = Console()
 
 
-def _run_workflow_with_tui(state: WorkflowState) -> str:
+def _run_workflow_with_tui(
+    state: WorkflowState,
+    ignore_staleness: bool = False,
+) -> str:
     """
     Execute the workflow loop with a persistent Textual TUI.
 
@@ -67,6 +70,7 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
     Args:
         state: Current workflow state containing task info, current stage,
             attempt count, and failure information.
+        ignore_staleness: If True, skip lineage staleness checks on resume.
 
     Returns:
         Result string indicating outcome:
@@ -77,6 +81,9 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
         - "error": An exception occurred during execution
     """
     config = get_config()
+
+    # Store ignore_staleness flag for use in workflow loop
+    state._ignore_staleness = ignore_staleness
 
     # Compute hidden stages based on task type and config
     hidden_stages = frozenset(get_hidden_stages_for_task_type(state.task_type, config.stages.skip))
@@ -95,8 +102,13 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
     # Create workflow engine
     engine = WorkflowEngine(state, config)
 
+    # Track if we've already checked staleness on this resume
+    staleness_checked = False
+
     async def workflow_loop() -> None:
         """Async workflow loop running within Textual's event loop."""
+        nonlocal staleness_checked
+
         try:
             while not engine.is_complete and not app._paused:
                 # Check GitHub issue status
@@ -108,6 +120,18 @@ def _run_workflow_with_tui(state: WorkflowState) -> str:
                     )
                     app._workflow_result = "paused"
                     break
+
+                # Check for stale stages on resume (once per resume)
+                if not staleness_checked and config.lineage.enabled:
+                    staleness_checked = True
+                    ignore = getattr(state, "_ignore_staleness", False)
+                    if not ignore:
+                        should_continue = await _check_staleness_on_resume(
+                            app, state, config
+                        )
+                        if not should_continue:
+                            app._workflow_result = "paused"
+                            break
 
                 app.update_stage(engine.current_stage.value, state.attempt)
                 app.set_status("running", f"executing {engine.current_stage.value}")
@@ -548,6 +572,99 @@ async def _handle_user_interrupts(app: WorkflowTUIApp, engine: WorkflowEngine) -
         return "continue"
 
     return "none"
+
+
+# =============================================================================
+# Lineage staleness checking
+# =============================================================================
+
+
+async def _check_staleness_on_resume(
+    app: WorkflowTUIApp,
+    state: WorkflowState,
+    config: GalangalConfig,
+) -> bool:
+    """Check for stale stages on resume and prompt user to confirm.
+
+    Detects artifacts modified outside the workflow and stages that need
+    to re-run due to upstream changes. Shows a preview and asks for
+    confirmation before continuing.
+
+    Args:
+        app: TUI application for user interaction.
+        state: Current workflow state with lineage information.
+        config: Galangal configuration.
+
+    Returns:
+        True to continue workflow, False to pause.
+    """
+    from galangal.core.lineage import LineageTracker, load_task_artifacts
+
+    try:
+        tracker = LineageTracker(config.lineage)
+        artifacts = load_task_artifacts(state.task_name)
+
+        # Check for external modifications
+        mods = tracker.detect_external_mods(state.task_name, artifacts, state)
+        if mods:
+            app.add_activity("External modifications detected:", "⚠")
+            for artifact, sections in mods.items():
+                app.add_activity(f"  {artifact}: {', '.join(sections)}", "")
+
+        # Get cascade preview - stages that will re-run
+        cascade = tracker.get_cascade_preview(state, artifacts)
+
+        if not cascade and not mods:
+            # Everything fresh, continue normally
+            return True
+
+        # Build confirmation message
+        msg_lines = []
+
+        if mods:
+            msg_lines.append("External modifications detected:")
+            for artifact, sections in list(mods.items())[:5]:
+                msg_lines.append(f"  {artifact}: {', '.join(sections[:3])}")
+            msg_lines.append("")
+
+        if cascade:
+            msg_lines.append("Stages will re-run due to staleness:")
+            for stage_name, reasons in cascade[:5]:
+                reason_str = reasons[0] if reasons else "upstream changed"
+                msg_lines.append(f"  → {stage_name}: {reason_str}")
+            msg_lines.append("")
+
+        msg_lines.append("Continue? (or use --ignore-staleness to skip this check)")
+
+        # Show confirmation
+        if config.lineage.block_on_staleness:
+            confirmed = await app.ask_yes_no_async("\n".join(msg_lines))
+            if not confirmed:
+                app.show_message("Workflow paused - staleness not confirmed", "warning")
+                return False
+
+            # If user confirms, roll back to earliest stale stage
+            if cascade:
+                earliest_stale = cascade[0][0]
+                current_stage = state.stage.value
+                app.add_activity(
+                    f"Rolling back from {current_stage} to {earliest_stale} due to staleness",
+                    "🔄",
+                )
+                state.stage = Stage.from_str(earliest_stale)
+                state.reset_attempts()
+                save_state(state)
+
+        else:
+            # Just warn, don't block
+            app.add_activity("⚠ Continuing with stale stages", "")
+
+        return True
+
+    except Exception as e:
+        # Staleness check failure should not block workflow
+        app.add_activity(f"Staleness check failed: {e}", "⚠")
+        return True
 
 
 # =============================================================================

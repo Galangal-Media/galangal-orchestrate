@@ -41,11 +41,77 @@ def read_artifact(name: str, task_name: str | None = None) -> str | None:
     return None
 
 
-def write_artifact(name: str, content: str, task_name: str | None = None) -> None:
-    """Write an artifact file."""
+def write_artifact(
+    name: str,
+    content: str,
+    task_name: str | None = None,
+    stage: str | None = None,
+) -> None:
+    """Write an artifact file.
+
+    Args:
+        name: Artifact filename.
+        content: Content to write.
+        task_name: Task name, or None to use active task.
+        stage: Optional stage that generated this artifact (for lineage tracking).
+    """
     path = artifact_path(name, task_name)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
+
+    # Record lineage if enabled
+    _record_lineage_if_enabled(name, content, task_name, stage)
+
+
+def _record_lineage_if_enabled(
+    name: str,
+    content: str,
+    task_name: str | None,
+    stage: str | None,
+) -> None:
+    """Record artifact lineage if lineage tracking is enabled.
+
+    Args:
+        name: Artifact filename.
+        content: Content written.
+        task_name: Task name.
+        stage: Stage that generated this artifact.
+    """
+    # Only track markdown artifacts
+    if not name.endswith(".md"):
+        return
+
+    try:
+        from galangal.config.loader import get_config
+        from galangal.core.lineage import LineageTracker
+        from galangal.core.state import load_state, save_state
+
+        config = get_config()
+        if not config.lineage.enabled:
+            return
+
+        if task_name is None:
+            from galangal.core.tasks import get_active_task
+
+            task_name = get_active_task()
+            if task_name is None:
+                return
+
+        state = load_state(task_name)
+        if state is None:
+            return
+
+        # Determine stage from state if not provided
+        if stage is None:
+            stage = state.stage.value
+
+        tracker = LineageTracker(config.lineage)
+        tracker.record_artifact(name, content, stage, task_name, state)
+        save_state(state)
+
+    except Exception:
+        # Lineage tracking failures should not break artifact writes
+        pass
 
 
 def write_skip_artifact(stage: str, reason: str, task_name: str | None = None) -> None:

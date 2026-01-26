@@ -464,12 +464,15 @@ class WorkflowEngine:
         duration = self.state.record_stage_duration()
         self.state.record_passed_stage(current)
 
+        # Record stage lineage if enabled
+        self._record_stage_lineage(current)
+
         # Create stage commit if enabled and this is a code-modifying stage
         if current in CODE_MODIFYING_STAGES:
             if self.config.stages.commit_per_stage:
                 self._create_stage_commit(current, tui_app)
             elif tui_app:
-                tui_app.add_activity(f"Skipping commit (commit_per_stage=False)", "ℹ️")
+                tui_app.add_activity("Skipping commit (commit_per_stage=False)", "ℹ️")
 
         # Archive rollback after successful DEV
         if current == Stage.DEV and tui_app:
@@ -512,6 +515,26 @@ class WorkflowEngine:
         if next_idx > current_idx + 1:
             return STAGE_ORDER[current_idx + 1 : next_idx]
         return []
+
+    def _record_stage_lineage(self, stage: Stage) -> None:
+        """Record lineage for a completed stage.
+
+        Args:
+            stage: The stage that just completed.
+        """
+        if not self.config.lineage.enabled:
+            return
+
+        try:
+            from galangal.core.lineage import LineageTracker, load_task_artifacts
+
+            artifacts = load_task_artifacts(self.state.task_name)
+            tracker = LineageTracker(self.config.lineage)
+            tracker.record_stage(stage.value, artifacts, self.state)
+            save_state(self.state)
+        except Exception:
+            # Lineage tracking failures should not break workflow
+            pass
 
     def _create_stage_commit(self, stage: Stage, tui_app: WorkflowTUIApp | None) -> None:
         """Create a WIP commit for a code-modifying stage.

@@ -316,6 +316,64 @@ class TaskTypeSettings(BaseModel):
     )
 
 
+class ArtifactDependencySpec(BaseModel):
+    """Specifies a dependency on an artifact, optionally limited to specific sections.
+
+    When sections is empty, the entire artifact is tracked as a dependency.
+    When sections is specified, only those sections (by normalized header name)
+    are considered for staleness detection.
+    """
+
+    artifact: str = Field(description="Name of the artifact file (e.g., 'SPEC.md')")
+    sections: list[str] = Field(
+        default_factory=list,
+        description="Specific sections to track (empty = entire artifact)",
+    )
+
+
+class StageDependencyConfig(BaseModel):
+    """Dependency configuration for a stage.
+
+    Stages can depend on:
+    - Other stages (the stage must have completed)
+    - Specific artifacts or sections within artifacts
+    """
+
+    depends_on_stages: list[str] = Field(
+        default_factory=list,
+        description="Stages that must complete before this stage (e.g., ['DEV', 'TEST'])",
+    )
+    depends_on_artifacts: list[ArtifactDependencySpec] = Field(
+        default_factory=list,
+        description="Artifacts (with optional sections) this stage depends on",
+    )
+
+
+class LineageConfig(BaseModel):
+    """Configuration for artifact lineage tracking.
+
+    When enabled, tracks section-level hashes of markdown artifacts to detect
+    when upstream changes should invalidate downstream stages.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable artifact lineage tracking for staleness detection",
+    )
+    block_on_staleness: bool = Field(
+        default=True,
+        description="Force re-run of stale stages (vs just warning)",
+    )
+    artifact_dependencies: dict[str, list[ArtifactDependencySpec]] = Field(
+        default_factory=dict,
+        description="Per-artifact dependency configuration (artifact -> [dependencies])",
+    )
+    stage_dependencies: dict[str, StageDependencyConfig] = Field(
+        default_factory=dict,
+        description="Per-stage dependency configuration (stage -> config)",
+    )
+
+
 class GitHubLabelMapping(BaseModel):
     """Maps GitHub labels to task types."""
 
@@ -397,4 +455,8 @@ class GalangalConfig(BaseModel):
     artifact_context: ArtifactContextConfig | None = Field(
         default=None,
         description="Per-stage artifact context filtering. If not set, uses default stage logic.",
+    )
+    lineage: LineageConfig = Field(
+        default_factory=LineageConfig,
+        description="Artifact lineage tracking for staleness detection",
     )

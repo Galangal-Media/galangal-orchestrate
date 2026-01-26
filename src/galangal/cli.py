@@ -193,6 +193,12 @@ def main() -> int:
         action="store_true",
         help="Skip remaining discovery Q&A and go straight to spec generation",
     )
+    resume_parser.add_argument(
+        "--ignore-staleness",
+        action="store_true",
+        dest="ignore_staleness",
+        help="Skip lineage staleness checks (don't prompt about changed artifacts)",
+    )
     resume_parser.set_defaults(func=_cmd_resume)
 
     # pause

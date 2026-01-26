@@ -26,5 +26,10 @@ def cmd_resume(args: argparse.Namespace) -> int:
         state._skip_discovery = True
         console.print("[dim]Discovery Q&A:[/dim] skipped")
 
-    run_workflow(state)
+    # Get ignore_staleness flag
+    ignore_staleness = getattr(args, "ignore_staleness", False)
+    if ignore_staleness:
+        console.print("[dim]Staleness checks:[/dim] skipped")
+
+    run_workflow(state, ignore_staleness=ignore_staleness)
     return 0

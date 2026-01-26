@@ -42,8 +42,13 @@ def _init_logging() -> None:
         )
 
 
-def run_workflow(state: WorkflowState) -> None:
-    """Run the workflow from current state to completion or failure."""
+def run_workflow(state: WorkflowState, ignore_staleness: bool = False) -> None:
+    """Run the workflow from current state to completion or failure.
+
+    Args:
+        state: Current workflow state.
+        ignore_staleness: If True, skip lineage staleness checks on resume.
+    """
     from galangal.core.workflow.tui_runner import _run_workflow_with_tui
     from galangal.logging import workflow_logger
 
@@ -58,7 +63,7 @@ def run_workflow(state: WorkflowState) -> None:
     )
 
     try:
-        _run_workflow_with_tui(state)
+        _run_workflow_with_tui(state, ignore_staleness=ignore_staleness)
     finally:
         # Log workflow end
         workflow_logger.workflow_completed(

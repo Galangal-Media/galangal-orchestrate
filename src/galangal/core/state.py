@@ -767,6 +767,12 @@ class WorkflowState:
     base_commit_sha: str | None = None  # Commit SHA at task start (squash target)
     stage_commits: list[dict[str, str]] | None = None  # [{"stage": "DEV", "sha": "abc123"}]
 
+    # Artifact lineage tracking for staleness detection
+    # Maps artifact name to ArtifactLineage with section hashes
+    artifact_lineage: dict[str, Any] = field(default_factory=dict)
+    # Maps stage name to StageLineage with input hashes
+    stage_lineage: dict[str, Any] = field(default_factory=dict)
+
     # -------------------------------------------------------------------------
     # Retry management methods
     # -------------------------------------------------------------------------
@@ -1018,12 +1024,41 @@ class WorkflowState:
         # Convert sets to lists for JSON serialization
         d["passed_stages"] = list(self.passed_stages)
         d["fast_track_skip"] = list(self.fast_track_skip)
+        # Convert lineage objects to dicts
+        d["artifact_lineage"] = {
+            name: lineage.to_dict() if hasattr(lineage, "to_dict") else lineage
+            for name, lineage in self.artifact_lineage.items()
+        }
+        d["stage_lineage"] = {
+            name: lineage.to_dict() if hasattr(lineage, "to_dict") else lineage
+            for name, lineage in self.stage_lineage.items()
+        }
         return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "WorkflowState":
         # Parse rollback history if present
         rollback_history = [RollbackEvent.from_dict(r) for r in d.get("rollback_history", [])]
+
+        # Parse artifact lineage if present
+        artifact_lineage: dict[str, Any] = {}
+        for name, data in d.get("artifact_lineage", {}).items():
+            if isinstance(data, dict):
+                from galangal.core.lineage import ArtifactLineage
+
+                artifact_lineage[name] = ArtifactLineage.from_dict(data)
+            else:
+                artifact_lineage[name] = data
+
+        # Parse stage lineage if present
+        stage_lineage: dict[str, Any] = {}
+        for name, data in d.get("stage_lineage", {}).items():
+            if isinstance(data, dict):
+                from galangal.core.lineage import StageLineage
+
+                stage_lineage[name] = StageLineage.from_dict(data)
+            else:
+                stage_lineage[name] = data
 
         return cls(
             stage=Stage.from_str(d["stage"]),
@@ -1048,6 +1083,8 @@ class WorkflowState:
             fast_track_skip=set(d.get("fast_track_skip", [])),
             base_commit_sha=d.get("base_commit_sha"),
             stage_commits=d.get("stage_commits"),
+            artifact_lineage=artifact_lineage,
+            stage_lineage=stage_lineage,
         )
 
     @classmethod
