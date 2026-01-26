@@ -993,8 +993,10 @@ class ValidationRunner:
         # Get artifacts produced by this stage
         try:
             stage_enum = Stage.from_str(stage.upper())
-            metadata = STAGE_METADATA.get(stage_enum, {})
-            artifacts_produced = metadata.get("artifacts", [])
+            metadata = STAGE_METADATA.get(stage_enum)
+            if not metadata:
+                return None
+            artifacts_produced = metadata.produces_artifacts
         except ValueError:
             return None
 
