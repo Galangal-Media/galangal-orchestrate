@@ -279,6 +279,11 @@ class ValidationRunner:
                     rollback_to="DEV",
                 )
 
+        # Validate artifact schemas if enabled
+        schema_result = self._validate_artifact_schemas(stage, task_name)
+        if schema_result and not schema_result.success:
+            return schema_result
+
         return ValidationResult(True, f"{stage} validation passed")
 
     def _get_all_changed_files(self) -> set[str]:
@@ -963,6 +968,79 @@ class ValidationRunner:
     def _check_qa_report(self, task_name: str) -> ValidationResult:
         """Check QA_DECISION file first, then fall back to QA_REPORT.md parsing."""
         return validate_stage_decision("QA", task_name, "QA_REPORT.md")
+
+    def _validate_artifact_schemas(self, stage: str, task_name: str) -> ValidationResult | None:
+        """
+        Validate artifacts produced by this stage against their schemas.
+
+        Only validates if schema validation is enabled in config and schemas
+        are defined for the stage's artifacts.
+
+        Args:
+            stage: Stage name that produced the artifacts.
+            task_name: Task name for artifact lookups.
+
+        Returns:
+            ValidationResult with schema errors, or None if validation passed/skipped.
+        """
+        # Check if schema validation is enabled
+        if not getattr(self.config, "schema_validation_enabled", True):
+            return None
+
+        from galangal.core.state import STAGE_METADATA, Stage, load_state
+        from galangal.schemas import ArtifactSchemaValidator
+
+        # Get artifacts produced by this stage
+        try:
+            stage_enum = Stage.from_str(stage.upper())
+            metadata = STAGE_METADATA.get(stage_enum, {})
+            artifacts_produced = metadata.get("artifacts", [])
+        except ValueError:
+            return None
+
+        if not artifacts_produced:
+            return None
+
+        # Get task type for schema overrides
+        state = load_state(task_name)
+        task_type = state.task_type.value if state else "feature"
+
+        # Validate each artifact
+        validator = ArtifactSchemaValidator()
+        all_errors: list[str] = []
+        all_warnings: list[str] = []
+
+        for artifact_name in artifacts_produced:
+            content = read_artifact(artifact_name, task_name)
+            if not content:
+                continue  # Missing artifacts handled by artifacts_required check
+
+            result = validator.validate(artifact_name, content, task_type)
+
+            if result.errors:
+                all_errors.extend(result.errors)
+            if result.warnings:
+                all_warnings.extend(result.warnings)
+
+        if all_errors:
+            # Build feedback message
+            feedback = "Schema validation failed:\n"
+            for error in all_errors:
+                feedback += f"  - {error}\n"
+            if all_warnings:
+                feedback += "\nWarnings:\n"
+                for warning in all_warnings:
+                    feedback += f"  - {warning}\n"
+            feedback += "\nPlease revise the artifact(s) to include the required sections."
+
+            return ValidationResult(
+                False,
+                "Artifact schema validation failed",
+                output=feedback,
+                rollback_to=None,  # Retry same stage, don't rollback
+            )
+
+        return None  # Validation passed
 
     def _validate_with_defaults(self, stage: str, task_name: str) -> ValidationResult:
         """
