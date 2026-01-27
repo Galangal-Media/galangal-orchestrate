@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Input, Static, TextArea
 
@@ -296,7 +296,8 @@ class GitHubIssueSelectModal(ModalScreen[int | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="issue-select-dialog"):
             yield Static("Select GitHub Issue", id="issue-select-title")
-            yield Static(self._render_issue_list(), id="issue-select-list")
+            with VerticalScroll(id="issue-select-scroll"):
+                yield Static(self._render_issue_list(), id="issue-select-list")
             yield Static(
                 "↑/↓ or j/k to navigate, Enter to select, Esc to cancel", id="issue-select-hint"
             )
@@ -318,6 +319,15 @@ class GitHubIssueSelectModal(ModalScreen[int | None]):
     def _update_display(self) -> None:
         list_widget = self.query_one("#issue-select-list", Static)
         list_widget.update(Text.from_markup(self._render_issue_list()))
+        # Scroll to keep selected item visible
+        self._scroll_to_selected()
+
+    def _scroll_to_selected(self) -> None:
+        """Scroll the list to ensure the selected item is visible."""
+        scroll = self.query_one("#issue-select-scroll", VerticalScroll)
+        # Each issue is approximately 1 line tall
+        # Scroll to center the selected item
+        scroll.scroll_to(y=max(0, self._selected_index - 5), animate=False)
 
     def action_move_up(self) -> None:
         if self._selected_index > 0:

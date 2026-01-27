@@ -8,7 +8,8 @@ PromptModal,
 TextInputModal,
 QuestionAnswerModal,
 UserQuestionsModal,
-MultilineInputModal {
+MultilineInputModal,
+GitHubIssueSelectModal {
     align: center middle;
     layout: vertical;
 }
@@ -192,6 +193,46 @@ MultilineInputModal {
 }
 
 #multiline-input-hint {
+    color: #7c6f64;
+    margin-top: 1;
+}
+
+/* ============================================
+ * GitHub Issue Select Modal
+ * ============================================ */
+
+#issue-select-dialog {
+    width: 90%;
+    max-width: 100;
+    min-width: 50;
+    height: auto;
+    max-height: 80%;
+    background: #3c3836;
+    border: round #504945;
+    padding: 1 2;
+    layout: vertical;
+}
+
+#issue-select-title {
+    color: #fe8019;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#issue-select-scroll {
+    height: auto;
+    max-height: 20;
+    min-height: 3;
+    background: #282828;
+    border: solid #504945;
+    padding: 0 1;
+}
+
+#issue-select-list {
+    color: #ebdbb2;
+}
+
+#issue-select-hint {
     color: #7c6f64;
     margin-top: 1;
 }

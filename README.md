@@ -203,11 +203,11 @@ Choose the right workflow for your task:
 | Type | Stages | When to Use |
 |------|--------|-------------|
 | **Feature** | All stages | New functionality |
-| **Bug Fix** | PM → PREFLIGHT → DEV → TEST → TEST_GATE → QA | Fixing bugs |
-| **Refactor** | PM → DESIGN → PREFLIGHT → DEV → TEST → TEST_GATE | Code restructuring |
-| **Chore** | PM → PREFLIGHT → DEV → TEST → TEST_GATE | Config, dependencies |
-| **Docs** | PM → DOCS | Documentation only |
-| **Hotfix** | PM → DEV → TEST → TEST_GATE | Critical fixes |
+| **Bug Fix** | PM → PREFLIGHT → DEV → TEST → TEST_GATE → QA → REVIEW → SUMMARY | Fixing bugs |
+| **Refactor** | PM → DESIGN → PREFLIGHT → DEV → TEST → TEST_GATE → REVIEW → SUMMARY | Code restructuring |
+| **Chore** | PM → PREFLIGHT → DEV → TEST → TEST_GATE → REVIEW → SUMMARY | Config, dependencies |
+| **Docs** | PM → DOCS → SUMMARY | Documentation only |
+| **Hotfix** | PM → DEV → TEST → TEST_GATE → SUMMARY | Critical fixes |
 
 The PM stage can further customize which stages run based on task analysis.
 

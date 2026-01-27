@@ -14,6 +14,7 @@ from galangal.ai import (
 )
 from galangal.ai.claude import ClaudeBackend
 from galangal.ai.codex import CodexBackend
+from galangal.exceptions import AIError
 from galangal.results import StageResult, StageResultType
 
 # Patch locations - subprocess logic moved to galangal.ai.subprocess module
@@ -211,8 +212,8 @@ class TestGetBackend:
         assert isinstance(backend, ClaudeBackend)
 
     def test_get_backend_unknown_raises(self):
-        """Test that unknown backend raises ValueError."""
-        with pytest.raises(ValueError) as exc_info:
+        """Test that unknown backend raises AIError."""
+        with pytest.raises(AIError) as exc_info:
             get_backend("unknown")
         assert "unknown" in str(exc_info.value).lower()
 
@@ -257,7 +258,7 @@ class TestGetBackendWithFallback:
     def test_raises_when_no_backend_available(self):
         """Test that error is raised when no backend is available."""
         with patch("galangal.ai.is_backend_available", return_value=False):
-            with pytest.raises(ValueError):
+            with pytest.raises(AIError):
                 get_backend_with_fallback("codex")
 
 

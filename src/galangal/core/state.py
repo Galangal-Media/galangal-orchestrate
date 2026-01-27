@@ -337,27 +337,25 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
 TASK_TYPE_SKIP_STAGES: dict[TaskType, set[Stage]] = {
     # FEATURE: Full workflow - PM → DESIGN → PREFLIGHT → DEV → all validation stages
     TaskType.FEATURE: set(),
-    # BUG_FIX: PM → DEV → TEST → QA (skip design, run QA for regression check)
+    # BUG_FIX: PM → DEV → TEST → QA → REVIEW (skip design, run QA for regression check)
     TaskType.BUG_FIX: {
         Stage.DESIGN,
         Stage.MIGRATION,
         Stage.CONTRACT,
         Stage.BENCHMARK,
         Stage.SECURITY,
-        Stage.REVIEW,
         Stage.DOCS,
     },
-    # REFACTOR: PM → DESIGN → DEV → TEST (code restructuring, needs design but not full validation)
+    # REFACTOR: PM → DESIGN → DEV → TEST → REVIEW (code restructuring, needs design and review)
     TaskType.REFACTOR: {
         Stage.MIGRATION,
         Stage.CONTRACT,
         Stage.QA,
         Stage.BENCHMARK,
         Stage.SECURITY,
-        Stage.REVIEW,
         Stage.DOCS,
     },
-    # CHORE: PM → DEV → TEST (dependencies, config, tooling - minimal workflow)
+    # CHORE: PM → DEV → TEST → REVIEW (dependencies, config, tooling)
     TaskType.CHORE: {
         Stage.DESIGN,
         Stage.MIGRATION,
@@ -365,7 +363,6 @@ TASK_TYPE_SKIP_STAGES: dict[TaskType, set[Stage]] = {
         Stage.QA,
         Stage.BENCHMARK,
         Stage.SECURITY,
-        Stage.REVIEW,
         Stage.DOCS,
     },
     # DOCS: PM → DOCS (documentation only - skip everything else)
