@@ -16,6 +16,7 @@ class _KeylessScroll(VerticalScroll):
     """VerticalScroll that doesn't capture arrow keys, allowing parent to handle them."""
 
     BINDINGS = []
+    can_focus = False
 
 
 @dataclass(frozen=True)
@@ -287,8 +288,8 @@ class GitHubIssueSelectModal(ModalScreen[int | None]):
 
     BINDINGS = [
         Binding("escape", "cancel", show=False),
-        Binding("up", "move_up", show=False),
-        Binding("down", "move_down", show=False),
+        Binding("up", "move_up", show=False, priority=True),
+        Binding("down", "move_down", show=False, priority=True),
         Binding("enter", "select", show=False),
         Binding("k", "move_up", show=False),
         Binding("j", "move_down", show=False),
