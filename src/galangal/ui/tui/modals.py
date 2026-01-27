@@ -12,6 +12,12 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Static, TextArea
 
 
+class _KeylessScroll(VerticalScroll):
+    """VerticalScroll that doesn't capture arrow keys, allowing parent to handle them."""
+
+    BINDINGS = []
+
+
 @dataclass(frozen=True)
 class PromptOption:
     """Option for a prompt modal."""
@@ -296,7 +302,7 @@ class GitHubIssueSelectModal(ModalScreen[int | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="issue-select-dialog"):
             yield Static("Select GitHub Issue", id="issue-select-title")
-            with VerticalScroll(id="issue-select-scroll"):
+            with _KeylessScroll(id="issue-select-scroll"):
                 yield Static(self._render_issue_list(), id="issue-select-list")
             yield Static(
                 "↑/↓ or j/k to navigate, Enter to select, Esc to cancel", id="issue-select-hint"
@@ -310,8 +316,8 @@ class GitHubIssueSelectModal(ModalScreen[int | None]):
         for i, issue in enumerate(self._issues):
             prefix = "→ " if i == self._selected_index else "  "
             color = "#b8bb26" if i == self._selected_index else "#ebdbb2"
-            # Truncate title if too long
-            title = issue.title[:50] + "..." if len(issue.title) > 50 else issue.title
+            # Truncate title if too long (80 chars to fit in modal)
+            title = issue.title[:80] + "..." if len(issue.title) > 80 else issue.title
             lines.append(f"[{color}]{prefix}#{issue.number} {title}[/]")
 
         return "\n".join(lines)
@@ -324,7 +330,7 @@ class GitHubIssueSelectModal(ModalScreen[int | None]):
 
     def _scroll_to_selected(self) -> None:
         """Scroll the list to ensure the selected item is visible."""
-        scroll = self.query_one("#issue-select-scroll", VerticalScroll)
+        scroll = self.query_one("#issue-select-scroll", _KeylessScroll)
         # Each issue is approximately 1 line tall
         # Scroll to center the selected item
         scroll.scroll_to(y=max(0, self._selected_index - 5), animate=False)
