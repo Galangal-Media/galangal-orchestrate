@@ -61,7 +61,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
         static_dir=Path(__file__).parent / "static" if (Path(__file__).parent / "static").exists() else None,
     )
 
-    print(f"Starting Galangal Hub on http://{host}:{port}")
+    # Print version
+    try:
+        from galangal import __version__
+        print(f"Galangal Hub v{__version__}")
+    except ImportError:
+        print("Galangal Hub")
+
+    print(f"Starting on http://{host}:{port}")
     print(f"Database: {db_path}")
     if api_key:
         print("Agent API key authentication enabled")
