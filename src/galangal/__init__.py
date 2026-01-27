@@ -5,6 +5,8 @@ A deterministic workflow system that guides AI assistants through
 structured development stages: PM -> DESIGN -> DEV -> TEST -> QA -> REVIEW -> DOCS.
 """
 
+from pathlib import Path
+
 from galangal.exceptions import (
     AIError,
     ConfigError,
@@ -21,7 +23,21 @@ from galangal.logging import (
     workflow_logger,
 )
 
-__version__ = "0.24.5"
+
+def _read_version() -> str:
+    """Read version from VERSION file."""
+    # Try various locations (installed vs development)
+    locations = [
+        Path(__file__).parent.parent.parent / "VERSION",  # src/../VERSION (dev)
+        Path(__file__).parent.parent / "VERSION",  # Installed location
+    ]
+    for path in locations:
+        if path.exists():
+            return path.read_text().strip()
+    return "0.0.0"
+
+
+__version__ = _read_version()
 
 __all__ = [
     # Exceptions

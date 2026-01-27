@@ -65,7 +65,8 @@ Repository = "https://github.com/Galangal-Media/galangal-orchestrate"
 Issues = "https://github.com/Galangal-Media/galangal-orchestrate/issues"
 
 [tool.hatch.version]
-path = "src/galangal/__init__.py"
+path = "VERSION"
+pattern = "(?P<version>.+)"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/galangal", "src/galangal_hub"]
