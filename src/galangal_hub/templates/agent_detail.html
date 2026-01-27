@@ -63,9 +63,21 @@
                 </div>
             </div>
             {% if agent.task.awaiting_approval %}
-            <div class="mt-3 flex items-center">
-                <span class="status-dot status-attention mr-2"></span>
-                <span class="text-yellow-400 text-sm">Awaiting Approval</span>
+            <div class="mt-3 flex items-center justify-between">
+                <div class="flex items-center">
+                    <span class="status-dot status-attention mr-2"></span>
+                    <span class="text-yellow-400 text-sm">Awaiting Approval</span>
+                </div>
+                <div class="flex gap-2" onclick="event.preventDefault(); event.stopPropagation();">
+                    <button onclick="approveTask('{{ agent.agent.agent_id }}', '{{ agent.task.task_name }}')"
+                            class="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded">
+                        Approve
+                    </button>
+                    <button onclick="rejectTask('{{ agent.agent.agent_id }}', '{{ agent.task.task_name }}')"
+                            class="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded">
+                        Reject
+                    </button>
+                </div>
             </div>
             {% endif %}
         </a>
@@ -125,4 +137,41 @@
         </div>
     </div>
 </div>
+
+<script>
+async function approveTask(agentId, taskName) {
+    try {
+        const response = await fetch(`/api/actions/${agentId}/${taskName}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Failed to approve task');
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+async function rejectTask(agentId, taskName) {
+    const reason = prompt('Rejection reason (optional):');
+    if (reason === null) return; // Cancelled
+    try {
+        const response = await fetch(`/api/actions/${agentId}/${taskName}/reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: reason })
+        });
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Failed to reject task');
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+</script>
 {% endblock %}
