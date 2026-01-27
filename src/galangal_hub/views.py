@@ -5,8 +5,9 @@ Uses Jinja2 templates with HTMX for interactivity.
 """
 
 from pathlib import Path
+from typing import Any
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -14,7 +15,6 @@ from galangal_hub.auth import (
     SESSION_COOKIE,
     create_session_token,
     is_dashboard_auth_enabled,
-    require_dashboard_auth,
     verify_dashboard_credentials,
     verify_session_token,
 )
@@ -36,8 +36,8 @@ async def check_auth(request: Request) -> bool:
     return session_token is not None and verify_session_token(session_token)
 
 
-@router.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request) -> HTMLResponse:
+@router.get("/login", response_model=None)
+async def login_page(request: Request) -> Response:
     """Login page."""
     # If already authenticated, redirect to dashboard
     if await check_auth(request):
@@ -49,12 +49,12 @@ async def login_page(request: Request) -> HTMLResponse:
     )
 
 
-@router.post("/login")
+@router.post("/login", response_model=None)
 async def login_submit(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
-) -> RedirectResponse | HTMLResponse:
+) -> Response:
     """Handle login form submission."""
     if verify_dashboard_credentials(username, password):
         # Create session and redirect to dashboard
@@ -77,16 +77,16 @@ async def login_submit(
         )
 
 
-@router.get("/logout")
-async def logout(request: Request) -> RedirectResponse:
+@router.get("/logout", response_model=None)
+async def logout(request: Request) -> Response:
     """Logout and clear session."""
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(SESSION_COOKIE)
     return response
 
 
-@router.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request) -> HTMLResponse | RedirectResponse:
+@router.get("/", response_model=None)
+async def dashboard(request: Request) -> Response:
     """Main dashboard view."""
     if not await check_auth(request):
         return RedirectResponse(url="/login", status_code=302)
@@ -107,8 +107,8 @@ async def dashboard(request: Request) -> HTMLResponse | RedirectResponse:
     )
 
 
-@router.get("/agent/{agent_id}", response_class=HTMLResponse)
-async def agent_detail(request: Request, agent_id: str) -> HTMLResponse | RedirectResponse:
+@router.get("/agent/{agent_id}", response_model=None)
+async def agent_detail(request: Request, agent_id: str) -> Response:
     """Agent detail view."""
     if not await check_auth(request):
         return RedirectResponse(url="/login", status_code=302)
@@ -136,8 +136,8 @@ async def agent_detail(request: Request, agent_id: str) -> HTMLResponse | Redire
     )
 
 
-@router.get("/task/{agent_id}/{task_name}", response_class=HTMLResponse)
-async def task_detail(request: Request, agent_id: str, task_name: str) -> HTMLResponse | RedirectResponse:
+@router.get("/task/{agent_id}/{task_name}", response_model=None)
+async def task_detail(request: Request, agent_id: str, task_name: str) -> Response:
     """Task detail view."""
     if not await check_auth(request):
         return RedirectResponse(url="/login", status_code=302)
@@ -185,8 +185,8 @@ async def task_detail(request: Request, agent_id: str, task_name: str) -> HTMLRe
 # HTMX partial endpoints for live updates
 
 
-@router.get("/partials/agents", response_class=HTMLResponse)
-async def agents_partial(request: Request) -> HTMLResponse | RedirectResponse:
+@router.get("/partials/agents", response_model=None)
+async def agents_partial(request: Request) -> Response:
     """Partial view of agent list for HTMX updates."""
     if not await check_auth(request):
         return RedirectResponse(url="/login", status_code=302)
@@ -198,8 +198,8 @@ async def agents_partial(request: Request) -> HTMLResponse | RedirectResponse:
     )
 
 
-@router.get("/partials/needs-attention", response_class=HTMLResponse)
-async def needs_attention_partial(request: Request) -> HTMLResponse | RedirectResponse:
+@router.get("/partials/needs-attention", response_model=None)
+async def needs_attention_partial(request: Request) -> Response:
     """Partial view of agents needing attention for HTMX updates."""
     if not await check_auth(request):
         return RedirectResponse(url="/login", status_code=302)
@@ -211,8 +211,8 @@ async def needs_attention_partial(request: Request) -> HTMLResponse | RedirectRe
     )
 
 
-@router.get("/partials/agent/{agent_id}/task", response_class=HTMLResponse)
-async def agent_task_partial(request: Request, agent_id: str) -> HTMLResponse | RedirectResponse:
+@router.get("/partials/agent/{agent_id}/task", response_model=None)
+async def agent_task_partial(request: Request, agent_id: str) -> Response:
     """Partial view of agent's current task for HTMX updates."""
     if not await check_auth(request):
         return RedirectResponse(url="/login", status_code=302)
