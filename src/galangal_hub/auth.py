@@ -160,39 +160,45 @@ async def verify_websocket_auth(
 
     logger = logging.getLogger(__name__)
 
+    # Always log for debugging
+    print(f"[AUTH DEBUG] API key configured: {bool(_api_key)}")
+    print(f"[AUTH DEBUG] All headers: {list(websocket_headers.keys())}")
+
     # If no API key configured, allow all
     if not _api_key:
-        logger.debug("No API key configured, allowing connection")
+        print("[AUTH DEBUG] No API key configured, allowing connection")
         return True
 
     # Check Authorization header (standard)
     auth_header = websocket_headers.get("authorization", "")
+    print(f"[AUTH DEBUG] Authorization header: {auth_header[:20] if auth_header else 'EMPTY'}...")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
         if token == _api_key:
-            logger.debug("Authenticated via Authorization header")
+            print("[AUTH DEBUG] Authenticated via Authorization header")
             return True
+        else:
+            print(f"[AUTH DEBUG] Bearer token mismatch")
 
     # Check X-API-Key header (alternative, less likely to be stripped by proxies)
     x_api_key = websocket_headers.get("x-api-key", "")
+    print(f"[AUTH DEBUG] X-API-Key header: {x_api_key[:10] if x_api_key else 'EMPTY'}...")
     if x_api_key == _api_key:
-        logger.debug("Authenticated via X-API-Key header")
+        print("[AUTH DEBUG] Authenticated via X-API-Key header")
         return True
 
     # Check query parameter (fallback for proxies that strip headers)
     if query_params:
         query_key = query_params.get("api_key", "")
+        print(f"[AUTH DEBUG] Query param api_key: {query_key[:10] if query_key else 'EMPTY'}...")
         if query_key == _api_key:
-            logger.debug("Authenticated via query parameter")
+            print("[AUTH DEBUG] Authenticated via query parameter")
             return True
 
     # Check Tailscale headers
     if websocket_headers.get("tailscale-user-login"):
-        logger.debug("Authenticated via Tailscale")
+        print("[AUTH DEBUG] Authenticated via Tailscale")
         return True
 
-    logger.warning(
-        "WebSocket auth failed. Headers received: %s",
-        [k for k in websocket_headers.keys() if "auth" in k.lower() or "api" in k.lower() or "key" in k.lower()],
-    )
+    print(f"[AUTH DEBUG] Auth FAILED - no valid credentials found")
     return False
