@@ -62,11 +62,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     )
 
     # Print version
-    try:
-        from galangal import __version__
-        print(f"Galangal Hub v{__version__}")
-    except ImportError:
-        print("Galangal Hub")
+    from galangal_hub import __version__
+    print(f"Galangal Hub v{__version__}")
 
     print(f"Starting on http://{host}:{port}")
     print(f"Database: {db_path}")

@@ -7,4 +7,4 @@ A FastAPI-based server that agents connect to via WebSocket for:
 - Multi-repo/machine workflow visibility
 """
 
-__version__ = "0.1.0"
+__version__ = "0.24.5"
