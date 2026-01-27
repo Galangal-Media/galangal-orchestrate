@@ -64,13 +64,20 @@ Monitor and control workflows remotely across multiple machines.
 
 ```bash
 # Deploy hub server (Docker)
-docker run -d -p 8080:8080 ghcr.io/galangal-media/galangal-hub:latest
+docker run -d -p 8080:8080 \
+  -e HUB_USERNAME=admin \
+  -e HUB_PASSWORD=your-password \
+  -e HUB_API_KEY=your-api-key \
+  -v galangal-hub-data:/data \
+  ghcr.io/galangal-media/galangal-hub:latest
+```
 
-# Enable in your project
-# .galangal/config.yaml
+```yaml
+# Enable in your project (.galangal/config.yaml)
 hub:
   enabled: true
   url: ws://your-server:8080/ws/agent
+  api_key: your-api-key  # Must match HUB_API_KEY on server
 ```
 
 See [Hub Documentation](docs/hub/README.md) for full setup instructions.

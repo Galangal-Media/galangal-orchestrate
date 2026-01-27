@@ -74,13 +74,10 @@ Add to your existing `docker-compose.yml`:
     image: ghcr.io/galangal-media/galangal-hub:latest
     container_name: galangal-hub
     environment:
-      - PUID=1000
-      - PGID=1000
       - TZ=Europe/London
-      - HUB_HOST=0.0.0.0
-      - HUB_PORT=8080
-      # Optional: uncomment to require API key
-      # - HUB_API_KEY=your-secret-key-here
+      - HUB_USERNAME=admin
+      - HUB_PASSWORD=your-secure-password
+      - HUB_API_KEY=your-agent-api-key
     volumes:
       - /home/docker/galangal-hub/data:/data
     ports:
@@ -88,18 +85,13 @@ Add to your existing `docker-compose.yml`:
     restart: unless-stopped
 ```
 
-Create the data directory and start:
+Start the service:
 
 ```bash
-# Create data directory
-mkdir -p /home/docker/galangal-hub/data
-
-# Start just the new service
 docker-compose up -d galangal-hub
-
-# Or restart everything
-docker-compose up -d
 ```
+
+The data directory is created automatically with correct permissions.
 
 Configure your development machine:
 
@@ -108,6 +100,7 @@ Configure your development machine:
 hub:
   enabled: true
   url: ws://your-server-ip:8081/ws/agent
+  api_key: your-agent-api-key  # Must match HUB_API_KEY on server
 ```
 
 #### With Cloudflare Tunnel
@@ -127,6 +120,7 @@ Then configure agents to use the public URL:
 hub:
   enabled: true
   url: wss://galangal.yourdomain.com/ws/agent
+  api_key: your-agent-api-key  # Must match HUB_API_KEY on server
 ```
 
 Note: Use `wss://` (secure WebSocket) when going through Cloudflare.
