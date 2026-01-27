@@ -125,7 +125,7 @@ class HubClient:
 
             self._websocket = await websockets.connect(
                 self.config.url,
-                extra_headers=self._get_auth_headers(),
+                additional_headers=self._get_auth_headers(),
             )
             self._connected = True
 

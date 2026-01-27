@@ -159,7 +159,7 @@ def cmd_hub_test(args: argparse.Namespace) -> int:
         try:
             async with websockets.connect(
                 hub_config.url,
-                extra_headers=headers,
+                additional_headers=headers,
                 close_timeout=5,
             ) as ws:
                 # Send registration
