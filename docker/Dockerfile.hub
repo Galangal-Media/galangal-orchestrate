@@ -1,0 +1,70 @@
+# =============================================================================
+# Galangal Hub Server - Dockerfile
+# =============================================================================
+#
+# Build:
+#   docker build -f docker/Dockerfile.hub -t galangal-hub .
+#
+# Run:
+#   docker run -p 8080:8080 -v galangal-hub-data:/data galangal-hub
+#
+# =============================================================================
+
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy package files
+COPY pyproject.toml README.md ./
+COPY src/ ./src/
+
+# Install the package with hub dependencies
+RUN pip install --no-cache-dir -e ".[hub]"
+
+# =============================================================================
+# Production image
+# =============================================================================
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install runtime dependencies (curl for health checks)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /bin/bash appuser
+
+# Copy installed packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /app /app
+
+# Create data directory
+RUN mkdir -p /data && chown appuser:appuser /data
+
+# Switch to non-root user
+USER appuser
+
+# Expose the default port
+EXPOSE 8080
+
+# Environment variables
+ENV HUB_DB_PATH=/data/hub.db \
+    HUB_HOST=0.0.0.0 \
+    HUB_PORT=8080 \
+    PYTHONUNBUFFERED=1
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:${HUB_PORT}/ || exit 1
+
+# Run the hub server
+CMD ["python", "-m", "galangal_hub.cli", "serve", \
+     "--host", "0.0.0.0", \
+     "--port", "8080", \
+     "--db", "/data/hub.db"]

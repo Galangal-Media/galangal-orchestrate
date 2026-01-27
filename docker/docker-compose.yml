@@ -1,0 +1,135 @@
+# =============================================================================
+# Galangal Hub - Docker Compose Configuration
+# =============================================================================
+#
+# This file deploys the Galangal Hub server for remote monitoring and control
+# of galangal workflows across multiple machines/repos.
+#
+# QUICK START:
+#   1. Copy this file to your server
+#   2. Run: docker-compose up -d
+#   3. Access dashboard at http://your-server:8080
+#
+# CONFIGURATION:
+#   - Edit environment variables below or create a .env file
+#   - For Tailscale access, see docker-compose.tailscale.yml
+#
+# AGENT CONFIGURATION:
+#   Add to each project's .galangal/config.yaml:
+#
+#     hub:
+#       enabled: true
+#       url: ws://your-server:8080/ws/agent
+#       # api_key: your-secret-key  # If HUB_API_KEY is set
+#
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Galangal Hub Server
+  # ---------------------------------------------------------------------------
+  galangal-hub:
+    # Use the published image from GitHub Container Registry
+    image: ghcr.io/galangal-media/galangal-hub:${HUB_VERSION:-latest}
+
+    # Or build locally (uncomment these lines and comment the image line above):
+    # build:
+    #   context: ..
+    #   dockerfile: docker/Dockerfile.hub
+
+    container_name: galangal-hub
+    restart: unless-stopped
+
+    ports:
+      # Main web interface and WebSocket endpoint
+      # Change the left side (host port) if 8080 is already in use
+      - "${HUB_PORT:-8080}:8080"
+
+    volumes:
+      # Persist SQLite database across container restarts
+      - galangal-hub-data:/data
+
+    environment:
+      # -----------------------------------------------------------------------
+      # Server Configuration
+      # -----------------------------------------------------------------------
+
+      # Host to bind to (0.0.0.0 = all interfaces)
+      - HUB_HOST=0.0.0.0
+
+      # Port inside container (should match Dockerfile)
+      - HUB_PORT=8080
+
+      # -----------------------------------------------------------------------
+      # Security (Optional)
+      # -----------------------------------------------------------------------
+
+      # API key for authentication. If set, agents must include this in their
+      # config. Generate with: openssl rand -hex 32
+      # - HUB_API_KEY=${HUB_API_KEY:-}
+
+      # -----------------------------------------------------------------------
+      # Database
+      # -----------------------------------------------------------------------
+
+      # SQLite database path (inside container)
+      - HUB_DB_PATH=/data/hub.db
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Resource limits (adjust based on your server)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    labels:
+      # Watchtower auto-update (if you use Watchtower)
+      - "com.centurylinklabs.watchtower.enable=true"
+
+      # Traefik labels (if you use Traefik as reverse proxy)
+      # Uncomment and configure if using Traefik
+      # - "traefik.enable=true"
+      # - "traefik.http.routers.galangal-hub.rule=Host(`hub.yourdomain.com`)"
+      # - "traefik.http.routers.galangal-hub.entrypoints=websecure"
+      # - "traefik.http.routers.galangal-hub.tls.certresolver=letsencrypt"
+      # - "traefik.http.services.galangal-hub.loadbalancer.server.port=8080"
+
+# -----------------------------------------------------------------------------
+# Volumes
+# -----------------------------------------------------------------------------
+volumes:
+  galangal-hub-data:
+    driver: local
+    # Optional: Specify a host path for easier backups
+    # driver_opts:
+    #   type: none
+    #   o: bind
+    #   device: /path/to/galangal-hub-data
+
+# -----------------------------------------------------------------------------
+# Networks (Optional)
+# -----------------------------------------------------------------------------
+# Uncomment if you want to connect to other services (e.g., Traefik)
+# networks:
+#   default:
+#     name: galangal-network
+#   traefik:
+#     external: true

@@ -4,6 +4,8 @@ Configuration schema using Pydantic models.
 
 from pydantic import BaseModel, Field, field_validator
 
+from galangal.hub.config import HubConfig
+
 
 class ProjectConfig(BaseModel):
     """Project-level configuration."""
@@ -459,4 +461,8 @@ class GalangalConfig(BaseModel):
     lineage: LineageConfig = Field(
         default_factory=LineageConfig,
         description="Artifact lineage tracking for staleness detection",
+    )
+    hub: HubConfig = Field(
+        default_factory=HubConfig,
+        description="Hub connection configuration for remote monitoring and control",
     )

@@ -1,0 +1,106 @@
+# =============================================================================
+# Build and Publish Galangal Hub Docker Image
+# =============================================================================
+#
+# Triggers:
+#   - Push to main branch (builds :latest)
+#   - New version tags (builds :v1.2.3 and :latest)
+#   - Manual dispatch
+#
+# Publishes to:
+#   - ghcr.io/galangal-media/galangal-hub
+#
+# Usage:
+#   docker pull ghcr.io/galangal-media/galangal-hub:latest
+#
+# =============================================================================
+
+name: Build and Push Hub Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/galangal_hub/**'
+      - 'src/galangal/hub/**'
+      - 'docker/Dockerfile.hub'
+      - 'pyproject.toml'
+      - '.github/workflows/docker-hub.yml'
+    tags:
+      - 'v*'
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (leave empty for branch-based tag)'
+        required: false
+        default: ''
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/galangal-hub
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Manual tag override
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
+            # Branch name (main -> latest)
+            type=ref,event=branch
+            # Version tags (v1.2.3 -> 1.2.3, latest)
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            # Latest on main branch or version tag
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+            # Git SHA (short)
+            type=sha,prefix=sha-
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.hub
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build-and-push.outputs.digest }}
+          push-to-registry: true

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}Not Found - Galangal Hub{% endblock %}
+
+{% block content %}
+<div class="text-center py-16">
+    <h1 class="text-4xl font-bold text-gray-400 mb-4">404</h1>
+    <p class="text-gray-500 mb-8">{{ message or 'Page not found' }}</p>
+    <a href="/" class="text-purple-400 hover:text-purple-300">Back to Dashboard</a>
+</div>
+{% endblock %}

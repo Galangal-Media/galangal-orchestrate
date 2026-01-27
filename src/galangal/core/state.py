@@ -1147,3 +1147,8 @@ def save_state(state: WorkflowState) -> None:
     state_file = task_dir / "state.json"
     with open(state_file, "w") as f:
         json.dump(state.to_dict(), f, indent=2)
+
+    # Notify hub if connected
+    from galangal.hub.hooks import notify_state_saved
+
+    notify_state_saved(state)

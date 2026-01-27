@@ -362,6 +362,17 @@ def main() -> int:
     # Set default subcommand for archive (show help if no subcommand)
     archive_parser.set_defaults(func=lambda args: archive_parser.print_help() or 0)
 
+    # hub
+    hub_parser = subparsers.add_parser("hub", help="Hub connection management")
+    hub_subparsers = hub_parser.add_subparsers(dest="hub_command")
+    hub_status = hub_subparsers.add_parser("status", help="Show hub connection status")
+    hub_status.set_defaults(func=_cmd_hub_status)
+    hub_test = hub_subparsers.add_parser("test", help="Test connection to hub")
+    hub_test.set_defaults(func=_cmd_hub_test)
+    hub_info = hub_subparsers.add_parser("info", help="Show hub server information")
+    hub_info.set_defaults(func=_cmd_hub_info)
+    hub_parser.set_defaults(func=lambda args: hub_parser.print_help() or 0)
+
     args = parser.parse_args()
 
     # Enable debug mode if requested
@@ -539,6 +550,24 @@ def _cmd_archive_restore(args: argparse.Namespace) -> int:
     from galangal.commands.archive import cmd_archive_restore
 
     return cmd_archive_restore(args)
+
+
+def _cmd_hub_status(args: argparse.Namespace) -> int:
+    from galangal.commands.hub import cmd_hub_status
+
+    return cmd_hub_status(args)
+
+
+def _cmd_hub_test(args: argparse.Namespace) -> int:
+    from galangal.commands.hub import cmd_hub_test
+
+    return cmd_hub_test(args)
+
+
+def _cmd_hub_info(args: argparse.Namespace) -> int:
+    from galangal.commands.hub import cmd_hub_info
+
+    return cmd_hub_info(args)
 
 
 if __name__ == "__main__":

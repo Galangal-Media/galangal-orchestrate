@@ -46,6 +46,49 @@ from galangal.validation.runner import ValidationRunner
 console = Console()
 
 
+async def _init_hub_client(config: GalangalConfig, state: WorkflowState) -> None:
+    """Initialize hub client if configured."""
+    if not config.hub.enabled:
+        return
+
+    try:
+        from pathlib import Path
+
+        from galangal.hub.action_handler import get_action_handler
+        from galangal.hub.client import HubClient, set_hub_client
+
+        project_path = Path.cwd()
+        client = HubClient(
+            config=config.hub,
+            project_name=config.project.name,
+            project_path=project_path,
+        )
+
+        # Register action handler
+        handler = get_action_handler()
+        client.on_action(handler.handle_hub_action)
+
+        # Connect to hub
+        connected = await client.connect()
+        if connected:
+            set_hub_client(client)
+            # Send initial state
+            await client.send_state(state)
+    except Exception:
+        # Hub connection failure is non-fatal
+        pass
+
+
+async def _cleanup_hub_client() -> None:
+    """Cleanup hub client on workflow exit."""
+    from galangal.hub.client import get_hub_client, set_hub_client
+
+    client = get_hub_client()
+    if client:
+        await client.disconnect()
+        set_hub_client(None)
+
+
 def _run_workflow_with_tui(
     state: WorkflowState,
     ignore_staleness: bool = False,
@@ -108,6 +151,9 @@ def _run_workflow_with_tui(
     async def workflow_loop() -> None:
         """Async workflow loop running within Textual's event loop."""
         nonlocal staleness_checked
+
+        # Initialize hub client if configured
+        await _init_hub_client(config, state)
 
         try:
             while not engine.is_complete and not app._paused:
@@ -190,6 +236,8 @@ def _run_workflow_with_tui(
             app.set_timer(0.5, app.exit)
             return
         finally:
+            # Cleanup hub client
+            await _cleanup_hub_client()
             if app._workflow_result != "error":
                 app.set_timer(0.5, app.exit)
 
@@ -1062,6 +1110,77 @@ async def _handle_max_retries_exceeded(
     return choice
 
 
+async def _check_remote_action_or_prompt(
+    app: WorkflowTUIApp,
+    state: WorkflowState,
+    stage_name: str,
+) -> str:
+    """
+    Check for pending remote action or prompt user for approval.
+
+    Polls for remote actions while waiting for user input. If a remote
+    action arrives, it's processed instead of the local prompt.
+
+    Args:
+        app: TUI application.
+        state: Current workflow state.
+        stage_name: Name of the stage being approved.
+
+    Returns:
+        "yes", "no", or "quit"
+    """
+    from galangal.hub.action_handler import ActionType, get_action_handler
+
+    handler = get_action_handler()
+    prompt_type = PromptType.PLAN_APPROVAL
+
+    # Start a background poll for remote actions
+    async def check_remote_action() -> str | None:
+        """Poll for remote actions."""
+        while True:
+            action = handler.peek_pending_action()
+            if action and action.task_name == state.task_name:
+                handler.get_pending_action()  # Consume it
+                if action.action_type == ActionType.APPROVE:
+                    app.add_activity("Remote approval received from hub", "*")
+                    return "yes"
+                elif action.action_type == ActionType.REJECT:
+                    reason = action.data.get("reason", "Rejected via hub")
+                    app.add_activity(f"Remote rejection: {reason}", "*")
+                    # Store reason in state
+                    state.last_failure = f"{stage_name} rejected via hub: {reason}"
+                    return "no"
+                elif action.action_type == ActionType.SKIP:
+                    app.add_activity("Remote skip received from hub", "*")
+                    return "skip"
+            await asyncio.sleep(0.5)  # Poll every 500ms
+
+    # Race between local prompt and remote action
+    prompt_task = asyncio.create_task(
+        app.prompt_async(prompt_type, f"Approve {stage_name} to continue?")
+    )
+    remote_task = asyncio.create_task(check_remote_action())
+
+    done, pending = await asyncio.wait(
+        [prompt_task, remote_task],
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+
+    # Cancel the pending task
+    for task in pending:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    # Get the result from whichever completed first
+    for task in done:
+        return task.result()
+
+    return "quit"
+
+
 async def _handle_stage_approval(
     app: WorkflowTUIApp,
     state: WorkflowState,
@@ -1083,13 +1202,26 @@ async def _handle_stage_approval(
     default_approver = config.project.approver_name or ""
     stage_name = state.stage.value
 
-    # Determine prompt type based on stage
-    prompt_type = PromptType.PLAN_APPROVAL  # Default, works for most stages
+    # Notify hub that approval is needed
+    from galangal.hub.hooks import notify_approval_needed
 
-    choice = await app.prompt_async(prompt_type, f"Approve {stage_name} to continue?")
+    notify_approval_needed(state, state.stage)
+
+    # Check for pending remote action from hub
+    choice = await _check_remote_action_or_prompt(app, state, stage_name)
 
     if choice == "yes":
-        name = await app.text_input_async("Enter approver name:", default_approver)
+        # Check if this was a remote approval (no need for name prompt)
+        from galangal.hub.client import get_hub_client
+
+        hub_client = get_hub_client()
+        if hub_client and hub_client.connected:
+            # Remote approval - use "Hub" as approver
+            name = "Hub"
+        else:
+            # Local approval - prompt for name
+            name = await app.text_input_async("Enter approver name:", default_approver)
+
         if name:
             from galangal.core.utils import now_formatted
 

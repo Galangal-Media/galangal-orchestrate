@@ -1,0 +1,151 @@
+# =============================================================================
+# Galangal Hub with Tailscale - Docker Compose Configuration
+# =============================================================================
+#
+# This configuration runs the hub with a Tailscale sidecar for secure access
+# across your Tailnet without exposing ports to the internet.
+#
+# PREREQUISITES:
+#   1. A Tailscale account (https://tailscale.com)
+#   2. An auth key from https://login.tailscale.com/admin/settings/keys
+#      - Enable "Reusable" for persistent containers
+#      - Enable "Ephemeral" to auto-cleanup if container stops
+#
+# QUICK START:
+#   1. Create .env file with your Tailscale auth key:
+#        TS_AUTHKEY=tskey-auth-xxxxx
+#
+#   2. Run:
+#        docker-compose -f docker-compose.tailscale.yml up -d
+#
+#   3. Access via Tailscale:
+#        https://galangal-hub  (from any device on your Tailnet)
+#
+# AGENT CONFIGURATION:
+#   Add to each project's .galangal/config.yaml:
+#
+#     hub:
+#       enabled: true
+#       url: wss://galangal-hub/ws/agent  # Note: wss:// for HTTPS
+#
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Tailscale Sidecar
+  # ---------------------------------------------------------------------------
+  # Provides a Tailscale IP for the hub, making it accessible from your Tailnet
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: galangal-hub-tailscale
+    hostname: galangal-hub
+    restart: unless-stopped
+
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+
+    volumes:
+      # Persist Tailscale state (login, keys, etc.)
+      - tailscale-state:/var/lib/tailscale
+      # Required for userspace networking
+      - /dev/net/tun:/dev/net/tun
+
+    environment:
+      # Auth key from https://login.tailscale.com/admin/settings/keys
+      - TS_AUTHKEY=${TS_AUTHKEY:?Set TS_AUTHKEY in .env file}
+
+      # State directory
+      - TS_STATE_DIR=/var/lib/tailscale
+
+      # Enable HTTPS serving on port 443
+      - TS_SERVE_CONFIG=/config/serve.json
+
+      # Optional: Add tags for ACL rules
+      # - TS_EXTRA_ARGS=--advertise-tags=tag:galangal-hub
+
+    # Create serve config and start Tailscale
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /config
+        cat > /config/serve.json << 'EOF'
+        {
+          "TCP": {
+            "443": {
+              "HTTPS": true
+            }
+          },
+          "Web": {
+            "${TS_HOSTNAME:-galangal-hub}.$TS_CERT_DOMAIN:443": {
+              "Handlers": {
+                "/": {
+                  "Proxy": "http://127.0.0.1:8080"
+                }
+              }
+            }
+          }
+        }
+        EOF
+        /usr/local/bin/containerboot
+
+    healthcheck:
+      test: ["CMD", "tailscale", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # Galangal Hub Server
+  # ---------------------------------------------------------------------------
+  galangal-hub:
+    # Use the published image from GitHub Container Registry
+    image: ghcr.io/galangal-media/galangal-hub:${HUB_VERSION:-latest}
+
+    # Or build locally (uncomment these lines and comment the image line above):
+    # build:
+    #   context: ..
+    #   dockerfile: docker/Dockerfile.hub
+
+    container_name: galangal-hub
+    restart: unless-stopped
+
+    # Share network with Tailscale container
+    network_mode: "service:tailscale"
+
+    volumes:
+      - galangal-hub-data:/data
+
+    environment:
+      - HUB_HOST=0.0.0.0
+      - HUB_PORT=8080
+      - HUB_DB_PATH=/data/hub.db
+
+    depends_on:
+      tailscale:
+        condition: service_healthy
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# -----------------------------------------------------------------------------
+# Volumes
+# -----------------------------------------------------------------------------
+volumes:
+  galangal-hub-data:
+    driver: local
+  tailscale-state:
+    driver: local

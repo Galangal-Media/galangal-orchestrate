@@ -155,6 +155,9 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         self._active_input_screen: TextInputModal | None = None
         self._files_visible = True
 
+        # Remote action from hub (for remote approval)
+        self._pending_remote_action: dict | None = None
+
     def compose(self) -> ComposeResult:
         with Container(id="workflow-root"):
             yield HeaderWidget(id="header")
