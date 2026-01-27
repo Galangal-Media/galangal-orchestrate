@@ -37,46 +37,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await storage.close()
 
 
-def create_app(
-    db_path: str | Path = "hub.db",
-    static_dir: str | Path | None = None,
-) -> FastAPI:
-    """
-    Create and configure the FastAPI application.
-
-    Args:
-        db_path: Path to SQLite database.
-        static_dir: Path to static files directory (optional).
-
-    Returns:
-        Configured FastAPI application.
-    """
-    # Configure storage path BEFORE creating app (so lifespan uses correct path)
-    storage.db_path = Path(db_path)
-
-    app = FastAPI(
-        title="Galangal Hub",
-        description="Centralized dashboard for remote monitoring and control of galangal workflows",
-        version="0.1.0",
-        lifespan=lifespan,
-    )
-
-    # Mount static files if directory provided
-    if static_dir:
-        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-
-    # Register routes
-    from galangal_hub.api import agents, tasks, actions
-    from galangal_hub import views
-
-    app.include_router(agents.router)
-    app.include_router(tasks.router)
-    app.include_router(actions.router)
-    app.include_router(views.router)
-
-    return app
-
-
 # Dashboard WebSocket connections for live updates
 _dashboard_connections: list[WebSocket] = []
 
@@ -96,14 +56,6 @@ async def notify_dashboards() -> None:
             _dashboard_connections.remove(ws)
 
 
-# Default app instance
-app = create_app()
-
-# Register dashboard notification callback
-manager.on_change(notify_dashboards)
-
-
-@app.websocket("/ws/dashboard")
 async def dashboard_websocket(websocket: WebSocket) -> None:
     """
     WebSocket endpoint for dashboard live updates.
@@ -127,8 +79,7 @@ async def dashboard_websocket(websocket: WebSocket) -> None:
         logger.info("Dashboard WebSocket disconnected")
 
 
-@app.websocket("/ws/agent")
-async def websocket_endpoint(websocket: WebSocket) -> None:
+async def agent_websocket(websocket: WebSocket) -> None:
     """
     WebSocket endpoint for agent connections.
 
@@ -282,3 +233,54 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     finally:
         if agent_id:
             await manager.disconnect(agent_id)
+
+
+def create_app(
+    db_path: str | Path = "hub.db",
+    static_dir: str | Path | None = None,
+) -> FastAPI:
+    """
+    Create and configure the FastAPI application.
+
+    Args:
+        db_path: Path to SQLite database.
+        static_dir: Path to static files directory (optional).
+
+    Returns:
+        Configured FastAPI application.
+    """
+    # Configure storage path BEFORE creating app (so lifespan uses correct path)
+    storage.db_path = Path(db_path)
+
+    app = FastAPI(
+        title="Galangal Hub",
+        description="Centralized dashboard for remote monitoring and control of galangal workflows",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
+
+    # Mount static files if directory provided
+    if static_dir:
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    # Register HTTP routes
+    from galangal_hub.api import agents, tasks, actions
+    from galangal_hub import views
+
+    app.include_router(agents.router)
+    app.include_router(tasks.router)
+    app.include_router(actions.router)
+    app.include_router(views.router)
+
+    # Register WebSocket routes
+    app.websocket("/ws/dashboard")(dashboard_websocket)
+    app.websocket("/ws/agent")(agent_websocket)
+
+    # Register dashboard notification callback
+    manager.on_change(notify_dashboards)
+
+    return app
+
+
+# Default app instance (for module-level imports)
+app = create_app()
