@@ -92,7 +92,7 @@
             <div class="flex items-center">
                 <span class="w-24 text-sm text-gray-400">{{ stage }}</span>
                 <div class="flex-1 bg-gray-700 rounded h-4 overflow-hidden">
-                    <div class="bg-purple-600 h-full" style="width: {{ (duration / 3600 * 100)|min(100) }}%"></div>
+                    <div class="bg-purple-600 h-full" style="width: {{ [duration / 3600 * 100, 100]|min }}%"></div>
                 </div>
                 <span class="ml-4 text-sm text-gray-400">{{ (duration / 60)|round(1) }}m</span>
             </div>
