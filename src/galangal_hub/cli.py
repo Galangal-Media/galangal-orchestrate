@@ -69,8 +69,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     uvicorn.run(
         app,
-        host=args.host,
-        port=args.port,
+        host=host,
+        port=port,
         log_level="info",
     )
     return 0

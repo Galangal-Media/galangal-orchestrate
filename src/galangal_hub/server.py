@@ -10,17 +10,21 @@ Provides:
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
 from fastapi.staticfiles import StaticFiles
 
+from galangal_hub.auth import verify_websocket_auth
 from galangal_hub.connection import manager
 from galangal_hub.models import AgentInfo, MessageType, TaskState, WorkflowEvent
 from galangal_hub.storage import storage
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -47,15 +51,15 @@ def create_app(
     Returns:
         Configured FastAPI application.
     """
+    # Configure storage path BEFORE creating app (so lifespan uses correct path)
+    storage.db_path = Path(db_path)
+
     app = FastAPI(
         title="Galangal Hub",
         description="Centralized dashboard for remote monitoring and control of galangal workflows",
         version="0.1.0",
         lifespan=lifespan,
     )
-
-    # Configure storage path
-    storage.db_path = Path(db_path)
 
     # Mount static files if directory provided
     if static_dir:
@@ -83,27 +87,57 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     WebSocket endpoint for agent connections.
 
     Protocol:
-    1. Agent connects
+    1. Agent connects with Authorization header (if API key required)
     2. Agent sends REGISTER message with agent info
     3. Hub acknowledges registration
     4. Agent sends STATE_UPDATE and EVENT messages
     5. Hub sends ACTION messages for remote control
     6. Agent sends HEARTBEAT to maintain connection
     """
+    # Verify authentication before accepting connection
+    headers = dict(websocket.headers)
+    if not await verify_websocket_auth(headers):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        logger.warning("WebSocket connection rejected: invalid or missing API key")
+        return
+
     await websocket.accept()
+    logger.info("WebSocket connection accepted")
 
     agent_id: str | None = None
+    registered_agent_id: str | None = None  # Set once on registration, immutable
 
     try:
         while True:
             data = await websocket.receive_text()
-            message = json.loads(data)
 
-            msg_type = MessageType(message.get("type", ""))
+            # Parse JSON with error handling
+            try:
+                message = json.loads(data)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Invalid JSON received: {e}")
+                continue
+
+            # Validate message type
+            try:
+                msg_type = MessageType(message.get("type", ""))
+            except ValueError:
+                logger.warning(f"Unknown message type: {message.get('type')}")
+                continue
+
             payload = message.get("payload", {})
-            agent_id = message.get("agent_id", agent_id)
 
             if msg_type == MessageType.REGISTER:
+                # Validate required fields
+                required_fields = ["agent_id", "hostname", "project_name", "project_path"]
+                missing = [f for f in required_fields if f not in payload]
+                if missing:
+                    logger.warning(f"Registration missing fields: {missing}")
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "message": f"Missing fields: {missing}"})
+                    )
+                    continue
+
                 # Register new agent
                 info = AgentInfo(
                     agent_id=payload["agent_id"],
@@ -112,9 +146,14 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     project_path=payload["project_path"],
                     agent_name=payload.get("agent_name", payload["hostname"]),
                 )
+                # Set agent_id once on registration - cannot be changed
                 agent_id = info.agent_id
+                registered_agent_id = info.agent_id
+
                 await manager.connect(agent_id, websocket, info)
                 await storage.upsert_agent(info)
+
+                logger.info(f"Agent registered: {agent_id} ({info.hostname})")
 
                 # Send acknowledgement
                 await websocket.send_text(
@@ -126,8 +165,20 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     )
                 )
 
-            elif msg_type == MessageType.STATE_UPDATE and agent_id:
-                # Update task state
+            elif msg_type == MessageType.STATE_UPDATE:
+                # Must be registered first
+                if not registered_agent_id:
+                    logger.warning("STATE_UPDATE received before registration")
+                    continue
+
+                # Use the registered agent_id, ignore any agent_id in message
+                agent_id = registered_agent_id
+
+                # Validate required fields
+                if "task_name" not in payload or "stage" not in payload:
+                    logger.warning("STATE_UPDATE missing task_name or stage")
+                    continue
+
                 state = TaskState(
                     task_name=payload["task_name"],
                     task_description=payload.get("task_description", ""),
@@ -143,26 +194,44 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 )
                 await manager.update_task_state(agent_id, state)
 
-            elif msg_type == MessageType.EVENT and agent_id:
-                # Record workflow event
-                event = WorkflowEvent(
-                    event_type=payload["event_type"],
-                    timestamp=datetime.fromisoformat(payload["timestamp"]),
-                    agent_id=agent_id,
-                    task_name=payload.get("task_name"),
-                    data=payload.get("data", {}),
-                )
-                await storage.record_event(event)
+            elif msg_type == MessageType.EVENT:
+                # Must be registered first
+                if not registered_agent_id:
+                    logger.warning("EVENT received before registration")
+                    continue
 
-            elif msg_type == MessageType.HEARTBEAT and agent_id:
-                # Update last seen time
+                agent_id = registered_agent_id
+
+                # Validate required fields
+                if "event_type" not in payload or "timestamp" not in payload:
+                    logger.warning("EVENT missing event_type or timestamp")
+                    continue
+
+                try:
+                    event = WorkflowEvent(
+                        event_type=payload["event_type"],
+                        timestamp=datetime.fromisoformat(payload["timestamp"]),
+                        agent_id=agent_id,
+                        task_name=payload.get("task_name"),
+                        data=payload.get("data", {}),
+                    )
+                    await storage.record_event(event)
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Invalid event data: {e}")
+
+            elif msg_type == MessageType.HEARTBEAT:
+                # Must be registered first
+                if not registered_agent_id:
+                    continue
+
+                agent_id = registered_agent_id
                 await manager.update_heartbeat(agent_id)
                 await storage.update_agent_seen(agent_id)
 
     except WebSocketDisconnect:
-        pass
-    except Exception:
-        pass
+        logger.info(f"Agent disconnected: {agent_id}")
+    except Exception as e:
+        logger.exception(f"WebSocket error for agent {agent_id}: {e}")
     finally:
         if agent_id:
             await manager.disconnect(agent_id)

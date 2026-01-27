@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -14,6 +15,8 @@ if TYPE_CHECKING:
     from fastapi import WebSocket
 
 from galangal_hub.models import AgentInfo, AgentWithState, HubAction, TaskState
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -33,11 +36,17 @@ class ConnectionManager:
     # agent_id -> ConnectedAgent
     _agents: dict[str, ConnectedAgent] = field(default_factory=dict)
 
-    # Lock for thread-safe access
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Lock for thread-safe access (created lazily)
+    _lock: asyncio.Lock | None = field(default=None)
 
     # Callbacks for state changes (for dashboard updates)
     _on_agent_change: list[Any] = field(default_factory=list)
+
+    def _get_lock(self) -> asyncio.Lock:
+        """Get or create the asyncio lock (lazy initialization)."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     async def connect(self, agent_id: str, websocket: WebSocket, info: AgentInfo) -> None:
         """
@@ -48,7 +57,7 @@ class ConnectionManager:
             websocket: The WebSocket connection.
             info: Agent information.
         """
-        async with self._lock:
+        async with self._get_lock():
             self._agents[agent_id] = ConnectedAgent(
                 websocket=websocket,
                 info=info,
@@ -63,7 +72,7 @@ class ConnectionManager:
         Args:
             agent_id: Agent to disconnect.
         """
-        async with self._lock:
+        async with self._get_lock():
             if agent_id in self._agents:
                 self._agents[agent_id].connected = False
                 # Keep agent info for a bit for UI display
@@ -78,7 +87,7 @@ class ConnectionManager:
             agent_id: Agent ID.
             state: New task state.
         """
-        async with self._lock:
+        async with self._get_lock():
             if agent_id in self._agents:
                 self._agents[agent_id].task = state
         await self._notify_change()
@@ -90,7 +99,7 @@ class ConnectionManager:
         Args:
             agent_id: Agent ID.
         """
-        async with self._lock:
+        async with self._get_lock():
             if agent_id in self._agents:
                 self._agents[agent_id].info.last_seen = datetime.now(timezone.utc)
 
@@ -105,7 +114,7 @@ class ConnectionManager:
         Returns:
             True if sent successfully, False otherwise.
         """
-        async with self._lock:
+        async with self._get_lock():
             agent = self._agents.get(agent_id)
             if not agent or not agent.connected:
                 return False
@@ -117,7 +126,8 @@ class ConnectionManager:
                 }
                 await agent.websocket.send_text(json.dumps(message))
                 return True
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to send to agent {agent_id}: {e}")
                 agent.connected = False
                 return False
 
@@ -185,8 +195,8 @@ class ConnectionManager:
                     await callback()
                 else:
                     callback()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Callback error: {e}")
 
 
 # Global connection manager instance
