@@ -34,6 +34,11 @@
                     <span id="connection-status" class="text-sm text-gray-400">
                         Connecting...
                     </span>
+                    {% if auth_enabled %}
+                    <a href="/logout" class="text-sm text-gray-400 hover:text-gray-200 transition">
+                        Logout
+                    </a>
+                    {% endif %}
                 </div>
             </div>
         </div>

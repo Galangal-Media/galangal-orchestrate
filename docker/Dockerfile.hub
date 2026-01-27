@@ -19,12 +19,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy package files
-COPY pyproject.toml README.md ./
-COPY src/ ./src/
+# Install hub dependencies directly (not the full galangal-orchestrate package)
+# This avoids pulling in sqlite-vss which isn't available for ARM64
+RUN pip install --no-cache-dir \
+    fastapi>=0.109.0 \
+    uvicorn>=0.27.0 \
+    websockets>=12.0 \
+    aiosqlite>=0.19.0 \
+    jinja2>=3.1.0 \
+    python-multipart>=0.0.6 \
+    pydantic>=2.0.0
 
-# Install the package with hub dependencies
-RUN pip install --no-cache-dir -e ".[hub]"
+# Copy only the hub package (not the full galangal package)
+COPY src/galangal_hub/ ./src/galangal_hub/
 
 # =============================================================================
 # Production image
@@ -42,7 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
-COPY --from=builder /app /app
+COPY --from=builder /app/src/galangal_hub /app/galangal_hub
 
 # Create data directory
 RUN mkdir -p /data && chown appuser:appuser /data
@@ -57,6 +64,7 @@ EXPOSE 8080
 ENV HUB_DB_PATH=/data/hub.db \
     HUB_HOST=0.0.0.0 \
     HUB_PORT=8080 \
+    PYTHONPATH=/app \
     PYTHONUNBUFFERED=1
 
 # Health check
@@ -64,7 +72,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:${HUB_PORT}/ || exit 1
 
 # Run the hub server
-CMD ["python", "-m", "galangal_hub.cli", "serve", \
-     "--host", "0.0.0.0", \
-     "--port", "8080", \
-     "--db", "/data/hub.db"]
+CMD ["python", "-m", "galangal_hub.cli", "serve"]

@@ -4,11 +4,20 @@ CLI for Galangal Hub server.
 Usage:
     galangal-hub serve [--port PORT] [--host HOST] [--db PATH]
     galangal-hub init [--force]
+
+Environment Variables:
+    HUB_HOST        Host to bind to (default: 0.0.0.0)
+    HUB_PORT        Port to listen on (default: 8080)
+    HUB_DB_PATH     SQLite database path (default: /data/hub.db)
+    HUB_API_KEY     API key for agent authentication (optional)
+    HUB_USERNAME    Dashboard username (optional, enables login)
+    HUB_PASSWORD    Dashboard password (required if HUB_USERNAME is set)
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -21,16 +30,41 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print("Error: uvicorn not installed. Install with: pip install galangal-orchestrate[hub]")
         return 1
 
+    from galangal_hub.auth import set_api_key, set_dashboard_credentials
     from galangal_hub.server import create_app
+
+    # Read configuration from environment variables (with CLI args as fallback)
+    host = os.environ.get("HUB_HOST", args.host)
+    port = int(os.environ.get("HUB_PORT", args.port))
+    db_path = os.environ.get("HUB_DB_PATH", args.db)
+    api_key = os.environ.get("HUB_API_KEY")
+    username = os.environ.get("HUB_USERNAME")
+    password = os.environ.get("HUB_PASSWORD")
+
+    # Set API key for agent authentication
+    if api_key:
+        set_api_key(api_key)
+
+    # Set dashboard credentials
+    if username:
+        if not password:
+            print("Error: HUB_PASSWORD is required when HUB_USERNAME is set")
+            return 1
+        set_dashboard_credentials(username, password)
+        print(f"Dashboard authentication enabled (username: {username})")
+    else:
+        print("Dashboard authentication disabled (set HUB_USERNAME and HUB_PASSWORD to enable)")
 
     # Create app with configuration
     app = create_app(
-        db_path=args.db,
+        db_path=db_path,
         static_dir=Path(__file__).parent / "static" if (Path(__file__).parent / "static").exists() else None,
     )
 
-    print(f"Starting Galangal Hub on http://{args.host}:{args.port}")
-    print(f"Database: {args.db}")
+    print(f"Starting Galangal Hub on http://{host}:{port}")
+    print(f"Database: {db_path}")
+    if api_key:
+        print("Agent API key authentication enabled")
     print("Press Ctrl+C to stop")
 
     uvicorn.run(

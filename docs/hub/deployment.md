@@ -198,22 +198,44 @@ services:
 | `HUB_HOST` | `0.0.0.0` | Host to bind to |
 | `HUB_PORT` | `8080` | Port to listen on |
 | `HUB_DB_PATH` | `/data/hub.db` | SQLite database path |
-| `HUB_API_KEY` | (none) | Optional API key for authentication |
+| `HUB_API_KEY` | (none) | API key for agent WebSocket connections |
+| `HUB_USERNAME` | (none) | Dashboard login username |
+| `HUB_PASSWORD` | (none) | Dashboard login password |
 
 ## Authentication
 
-To require API key authentication:
+### Dashboard Login (Username/Password)
+
+To require login for the web dashboard:
+
+```yaml
+environment:
+  - HUB_USERNAME=admin
+  - HUB_PASSWORD=your-secure-password
+```
+
+When enabled:
+- Visiting the dashboard redirects to `/login`
+- Enter username/password to access
+- Session lasts 7 days
+- Logout via `/logout` or the logout link in the nav
+
+### Agent API Key
+
+To require API key for agent connections:
 
 ```bash
 # Generate a key
 openssl rand -hex 32
+```
 
-# Set in docker-compose.yml
+```yaml
+# docker-compose.yml
 environment:
   - HUB_API_KEY=your-generated-key
 ```
 
-Agents must then include the key:
+Agents must include the key:
 
 ```yaml
 # .galangal/config.yaml
@@ -221,6 +243,24 @@ hub:
   enabled: true
   url: ws://your-server:8080/ws/agent
   api_key: your-generated-key
+```
+
+### Full Authentication Example
+
+Both dashboard login and agent API key:
+
+```yaml
+services:
+  galangal-hub:
+    image: ghcr.io/galangal-media/galangal-hub:latest
+    environment:
+      - HUB_USERNAME=admin
+      - HUB_PASSWORD=dashboard-password
+      - HUB_API_KEY=agent-api-key
+    volumes:
+      - galangal-hub-data:/data
+    ports:
+      - "8080:8080"
 ```
 
 ## Maintenance

@@ -62,7 +62,32 @@ The hub server is configured via environment variables:
 | `HUB_HOST` | `0.0.0.0` | Host to bind to |
 | `HUB_PORT` | `8080` | Port to listen on |
 | `HUB_DB_PATH` | `/data/hub.db` | SQLite database path |
-| `HUB_API_KEY` | (none) | API key for authentication |
+| `HUB_API_KEY` | (none) | API key for agent authentication |
+| `HUB_USERNAME` | (none) | Dashboard login username |
+| `HUB_PASSWORD` | (none) | Dashboard login password |
+
+### Dashboard Authentication
+
+To require login for the web dashboard, set both `HUB_USERNAME` and `HUB_PASSWORD`:
+
+```yaml
+services:
+  galangal-hub:
+    image: ghcr.io/galangal-media/galangal-hub:latest
+    environment:
+      - HUB_USERNAME=admin
+      - HUB_PASSWORD=your-secure-password
+      - HUB_API_KEY=agent-key-for-connections
+    volumes:
+      - galangal-hub-data:/data
+```
+
+When enabled:
+- Dashboard routes redirect to `/login` if not authenticated
+- Session lasts 7 days (cookie-based)
+- Logout available via `/logout`
+
+**Note:** `HUB_API_KEY` is for agent WebSocket connections. `HUB_USERNAME`/`HUB_PASSWORD` is for browser dashboard access. They serve different purposes and can be used independently.
 
 ### Docker Compose Example
 
@@ -73,6 +98,8 @@ services:
     environment:
       - HUB_HOST=0.0.0.0
       - HUB_PORT=8080
+      - HUB_USERNAME=admin
+      - HUB_PASSWORD=${HUB_PASSWORD}
       - HUB_API_KEY=${HUB_API_KEY:-}
     volumes:
       - galangal-hub-data:/data
@@ -84,7 +111,9 @@ Create a `.env` file:
 
 ```bash
 HUB_PORT=8080
-HUB_API_KEY=your-secret-key
+HUB_USERNAME=admin
+HUB_PASSWORD=your-secure-password
+HUB_API_KEY=your-agent-api-key
 ```
 
 ## CLI Commands
