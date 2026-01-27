@@ -77,8 +77,54 @@ def create_app(
     return app
 
 
+# Dashboard WebSocket connections for live updates
+_dashboard_connections: list[WebSocket] = []
+
+
+async def notify_dashboards() -> None:
+    """Send refresh notification to all connected dashboards."""
+    disconnected = []
+    for ws in _dashboard_connections:
+        try:
+            await ws.send_text('{"type": "refresh"}')
+        except Exception:
+            disconnected.append(ws)
+
+    # Clean up disconnected
+    for ws in disconnected:
+        if ws in _dashboard_connections:
+            _dashboard_connections.remove(ws)
+
+
 # Default app instance
 app = create_app()
+
+# Register dashboard notification callback
+manager.on_change(notify_dashboards)
+
+
+@app.websocket("/ws/dashboard")
+async def dashboard_websocket(websocket: WebSocket) -> None:
+    """
+    WebSocket endpoint for dashboard live updates.
+
+    This endpoint does NOT require API key authentication - it's for
+    browser dashboards that use session cookies for auth.
+    """
+    await websocket.accept()
+    _dashboard_connections.append(websocket)
+    logger.info("Dashboard WebSocket connected")
+
+    try:
+        while True:
+            # Keep connection alive, wait for messages (or disconnect)
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if websocket in _dashboard_connections:
+            _dashboard_connections.remove(websocket)
+        logger.info("Dashboard WebSocket disconnected")
 
 
 @app.websocket("/ws/agent")
