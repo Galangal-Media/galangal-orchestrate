@@ -543,11 +543,11 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         Returns:
             The selected option string (e.g., "yes", "no", "quit").
         """
-        # Notify hub of the prompt
+        # Notify hub of the prompt (non-fatal if fails)
         options = get_prompt_options(prompt_type)
         self._notify_hub_prompt(prompt_type, message, options)
 
-        # Race local prompt vs remote response
+        # Set up local prompt
         local_future: asyncio.Future[str] = asyncio.Future()
 
         def callback(result: str) -> None:
@@ -556,34 +556,52 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
 
         self.show_prompt(prompt_type, message, callback)
 
-        # Start remote response check
-        remote_task = asyncio.create_task(self._wait_for_remote_response(prompt_type))
+        # Start remote response check (wrapped to handle errors gracefully)
+        remote_task = asyncio.create_task(
+            self._wait_for_remote_response_safe(prompt_type)
+        )
         local_task = asyncio.ensure_future(local_future)
 
-        done, pending = await asyncio.wait(
-            [local_task, remote_task],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
+        try:
+            done, pending = await asyncio.wait(
+                [local_task, remote_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
 
-        # Cancel the loser
-        for task in pending:
-            task.cancel()
+            # Cancel the loser
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            # Clear the hub prompt
+            self._notify_hub_prompt_cleared()
+
+            # Get the result - if remote task won but had an error, fall back to local
+            completed_task = done.pop()
             try:
-                await task
-            except asyncio.CancelledError:
-                pass
+                result = completed_task.result()
+            except Exception:
+                # If the winning task failed, wait for the local prompt
+                if completed_task == remote_task and not local_future.done():
+                    result = await local_future
+                else:
+                    raise
 
-        # Clear the hub prompt
-        self._notify_hub_prompt_cleared()
+            # If remote won, dismiss the local prompt
+            if local_task in pending:
+                self.hide_prompt()
 
-        # Get the result from whichever completed first
-        result = done.pop().result()
+            return result
 
-        # If remote won, dismiss the local prompt
-        if local_task in pending:
-            self.hide_prompt()
-
-        return result
+        except Exception:
+            # If racing fails, fall back to simple local-only prompt
+            self._notify_hub_prompt_cleared()
+            if not local_future.done():
+                return await local_future
+            raise
 
     def _notify_hub_prompt(
         self,
@@ -636,6 +654,21 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         }
         return mapping.get(prompt_type, [])
 
+    async def _wait_for_remote_response_safe(self, prompt_type: PromptType) -> str:
+        """
+        Wait for a remote response from the hub, with error handling.
+
+        This wrapper ensures that hub connection issues don't crash the prompt.
+        If hub is not available, this will wait indefinitely (to be cancelled
+        when local prompt completes).
+        """
+        try:
+            return await self._wait_for_remote_response(prompt_type)
+        except Exception:
+            # If hub checking fails, wait forever (will be cancelled by local prompt)
+            await asyncio.Event().wait()
+            return ""  # Never reached, but keeps type checker happy
+
     async def _wait_for_remote_response(self, prompt_type: PromptType) -> str:
         """Wait for a remote response from the hub."""
         from galangal.hub.action_handler import get_action_handler
@@ -643,40 +676,44 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         handler = get_action_handler()
 
         while True:
-            response = handler.peek_pending_response()
-            if response and response.prompt_type == prompt_type.value:
-                # Consume the response
-                handler.get_pending_response()
-                self.add_activity(f"Remote response received from hub: {response.result}", "🌐")
+            try:
+                response = handler.peek_pending_response()
+                if response and response.prompt_type == prompt_type.value:
+                    # Consume the response
+                    handler.get_pending_response()
+                    self.add_activity(f"Remote response received from hub: {response.result}", "🌐")
 
-                # Store text_input in a place the caller can access if needed
-                if response.text_input:
-                    self._pending_remote_action = {
-                        "text_input": response.text_input,
-                    }
+                    # Store text_input in a place the caller can access if needed
+                    if response.text_input:
+                        self._pending_remote_action = {
+                            "text_input": response.text_input,
+                        }
 
-                return response.result
+                    return response.result
 
-            # Also check for legacy approve/reject actions for backwards compatibility
-            action = handler.peek_pending_action()
-            if action and action.task_name == self.task_name:
-                from galangal.hub.action_handler import ActionType
+                # Also check for legacy approve/reject actions for backwards compatibility
+                action = handler.peek_pending_action()
+                if action and action.task_name == self.task_name:
+                    from galangal.hub.action_handler import ActionType
 
-                if action.action_type == ActionType.APPROVE:
-                    handler.get_pending_action()
-                    self.add_activity("Remote approval received from hub", "🌐")
-                    return "yes"
-                elif action.action_type == ActionType.REJECT:
-                    handler.get_pending_action()
-                    reason = action.data.get("reason", "")
-                    self.add_activity(f"Remote rejection from hub: {reason}", "🌐")
-                    if reason:
-                        self._pending_remote_action = {"text_input": reason}
-                    return "no"
-                elif action.action_type == ActionType.SKIP:
-                    handler.get_pending_action()
-                    self.add_activity("Remote skip received from hub", "🌐")
-                    return "skip"
+                    if action.action_type == ActionType.APPROVE:
+                        handler.get_pending_action()
+                        self.add_activity("Remote approval received from hub", "🌐")
+                        return "yes"
+                    elif action.action_type == ActionType.REJECT:
+                        handler.get_pending_action()
+                        reason = action.data.get("reason", "")
+                        self.add_activity(f"Remote rejection from hub: {reason}", "🌐")
+                        if reason:
+                            self._pending_remote_action = {"text_input": reason}
+                        return "no"
+                    elif action.action_type == ActionType.SKIP:
+                        handler.get_pending_action()
+                        self.add_activity("Remote skip received from hub", "🌐")
+                        return "skip"
+            except Exception:
+                # If there's an error checking, just continue polling
+                pass
 
             await asyncio.sleep(0.3)  # Poll every 300ms
 
