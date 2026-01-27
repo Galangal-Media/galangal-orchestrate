@@ -40,22 +40,24 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install runtime dependencies (curl for health checks)
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    gosu \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --shell /bin/bash appuser
+    && useradd --create-home --shell /bin/bash --uid 1000 appuser
 
 # Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /app/src/galangal_hub /app/galangal_hub
 
-# Create data directory
-RUN mkdir -p /data && chown appuser:appuser /data
+# Copy entrypoint script
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Switch to non-root user
-USER appuser
+# Create data directory (will be overwritten by volume mount)
+RUN mkdir -p /data && chown appuser:appuser /data
 
 # Expose the default port
 EXPOSE 8080
@@ -71,5 +73,5 @@ ENV HUB_DB_PATH=/data/hub.db \
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:${HUB_PORT}/ || exit 1
 
-# Run the hub server
-CMD ["python", "-m", "galangal_hub.cli", "serve"]
+# Run as root initially, entrypoint will switch to appuser after fixing permissions
+ENTRYPOINT ["/entrypoint.sh"]
