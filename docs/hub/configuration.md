@@ -118,17 +118,103 @@ HUB_API_KEY=your-agent-api-key
 
 ## CLI Commands
 
-Check your configuration:
+### galangal hub status
+
+Show current hub configuration:
 
 ```bash
-# Show current hub config
 galangal hub status
+```
 
-# Test connection
+Output:
+```
+Hub Configuration
+
+Enabled       Yes
+URL           ws://localhost:8080/ws/agent
+API Key       ****
+Heartbeat     30s
+Agent Name    <hostname>
+
+Hub is enabled.
+Use galangal hub test to verify the connection.
+```
+
+### galangal hub test
+
+Test connection to the hub server with detailed diagnostics:
+
+```bash
 galangal hub test
+```
 
-# Show server URLs
+This command performs step-by-step testing to identify connection problems:
+
+1. **websockets module** - Checks the required library is installed
+2. **DNS resolution** - Verifies the hostname can be resolved
+3. **TCP connection** - Tests that the server is reachable
+4. **TLS handshake** - For `wss://` URLs, validates SSL/TLS
+5. **WebSocket connection** - Tests the WebSocket upgrade
+6. **Authentication** - Verifies API key is accepted
+7. **Agent registration** - Confirms the hub accepts the agent
+
+**Success output:**
+```
+Testing connection to hub
+URL: ws://192.168.1.100:8080/ws/agent
+
+1. Checking websockets module...
+✓ websockets module available
+2. Resolving hostname 192.168.1.100...
+✓ DNS resolved to 192.168.1.100
+3. Testing TCP connection to 192.168.1.100:8080...
+✓ TCP connection successful
+4. Skipping TLS check (using ws://)
+5. Testing WebSocket connection and authentication...
+✓ WebSocket connection successful
+✓ Agent registration successful
+
+All tests passed!
+
+Agent ID: a1b2c3d4-...
+Project: my-project
+API Key: ****configured
+```
+
+**Failure example (authentication):**
+```
+5. Testing WebSocket connection and authentication...
+✗ Authentication failed (403 Forbidden) - check API key
+
+Troubleshooting hints:
+  • Check that HUB_API_KEY on server matches api_key in config
+  • Verify api_key is set in .galangal/config.yaml:
+    hub:
+      api_key: your-api-key
+```
+
+**Failure example (connection refused):**
+```
+3. Testing TCP connection to 192.168.1.100:8080...
+✗ TCP connection refused
+  Hub server may not be running on 192.168.1.100:8080
+```
+
+### galangal hub info
+
+Show hub server URLs:
+
+```bash
 galangal hub info
+```
+
+Output:
+```
+Hub URL: http://192.168.1.100:8080
+
+Dashboard: http://192.168.1.100:8080/
+API: http://192.168.1.100:8080/api/
+WebSocket: ws://192.168.1.100:8080/ws/agent
 ```
 
 ## Connection Behavior

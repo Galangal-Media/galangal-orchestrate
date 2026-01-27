@@ -292,6 +292,23 @@ curl http://localhost:8080/
 
 ## Troubleshooting
 
+### Test Connection from Agent
+
+Run the diagnostic command from your development machine:
+
+```bash
+galangal hub test
+```
+
+This performs step-by-step testing and provides specific error messages:
+- DNS resolution
+- TCP connectivity
+- TLS handshake (for wss://)
+- WebSocket authentication
+- Agent registration
+
+See [Configuration - CLI Commands](configuration.md#galangal-hub-test) for detailed output examples.
+
 ### Container Won't Start
 
 ```bash
@@ -300,9 +317,20 @@ docker logs galangal-hub
 
 ### Agents Can't Connect
 
-1. Check firewall allows port 8080
-2. Verify WebSocket URL includes `/ws/agent`
-3. Check API key matches (if enabled)
+1. Run `galangal hub test` to identify the issue
+2. Check firewall allows the hub port (default 8080)
+3. Verify WebSocket URL includes `/ws/agent`
+4. Check API key matches (if `HUB_API_KEY` is set on server)
+
+**Common errors from `galangal hub test`:**
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| DNS resolution failed | Hostname not reachable | Check hostname/IP is correct |
+| TCP connection refused | Hub not running | Start the container |
+| TCP connection timed out | Firewall blocking | Open port in firewall |
+| 403 Forbidden | API key mismatch | Check `api_key` matches `HUB_API_KEY` |
+| 404 Not Found | Wrong URL path | Use `/ws/agent` path |
 
 ### Database Locked
 

@@ -77,9 +77,33 @@ Open `http://your-server:8080` in your browser.
 # Check hub connection status
 galangal hub status
 
-# Test connection to hub
+# Test connection to hub (with detailed diagnostics)
 galangal hub test
 
 # Show hub server URLs
 galangal hub info
 ```
+
+### Connection Testing
+
+The `galangal hub test` command performs step-by-step diagnostics:
+
+```
+Testing connection to hub
+URL: ws://192.168.1.100:8080/ws/agent
+
+1. Checking websockets module...
+✓ websockets module available
+2. Resolving hostname 192.168.1.100...
+✓ DNS resolved to 192.168.1.100
+3. Testing TCP connection to 192.168.1.100:8080...
+✓ TCP connection successful
+4. Skipping TLS check (using ws://)
+5. Testing WebSocket connection and authentication...
+✓ WebSocket connection successful
+✓ Agent registration successful
+
+All tests passed!
+```
+
+If something fails, the command provides specific troubleshooting hints.
