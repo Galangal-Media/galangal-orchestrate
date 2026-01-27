@@ -11,17 +11,24 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
 from fastapi.staticfiles import StaticFiles
 
 from galangal_hub.auth import verify_websocket_auth
 from galangal_hub.connection import manager
-from galangal_hub.models import AgentInfo, MessageType, TaskState, WorkflowEvent
+from galangal_hub.models import (
+    AgentInfo,
+    MessageType,
+    PromptData,
+    PromptOption,
+    TaskState,
+    WorkflowEvent,
+)
 from galangal_hub.storage import storage
 
 logger = logging.getLogger(__name__)
@@ -226,6 +233,54 @@ async def agent_websocket(websocket: WebSocket) -> None:
                 await manager.update_heartbeat(agent_id)
                 await storage.update_agent_seen(agent_id)
 
+            elif msg_type == MessageType.PROMPT:
+                # Must be registered first
+                if not registered_agent_id:
+                    logger.warning("PROMPT received before registration")
+                    continue
+
+                agent_id = registered_agent_id
+
+                # Check if prompt is being cleared
+                if payload.get("prompt_type") is None:
+                    await manager.clear_prompt(agent_id)
+                    logger.info(f"Agent {agent_id}: prompt cleared")
+                else:
+                    # Parse prompt data
+                    try:
+                        options = [
+                            PromptOption(
+                                key=opt.get("key", ""),
+                                label=opt.get("label", ""),
+                                result=opt.get("result", ""),
+                                color=opt.get("color"),
+                            )
+                            for opt in payload.get("options", [])
+                        ]
+                        prompt = PromptData(
+                            prompt_type=payload["prompt_type"],
+                            message=payload.get("message", ""),
+                            options=options,
+                            artifacts=payload.get("artifacts", []),
+                            context=payload.get("context", {}),
+                        )
+                        await manager.update_prompt(agent_id, prompt)
+                        logger.info(f"Agent {agent_id}: prompt updated - {prompt.prompt_type}")
+                    except (KeyError, TypeError, ValueError) as e:
+                        logger.warning(f"Invalid PROMPT data: {e}")
+
+            elif msg_type == MessageType.ARTIFACTS:
+                # Must be registered first
+                if not registered_agent_id:
+                    logger.warning("ARTIFACTS received before registration")
+                    continue
+
+                agent_id = registered_agent_id
+                artifacts = payload.get("artifacts", {})
+                if artifacts and isinstance(artifacts, dict):
+                    await manager.update_artifacts(agent_id, artifacts)
+                    logger.info(f"Agent {agent_id}: artifacts updated - {list(artifacts.keys())}")
+
     except WebSocketDisconnect:
         logger.info(f"Agent disconnected: {agent_id}")
     except Exception as e:
@@ -264,8 +319,8 @@ def create_app(
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     # Register HTTP routes
-    from galangal_hub.api import agents, tasks, actions
     from galangal_hub import views
+    from galangal_hub.api import actions, agents, tasks
 
     app.include_router(agents.router)
     app.include_router(tasks.router)

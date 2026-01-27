@@ -532,6 +532,10 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         for callbacks and threading.Event coordination. Use this from async
         workflow code instead of the callback-based version.
 
+        Also notifies the hub of the prompt and races local input against
+        remote responses, allowing users to respond from either the TUI
+        or the Hub UI.
+
         Args:
             prompt_type: Type of prompt determining available options.
             message: Message to display in the modal.
@@ -539,15 +543,142 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         Returns:
             The selected option string (e.g., "yes", "no", "quit").
         """
-        future: asyncio.Future[str] = asyncio.Future()
+        # Notify hub of the prompt
+        options = get_prompt_options(prompt_type)
+        self._notify_hub_prompt(prompt_type, message, options)
+
+        # Race local prompt vs remote response
+        local_future: asyncio.Future[str] = asyncio.Future()
 
         def callback(result: str) -> None:
-            if not future.done():
-                # Callback runs in main thread, so set result directly
-                future.set_result(result)
+            if not local_future.done():
+                local_future.set_result(result)
 
         self.show_prompt(prompt_type, message, callback)
-        return await future
+
+        # Start remote response check
+        remote_task = asyncio.create_task(self._wait_for_remote_response(prompt_type))
+        local_task = asyncio.ensure_future(local_future)
+
+        done, pending = await asyncio.wait(
+            [local_task, remote_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        # Cancel the loser
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        # Clear the hub prompt
+        self._notify_hub_prompt_cleared()
+
+        # Get the result from whichever completed first
+        result = done.pop().result()
+
+        # If remote won, dismiss the local prompt
+        if local_task in pending:
+            self.hide_prompt()
+
+        return result
+
+    def _notify_hub_prompt(
+        self,
+        prompt_type: PromptType,
+        message: str,
+        options: list,
+    ) -> None:
+        """Notify hub of a prompt being displayed."""
+        try:
+            from galangal.hub.hooks import notify_prompt
+
+            # Determine relevant artifacts based on prompt type
+            artifacts = self._get_artifacts_for_prompt(prompt_type)
+
+            # Build context
+            context = {
+                "stage": self.current_stage,
+                "task_name": self.task_name,
+            }
+
+            notify_prompt(
+                prompt_type=prompt_type.value,
+                message=message,
+                options=options,
+                artifacts=artifacts,
+                context=context,
+            )
+        except Exception:
+            # Hub notification failure is non-fatal
+            pass
+
+    def _notify_hub_prompt_cleared(self) -> None:
+        """Notify hub that the prompt was answered/cleared."""
+        try:
+            from galangal.hub.hooks import notify_prompt_cleared
+
+            notify_prompt_cleared()
+        except Exception:
+            pass
+
+    def _get_artifacts_for_prompt(self, prompt_type: PromptType) -> list[str]:
+        """Get list of relevant artifact names for a prompt type."""
+        mapping = {
+            PromptType.PLAN_APPROVAL: ["SPEC.md", "PLAN.md", "STAGE_PLAN.md"],
+            PromptType.DESIGN_APPROVAL: ["DESIGN.md"],
+            PromptType.COMPLETION: ["SUMMARY.md"],
+            PromptType.STAGE_FAILURE: ["VALIDATION_REPORT.md"],
+            PromptType.USER_DECISION: ["QA_REPORT.md", "TEST_REPORT.md"],
+            PromptType.PREFLIGHT_RETRY: ["PREFLIGHT_REPORT.md"],
+        }
+        return mapping.get(prompt_type, [])
+
+    async def _wait_for_remote_response(self, prompt_type: PromptType) -> str:
+        """Wait for a remote response from the hub."""
+        from galangal.hub.action_handler import get_action_handler
+
+        handler = get_action_handler()
+
+        while True:
+            response = handler.peek_pending_response()
+            if response and response.prompt_type == prompt_type.value:
+                # Consume the response
+                handler.get_pending_response()
+                self.add_activity(f"Remote response received from hub: {response.result}", "🌐")
+
+                # Store text_input in a place the caller can access if needed
+                if response.text_input:
+                    self._pending_remote_action = {
+                        "text_input": response.text_input,
+                    }
+
+                return response.result
+
+            # Also check for legacy approve/reject actions for backwards compatibility
+            action = handler.peek_pending_action()
+            if action and action.task_name == self.task_name:
+                from galangal.hub.action_handler import ActionType
+
+                if action.action_type == ActionType.APPROVE:
+                    handler.get_pending_action()
+                    self.add_activity("Remote approval received from hub", "🌐")
+                    return "yes"
+                elif action.action_type == ActionType.REJECT:
+                    handler.get_pending_action()
+                    reason = action.data.get("reason", "")
+                    self.add_activity(f"Remote rejection from hub: {reason}", "🌐")
+                    if reason:
+                        self._pending_remote_action = {"text_input": reason}
+                    return "no"
+                elif action.action_type == ActionType.SKIP:
+                    handler.get_pending_action()
+                    self.add_activity("Remote skip received from hub", "🌐")
+                    return "skip"
+
+            await asyncio.sleep(0.3)  # Poll every 300ms
 
     async def text_input_async(self, label: str, default: str = "") -> str | None:
         """

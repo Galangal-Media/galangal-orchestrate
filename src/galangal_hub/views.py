@@ -5,10 +5,9 @@ Uses Jinja2 templates with HTMX for interactivity.
 """
 
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Form, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from galangal_hub.auth import (
@@ -221,4 +220,23 @@ async def agent_task_partial(request: Request, agent_id: str) -> Response:
     return templates.TemplateResponse(
         "partials/task_card.html",
         {"request": request, "agent": agent},
+    )
+
+
+@router.get("/partials/agent/{agent_id}/prompt", response_model=None)
+async def agent_prompt_partial(request: Request, agent_id: str) -> Response:
+    """Partial view of agent's current prompt for HTMX updates."""
+    if not await check_auth(request):
+        return RedirectResponse(url="/login", status_code=302)
+
+    agent = manager.get_agent(agent_id)
+    task_name = agent.task.task_name if agent and agent.task else ""
+    return templates.TemplateResponse(
+        "partials/prompt_card.html",
+        {
+            "request": request,
+            "prompt": agent.current_prompt if agent else None,
+            "agent_id": agent_id,
+            "task_name": task_name,
+        },
     )

@@ -180,3 +180,88 @@ async def _send_event(event_type: EventType, data: dict) -> None:
     client = get_hub_client()
     if client:
         await client.send_event(event_type, data)
+
+
+def notify_prompt(
+    prompt_type: str,
+    message: str,
+    options: list,
+    artifacts: list[str] | None = None,
+    context: dict | None = None,
+) -> None:
+    """
+    Notify hub that a prompt is being displayed.
+
+    Args:
+        prompt_type: Type of prompt (e.g., "PLAN_APPROVAL", "COMPLETION").
+        message: Message being displayed.
+        options: List of PromptOption objects or dicts.
+        artifacts: List of artifact names relevant to this prompt.
+        context: Optional additional context.
+    """
+    client = get_hub_client()
+    if client and client.connected:
+        # Convert PromptOption objects to dicts if needed
+        option_dicts = []
+        for opt in options:
+            if hasattr(opt, "key"):
+                # It's a PromptOption object
+                option_dicts.append({
+                    "key": opt.key,
+                    "label": opt.label,
+                    "result": opt.result,
+                    "color": getattr(opt, "color", None),
+                })
+            else:
+                # It's already a dict
+                option_dicts.append(opt)
+
+        asyncio.create_task(
+            _send_prompt(prompt_type, message, option_dicts, artifacts, context)
+        )
+
+
+async def _send_prompt(
+    prompt_type: str,
+    message: str,
+    options: list[dict],
+    artifacts: list[str] | None,
+    context: dict | None,
+) -> None:
+    """Send prompt to hub."""
+    client = get_hub_client()
+    if client:
+        await client.send_prompt(prompt_type, message, options, artifacts, context)
+
+
+def notify_prompt_cleared() -> None:
+    """Notify hub that the current prompt has been answered/cleared."""
+    client = get_hub_client()
+    if client and client.connected:
+        asyncio.create_task(_clear_prompt())
+
+
+async def _clear_prompt() -> None:
+    """Clear prompt on hub."""
+    client = get_hub_client()
+    if client:
+        await client.clear_prompt()
+
+
+def notify_artifacts_updated(artifacts: dict[str, str]) -> None:
+    """
+    Notify hub of artifact content updates.
+
+    Args:
+        artifacts: Dict mapping artifact names to content.
+    """
+    client = get_hub_client()
+    if client and client.connected:
+        asyncio.create_task(_send_artifacts(artifacts))
+
+
+async def _send_artifacts(artifacts: dict[str, str]) -> None:
+    """Send artifacts to hub."""
+    client = get_hub_client()
+    if client:
+        await client.send_artifacts(artifacts)

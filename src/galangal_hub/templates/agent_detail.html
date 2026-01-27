@@ -47,9 +47,22 @@
         </div>
     </div>
 
+    <!-- Active Prompt -->
+    {% if agent.current_prompt %}
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-6" id="active-prompt"
+         hx-get="/partials/agent/{{ agent.agent.agent_id }}/prompt" hx-trigger="every 3s" hx-swap="innerHTML">
+        <h2 class="text-lg font-semibold mb-4">Active Prompt</h2>
+        {% set prompt = agent.current_prompt %}
+        {% set agent_id = agent.agent.agent_id %}
+        {% set task_name = agent.task.task_name if agent.task else '' %}
+        {% include "partials/prompt_card.html" %}
+    </div>
+    {% endif %}
+
     <!-- Current Task -->
     {% if agent.task %}
-    <div class="bg-gray-800 border border-gray-700 rounded-lg p-6" id="current-task" hx-get="/partials/agent/{{ agent.agent.agent_id }}/task" hx-trigger="every 5s" hx-swap="innerHTML">
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-6" id="current-task"
+         hx-get="/partials/agent/{{ agent.agent.agent_id }}/task" hx-trigger="every 5s" hx-swap="innerHTML">
         <h2 class="text-lg font-semibold mb-4">Current Task</h2>
         <a href="/task/{{ agent.agent.agent_id }}/{{ agent.task.task_name }}" class="block hover:bg-gray-750 -m-2 p-2 rounded overflow-hidden">
             <div class="flex items-center justify-between gap-4">
@@ -62,7 +75,7 @@
                     <div class="text-xs text-gray-500">Attempt {{ agent.task.attempt }}</div>
                 </div>
             </div>
-            {% if agent.task.awaiting_approval %}
+            {% if agent.task.awaiting_approval and not agent.current_prompt %}
             <div class="mt-3 flex items-center justify-between">
                 <div class="flex items-center">
                     <span class="status-dot status-attention mr-2"></span>
@@ -86,6 +99,26 @@
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
         <h2 class="text-lg font-semibold mb-2">Current Task</h2>
         <p class="text-gray-500">No active task</p>
+    </div>
+    {% endif %}
+
+    <!-- Artifacts -->
+    {% if agent.artifacts %}
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
+        <h2 class="text-lg font-semibold mb-4">Artifacts</h2>
+        <div class="space-y-2">
+            {% for name, content in agent.artifacts.items() %}
+            <details class="bg-gray-900 rounded-lg group">
+                <summary class="p-3 cursor-pointer flex items-center justify-between hover:bg-gray-850 rounded-lg">
+                    <span class="font-medium text-purple-400">{{ name }}</span>
+                    <span class="text-xs text-gray-500">{{ content|length }} chars</span>
+                </summary>
+                <div class="p-4 border-t border-gray-700">
+                    <pre class="text-sm text-gray-300 whitespace-pre-wrap overflow-x-auto max-h-96">{{ content }}</pre>
+                </div>
+            </details>
+            {% endfor %}
+        </div>
     </div>
     {% endif %}
 

@@ -7,9 +7,10 @@ to execute them.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 
 class ActionType(str, Enum):
@@ -20,6 +21,7 @@ class ActionType(str, Enum):
     SKIP = "skip"
     ROLLBACK = "rollback"
     INTERRUPT = "interrupt"
+    RESPONSE = "response"  # Response to any prompt (not just approval)
 
 
 @dataclass
@@ -31,12 +33,31 @@ class PendingAction:
     data: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "PendingAction":
+    def from_dict(cls, d: dict[str, Any]) -> PendingAction:
         """Create from dictionary (hub message payload)."""
         return cls(
             action_type=ActionType(d["action_type"]),
             task_name=d["task_name"],
             data=d.get("data", {}),
+        )
+
+
+@dataclass
+class PendingResponse:
+    """A pending response to a prompt from the hub."""
+
+    prompt_type: str  # The prompt type this responds to
+    result: str  # The selected option result (e.g., "yes", "no", "quit")
+    text_input: str | None = None  # Optional text input for prompts that need it
+
+    @classmethod
+    def from_action(cls, action: PendingAction) -> PendingResponse:
+        """Create from a RESPONSE action."""
+        data = action.data
+        return cls(
+            prompt_type=data.get("prompt_type", ""),
+            result=data.get("result", ""),
+            text_input=data.get("text_input"),
         )
 
 
@@ -50,12 +71,19 @@ class ActionHandler:
 
     def __init__(self) -> None:
         self._pending: PendingAction | None = None
+        self._pending_response: PendingResponse | None = None
         self._callbacks: list[Callable[[PendingAction], None]] = []
+        self._response_callbacks: list[Callable[[PendingResponse], None]] = []
 
     @property
     def has_pending_action(self) -> bool:
         """Check if there is a pending action."""
         return self._pending is not None
+
+    @property
+    def has_pending_response(self) -> bool:
+        """Check if there is a pending response."""
+        return self._pending_response is not None
 
     def get_pending_action(self) -> PendingAction | None:
         """Get and clear the pending action."""
@@ -66,6 +94,16 @@ class ActionHandler:
     def peek_pending_action(self) -> PendingAction | None:
         """Get the pending action without clearing it."""
         return self._pending
+
+    def get_pending_response(self) -> PendingResponse | None:
+        """Get and clear the pending response."""
+        response = self._pending_response
+        self._pending_response = None
+        return response
+
+    def peek_pending_response(self) -> PendingResponse | None:
+        """Get the pending response without clearing it."""
+        return self._pending_response
 
     def handle_hub_action(self, payload: dict[str, Any]) -> None:
         """
@@ -78,14 +116,27 @@ class ActionHandler:
         """
         try:
             action = PendingAction.from_dict(payload)
-            self._pending = action
 
-            # Notify callbacks
-            for callback in self._callbacks:
-                try:
-                    callback(action)
-                except Exception:
-                    pass
+            # Handle RESPONSE action type specially
+            if action.action_type == ActionType.RESPONSE:
+                response = PendingResponse.from_action(action)
+                self._pending_response = response
+
+                # Notify response callbacks
+                for callback in self._response_callbacks:
+                    try:
+                        callback(response)
+                    except Exception:
+                        pass
+            else:
+                self._pending = action
+
+                # Notify action callbacks
+                for callback in self._callbacks:
+                    try:
+                        callback(action)
+                    except Exception:
+                        pass
 
         except (KeyError, ValueError) as e:
             # Invalid action payload - log and ignore
@@ -106,9 +157,22 @@ class ActionHandler:
         """
         self._callbacks.append(callback)
 
+    def on_response(self, callback: Callable[[PendingResponse], None]) -> None:
+        """
+        Register a callback for when a response is received.
+
+        The callback is called immediately when a response arrives,
+        before the TUI polls for it.
+
+        Args:
+            callback: Function to call with the response.
+        """
+        self._response_callbacks.append(callback)
+
     def clear(self) -> None:
-        """Clear any pending action."""
+        """Clear any pending action and response."""
         self._pending = None
+        self._pending_response = None
 
 
 # Global action handler instance

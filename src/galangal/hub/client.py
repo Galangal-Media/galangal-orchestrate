@@ -14,11 +14,12 @@ import asyncio
 import json
 import platform
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from galangal.core.state import WorkflowState
@@ -33,6 +34,8 @@ class MessageType(str, Enum):
     STATE_UPDATE = "state_update"
     EVENT = "event"
     HEARTBEAT = "heartbeat"
+    PROMPT = "prompt"  # Send current prompt with options
+    ARTIFACTS = "artifacts"  # Send artifact contents
 
     # Hub -> Agent
     ACTION = "action"
@@ -216,6 +219,77 @@ class HubClient:
                 "event_type": event_type.value,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data": data or {},
+            },
+        )
+
+    async def send_prompt(
+        self,
+        prompt_type: str,
+        message: str,
+        options: list[dict[str, Any]],
+        artifacts: list[str] | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        Send current prompt to hub.
+
+        This notifies the hub that a prompt is being displayed to the user,
+        allowing remote users to respond via the hub UI.
+
+        Args:
+            prompt_type: Type of prompt (e.g., "PLAN_APPROVAL", "COMPLETION").
+            message: Message being displayed.
+            options: List of option dicts with key, label, result fields.
+            artifacts: List of artifact names relevant to this prompt.
+            context: Optional additional context (stage, task_name, etc.).
+        """
+        if not self._connected:
+            return
+
+        await self._send(
+            MessageType.PROMPT,
+            {
+                "prompt_type": prompt_type,
+                "message": message,
+                "options": options,
+                "artifacts": artifacts or [],
+                "context": context or {},
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    async def send_artifacts(self, artifacts: dict[str, str]) -> None:
+        """
+        Send artifact contents to hub.
+
+        Args:
+            artifacts: Dict mapping artifact names to content.
+        """
+        if not self._connected:
+            return
+
+        await self._send(
+            MessageType.ARTIFACTS,
+            {
+                "artifacts": artifacts,
+            },
+        )
+
+    async def clear_prompt(self) -> None:
+        """
+        Notify hub that the current prompt has been cleared/answered.
+        """
+        if not self._connected:
+            return
+
+        await self._send(
+            MessageType.PROMPT,
+            {
+                "prompt_type": None,  # None indicates prompt cleared
+                "message": "",
+                "options": [],
+                "artifacts": [],
+                "context": {},
             },
         )
 

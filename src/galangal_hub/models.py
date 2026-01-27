@@ -17,6 +17,8 @@ class MessageType(str, Enum):
     STATE_UPDATE = "state_update"
     EVENT = "event"
     HEARTBEAT = "heartbeat"
+    PROMPT = "prompt"  # Send current prompt with options
+    ARTIFACTS = "artifacts"  # Send artifact contents
 
     # Hub -> Agent
     ACTION = "action"
@@ -43,6 +45,7 @@ class ActionType(str, Enum):
     SKIP = "skip"
     ROLLBACK = "rollback"
     INTERRUPT = "interrupt"
+    RESPONSE = "response"  # Response to any prompt (not just approval)
 
 
 class AgentInfo(BaseModel):
@@ -101,9 +104,31 @@ class HubAction(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+class PromptOption(BaseModel):
+    """An option for a prompt."""
+
+    key: str  # Keyboard shortcut (e.g., "1", "2")
+    label: str  # Display label (e.g., "Approve", "Reject")
+    result: str  # Result value to return (e.g., "yes", "no")
+    color: str | None = None  # Optional color for styling
+
+
+class PromptData(BaseModel):
+    """Data about a prompt being displayed to the user."""
+
+    prompt_type: str  # PromptType enum value
+    message: str  # Display message
+    options: list[PromptOption]  # Available choices
+    artifacts: list[str] = Field(default_factory=list)  # Relevant artifact names
+    context: dict[str, Any] = Field(default_factory=dict)  # Optional context
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class AgentWithState(BaseModel):
     """Agent info combined with current task state."""
 
     agent: AgentInfo
     task: TaskState | None = None
     connected: bool = True
+    current_prompt: PromptData | None = None  # Currently displayed prompt
+    artifacts: dict[str, str] = Field(default_factory=dict)  # Artifact name -> content

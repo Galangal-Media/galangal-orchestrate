@@ -1,0 +1,81 @@
+{% if prompt %}
+<div class="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4" id="prompt-card">
+    <div class="flex items-start justify-between mb-3">
+        <div class="flex items-center">
+            <span class="status-dot status-attention mr-2"></span>
+            <span class="text-yellow-400 font-semibold text-sm uppercase">{{ prompt.prompt_type }}</span>
+        </div>
+        <span class="text-xs text-gray-500">{{ prompt.timestamp.strftime('%H:%M:%S') if prompt.timestamp else '' }}</span>
+    </div>
+
+    <div class="mb-4">
+        <pre class="text-sm text-gray-300 whitespace-pre-wrap font-sans">{{ prompt.message[:1000] }}{% if prompt.message|length > 1000 %}...{% endif %}</pre>
+    </div>
+
+    <div class="flex flex-wrap gap-2">
+        {% for option in prompt.options %}
+        <button onclick="respondToPrompt('{{ agent_id }}', '{{ task_name }}', '{{ prompt.prompt_type }}', '{{ option.result }}')"
+                class="px-4 py-2 rounded text-sm font-medium transition-colors
+                    {% if option.result == 'yes' or option.result == 'approve' %}
+                    bg-green-600 hover:bg-green-700 text-white
+                    {% elif option.result == 'no' or option.result == 'reject' %}
+                    bg-red-600 hover:bg-red-700 text-white
+                    {% elif option.result == 'quit' %}
+                    bg-gray-600 hover:bg-gray-700 text-white
+                    {% else %}
+                    bg-blue-600 hover:bg-blue-700 text-white
+                    {% endif %}">
+            <span class="mr-1 opacity-70">{{ option.key }}.</span>{{ option.label }}
+        </button>
+        {% endfor %}
+    </div>
+
+    {% if prompt.artifacts %}
+    <div class="mt-4 pt-4 border-t border-yellow-800">
+        <div class="text-xs text-gray-500 uppercase mb-2">Relevant Artifacts</div>
+        <div class="flex flex-wrap gap-2">
+            {% for artifact in prompt.artifacts %}
+            <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400">{{ artifact }}</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+async function respondToPrompt(agentId, taskName, promptType, result) {
+    // Check if this prompt type might need text input
+    const needsText = ['reject', 'no', 'fix_in_dev'].includes(result);
+
+    let textInput = null;
+    if (needsText) {
+        textInput = prompt('Enter reason/feedback (optional):');
+        if (textInput === null) return; // Cancelled
+    }
+
+    try {
+        const response = await fetch(`/api/actions/${agentId}/${taskName}/respond`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt_type: promptType,
+                result: result,
+                text_input: textInput
+            })
+        });
+
+        if (response.ok) {
+            // Refresh the page to show updated state
+            location.reload();
+        } else {
+            const data = await response.json();
+            alert('Failed to respond: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+</script>
+{% else %}
+<div class="text-gray-500 text-sm">No active prompt</div>
+{% endif %}

@@ -36,6 +36,14 @@ class RollbackRequest(BaseModel):
     feedback: str | None = None
 
 
+class PromptResponse(BaseModel):
+    """Request to respond to any prompt."""
+
+    prompt_type: str  # The prompt type being responded to
+    result: str  # The selected option result (e.g., "yes", "no", "quit")
+    text_input: str | None = None  # Optional text input for prompts that need it
+
+
 @router.post("/{agent_id}/{task_name}/approve")
 async def approve_task(
     agent_id: str,
@@ -218,3 +226,64 @@ async def interrupt_task(
         raise HTTPException(status_code=500, detail="Failed to send action to agent")
 
     return {"status": "interrupting", "task_name": task_name}
+
+
+@router.post("/{agent_id}/{task_name}/respond")
+async def respond_to_prompt(
+    agent_id: str,
+    task_name: str,
+    request: PromptResponse,
+) -> dict:
+    """
+    Respond to any prompt being displayed by an agent.
+
+    This is a general-purpose endpoint that can respond to any prompt type,
+    not just approval gates. Use this when the agent has an active prompt.
+
+    Args:
+        agent_id: Target agent.
+        task_name: Task to respond to.
+        request: The response with prompt_type, result, and optional text_input.
+    """
+    agent = manager.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not agent.connected:
+        raise HTTPException(status_code=400, detail="Agent not connected")
+    if not agent.task or agent.task.task_name != task_name:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Check if there's an active prompt
+    if not agent.current_prompt:
+        raise HTTPException(status_code=400, detail="No active prompt")
+
+    # Optionally validate that the prompt_type matches
+    if agent.current_prompt.prompt_type != request.prompt_type:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Prompt type mismatch: expected {agent.current_prompt.prompt_type}, got {request.prompt_type}"
+        )
+
+    action = HubAction(
+        action_type=ActionType.RESPONSE,
+        task_name=task_name,
+        data={
+            "prompt_type": request.prompt_type,
+            "result": request.result,
+            "text_input": request.text_input,
+        },
+    )
+
+    success = await manager.send_to_agent(agent_id, action)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send response to agent")
+
+    # Clear the prompt on the hub side since we've responded
+    await manager.clear_prompt(agent_id)
+
+    return {
+        "status": "responded",
+        "task_name": task_name,
+        "prompt_type": request.prompt_type,
+        "result": request.result,
+    }

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from fastapi import WebSocket
 
-from galangal_hub.models import AgentInfo, AgentWithState, HubAction, TaskState
+from galangal_hub.models import AgentInfo, AgentWithState, HubAction, PromptData, TaskState
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,8 @@ class ConnectedAgent:
     info: AgentInfo
     task: TaskState | None = None
     connected: bool = True
+    current_prompt: PromptData | None = None  # Currently displayed prompt
+    artifacts: dict[str, str] = field(default_factory=dict)  # Artifact name -> content
 
 
 @dataclass
@@ -103,6 +105,41 @@ class ConnectionManager:
             if agent_id in self._agents:
                 self._agents[agent_id].info.last_seen = datetime.now(timezone.utc)
 
+    async def update_prompt(self, agent_id: str, prompt: PromptData | None) -> None:
+        """
+        Update the current prompt for an agent.
+
+        Args:
+            agent_id: Agent ID.
+            prompt: Prompt data, or None to clear.
+        """
+        async with self._get_lock():
+            if agent_id in self._agents:
+                self._agents[agent_id].current_prompt = prompt
+        await self._notify_change()
+
+    async def update_artifacts(self, agent_id: str, artifacts: dict[str, str]) -> None:
+        """
+        Update the artifacts for an agent.
+
+        Args:
+            agent_id: Agent ID.
+            artifacts: Dict mapping artifact names to content.
+        """
+        async with self._get_lock():
+            if agent_id in self._agents:
+                self._agents[agent_id].artifacts.update(artifacts)
+        await self._notify_change()
+
+    async def clear_prompt(self, agent_id: str) -> None:
+        """
+        Clear the current prompt for an agent.
+
+        Args:
+            agent_id: Agent ID.
+        """
+        await self.update_prompt(agent_id, None)
+
     async def send_to_agent(self, agent_id: str, action: HubAction) -> bool:
         """
         Send an action to a specific agent.
@@ -143,6 +180,8 @@ class ConnectionManager:
                 agent=agent.info,
                 task=agent.task,
                 connected=agent.connected,
+                current_prompt=agent.current_prompt,
+                artifacts=agent.artifacts,
             )
             for agent in self._agents.values()
         ]
@@ -164,23 +203,29 @@ class ConnectionManager:
             agent=agent.info,
             task=agent.task,
             connected=agent.connected,
+            current_prompt=agent.current_prompt,
+            artifacts=agent.artifacts,
         )
 
     def get_agents_needing_attention(self) -> list[AgentWithState]:
         """
-        Get agents that need user attention (awaiting approval).
+        Get agents that need user attention (awaiting approval or with active prompt).
 
         Returns:
-            List of agents awaiting approval.
+            List of agents awaiting user input.
         """
         return [
             AgentWithState(
                 agent=agent.info,
                 task=agent.task,
                 connected=agent.connected,
+                current_prompt=agent.current_prompt,
+                artifacts=agent.artifacts,
             )
             for agent in self._agents.values()
-            if agent.task and agent.task.awaiting_approval and agent.connected
+            if agent.connected and (
+                (agent.task and agent.task.awaiting_approval) or agent.current_prompt
+            )
         ]
 
     def on_change(self, callback: Any) -> None:

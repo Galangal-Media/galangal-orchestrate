@@ -1110,77 +1110,6 @@ async def _handle_max_retries_exceeded(
     return choice
 
 
-async def _check_remote_action_or_prompt(
-    app: WorkflowTUIApp,
-    state: WorkflowState,
-    stage_name: str,
-) -> str:
-    """
-    Check for pending remote action or prompt user for approval.
-
-    Polls for remote actions while waiting for user input. If a remote
-    action arrives, it's processed instead of the local prompt.
-
-    Args:
-        app: TUI application.
-        state: Current workflow state.
-        stage_name: Name of the stage being approved.
-
-    Returns:
-        "yes", "no", or "quit"
-    """
-    from galangal.hub.action_handler import ActionType, get_action_handler
-
-    handler = get_action_handler()
-    prompt_type = PromptType.PLAN_APPROVAL
-
-    # Start a background poll for remote actions
-    async def check_remote_action() -> str | None:
-        """Poll for remote actions."""
-        while True:
-            action = handler.peek_pending_action()
-            if action and action.task_name == state.task_name:
-                handler.get_pending_action()  # Consume it
-                if action.action_type == ActionType.APPROVE:
-                    app.add_activity("Remote approval received from hub", "*")
-                    return "yes"
-                elif action.action_type == ActionType.REJECT:
-                    reason = action.data.get("reason", "Rejected via hub")
-                    app.add_activity(f"Remote rejection: {reason}", "*")
-                    # Store reason in state
-                    state.last_failure = f"{stage_name} rejected via hub: {reason}"
-                    return "no"
-                elif action.action_type == ActionType.SKIP:
-                    app.add_activity("Remote skip received from hub", "*")
-                    return "skip"
-            await asyncio.sleep(0.5)  # Poll every 500ms
-
-    # Race between local prompt and remote action
-    prompt_task = asyncio.create_task(
-        app.prompt_async(prompt_type, f"Approve {stage_name} to continue?")
-    )
-    remote_task = asyncio.create_task(check_remote_action())
-
-    done, pending = await asyncio.wait(
-        [prompt_task, remote_task],
-        return_when=asyncio.FIRST_COMPLETED,
-    )
-
-    # Cancel the pending task
-    for task in pending:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-
-    # Get the result from whichever completed first
-    for task in done:
-        return task.result()
-
-    return "quit"
-
-
 async def _handle_stage_approval(
     app: WorkflowTUIApp,
     state: WorkflowState,
@@ -1189,6 +1118,10 @@ async def _handle_stage_approval(
 ) -> bool:
     """
     Handle approval gate after a stage that requires approval.
+
+    Uses prompt_async which automatically races local input vs remote
+    responses from the hub, allowing users to approve from either
+    the TUI or the Hub UI.
 
     Args:
         app: TUI application for user interaction.
@@ -1207,15 +1140,23 @@ async def _handle_stage_approval(
 
     notify_approval_needed(state, state.stage)
 
-    # Check for pending remote action from hub
-    choice = await _check_remote_action_or_prompt(app, state, stage_name)
+    # Send relevant artifacts to hub
+    _send_artifacts_for_approval(app, state, stage_name)
+
+    # Prompt for approval (prompt_async handles racing local vs remote)
+    prompt_type = PromptType.PLAN_APPROVAL if stage_name == "PM" else PromptType.DESIGN_APPROVAL
+    choice = await app.prompt_async(prompt_type, f"Approve {stage_name} to continue?")
 
     if choice == "yes":
-        # Check if this was a remote approval (no need for name prompt)
+        # Check if this was a remote response with text input
+        remote_data = app._pending_remote_action
+        app._pending_remote_action = None  # Clear it
+
+        # Determine approver name
         from galangal.hub.client import get_hub_client
 
         hub_client = get_hub_client()
-        if hub_client and hub_client.connected:
+        if hub_client and hub_client.connected and remote_data:
             # Remote approval - use "Hub" as approver
             name = "Hub"
         else:
@@ -1258,9 +1199,18 @@ async def _handle_stage_approval(
             return await _handle_stage_approval(app, state, config, approval_artifact)
 
     elif choice == "no":
-        reason = await app.multiline_input_async(
-            "Enter rejection reason (Ctrl+S to submit):", "Needs revision"
-        )
+        # Check for remote text input
+        remote_data = app._pending_remote_action
+        app._pending_remote_action = None
+
+        if remote_data and remote_data.get("text_input"):
+            # Use remote rejection reason
+            reason = remote_data["text_input"]
+        else:
+            reason = await app.multiline_input_async(
+                "Enter rejection reason (Ctrl+S to submit):", "Needs revision"
+            )
+
         if reason:
             state.last_failure = f"{stage_name} rejected: {reason}"
             state.reset_attempts(clear_failure=False)
@@ -1272,9 +1222,44 @@ async def _handle_stage_approval(
             # Cancelled - ask again
             return await _handle_stage_approval(app, state, config, approval_artifact)
 
-    else:  # quit
+    else:  # quit or skip
         app._workflow_result = "paused"
         return False
+
+
+def _send_artifacts_for_approval(
+    app: WorkflowTUIApp,
+    state: WorkflowState,
+    stage_name: str,
+) -> None:
+    """Send relevant artifacts to hub for display during approval."""
+    try:
+        from galangal.core.artifacts import read_artifact
+        from galangal.hub.hooks import notify_artifacts_updated
+
+        artifacts: dict[str, str] = {}
+
+        # Determine which artifacts to send based on stage
+        if stage_name == "PM":
+            artifact_names = ["SPEC.md", "PLAN.md", "STAGE_PLAN.md"]
+        elif stage_name == "DESIGN":
+            artifact_names = ["DESIGN.md"]
+        else:
+            artifact_names = []
+
+        for name in artifact_names:
+            content = read_artifact(name, state.task_name)
+            if content:
+                # Truncate very large artifacts
+                if len(content) > 50000:
+                    content = content[:50000] + "\n\n[... truncated]"
+                artifacts[name] = content
+
+        if artifacts:
+            notify_artifacts_updated(artifacts)
+    except Exception:
+        # Artifact sending failure is non-fatal
+        pass
 
 
 async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -> None:
