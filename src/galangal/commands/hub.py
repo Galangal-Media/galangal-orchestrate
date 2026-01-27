@@ -154,7 +154,10 @@ def cmd_hub_test(args: argparse.Namespace) -> int:
 
         headers = {}
         if hub_config.api_key:
+            # Use both Authorization and X-API-Key headers
+            # Some proxies (like Cloudflare) may strip Authorization headers
             headers["Authorization"] = f"Bearer {hub_config.api_key}"
+            headers["X-API-Key"] = hub_config.api_key
 
         try:
             async with websockets.connect(

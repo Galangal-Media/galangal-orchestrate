@@ -142,7 +142,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     """
     # Verify authentication before accepting connection
     headers = dict(websocket.headers)
-    if not await verify_websocket_auth(headers):
+    query_params = dict(websocket.query_params)
+    if not await verify_websocket_auth(headers, query_params):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         logger.warning("WebSocket connection rejected: invalid or missing API key")
         return

@@ -286,7 +286,10 @@ class HubClient:
         """Get authentication headers for WebSocket connection."""
         headers = {}
         if self.config.api_key:
+            # Use both Authorization and X-API-Key headers
+            # Some proxies (like Cloudflare) may strip Authorization headers
             headers["Authorization"] = f"Bearer {self.config.api_key}"
+            headers["X-API-Key"] = self.config.api_key
         return headers
 
 

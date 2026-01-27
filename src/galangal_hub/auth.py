@@ -144,29 +144,55 @@ async def verify_api_key(
 
 async def verify_websocket_auth(
     websocket_headers: dict[str, str],
+    query_params: dict[str, str] | None = None,
 ) -> bool:
     """
     Verify authentication for WebSocket connections.
 
     Args:
         websocket_headers: Headers from the WebSocket connection.
+        query_params: Query parameters from the WebSocket URL.
 
     Returns:
         True if authenticated, False otherwise.
     """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
     # If no API key configured, allow all
     if not _api_key:
+        logger.debug("No API key configured, allowing connection")
         return True
 
-    # Check Authorization header
+    # Check Authorization header (standard)
     auth_header = websocket_headers.get("authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
         if token == _api_key:
+            logger.debug("Authenticated via Authorization header")
+            return True
+
+    # Check X-API-Key header (alternative, less likely to be stripped by proxies)
+    x_api_key = websocket_headers.get("x-api-key", "")
+    if x_api_key == _api_key:
+        logger.debug("Authenticated via X-API-Key header")
+        return True
+
+    # Check query parameter (fallback for proxies that strip headers)
+    if query_params:
+        query_key = query_params.get("api_key", "")
+        if query_key == _api_key:
+            logger.debug("Authenticated via query parameter")
             return True
 
     # Check Tailscale headers
     if websocket_headers.get("tailscale-user-login"):
+        logger.debug("Authenticated via Tailscale")
         return True
 
+    logger.warning(
+        "WebSocket auth failed. Headers received: %s",
+        [k for k in websocket_headers.keys() if "auth" in k.lower() or "api" in k.lower() or "key" in k.lower()],
+    )
     return False
