@@ -683,11 +683,11 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
                     handler.get_pending_response()
                     self.add_activity(f"Remote response received from hub: {response.result}", "🌐")
 
-                    # Store text_input in a place the caller can access if needed
-                    if response.text_input:
-                        self._pending_remote_action = {
-                            "text_input": response.text_input,
-                        }
+                    # Always mark as remote response, include text_input if provided
+                    self._pending_remote_action = {
+                        "remote": True,
+                        "text_input": response.text_input,
+                    }
 
                     return response.result
 
@@ -699,17 +699,18 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
                     if action.action_type == ActionType.APPROVE:
                         handler.get_pending_action()
                         self.add_activity("Remote approval received from hub", "🌐")
+                        self._pending_remote_action = {"remote": True}
                         return "yes"
                     elif action.action_type == ActionType.REJECT:
                         handler.get_pending_action()
                         reason = action.data.get("reason", "")
                         self.add_activity(f"Remote rejection from hub: {reason}", "🌐")
-                        if reason:
-                            self._pending_remote_action = {"text_input": reason}
+                        self._pending_remote_action = {"remote": True, "text_input": reason}
                         return "no"
                     elif action.action_type == ActionType.SKIP:
                         handler.get_pending_action()
                         self.add_activity("Remote skip received from hub", "🌐")
+                        self._pending_remote_action = {"remote": True}
                         return "skip"
             except Exception:
                 # If there's an error checking, just continue polling

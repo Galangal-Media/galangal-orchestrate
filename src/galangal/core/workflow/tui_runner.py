@@ -1148,15 +1148,12 @@ async def _handle_stage_approval(
     choice = await app.prompt_async(prompt_type, f"Approve {stage_name} to continue?")
 
     if choice == "yes":
-        # Check if this was a remote response with text input
+        # Check if this was a remote response from the hub
         remote_data = app._pending_remote_action
         app._pending_remote_action = None  # Clear it
+        is_remote = remote_data and remote_data.get("remote")
 
-        # Determine approver name
-        from galangal.hub.client import get_hub_client
-
-        hub_client = get_hub_client()
-        if hub_client and hub_client.connected and remote_data:
+        if is_remote:
             # Remote approval - use "Hub" as approver
             name = "Hub"
         else:
@@ -1202,10 +1199,14 @@ async def _handle_stage_approval(
         # Check for remote text input
         remote_data = app._pending_remote_action
         app._pending_remote_action = None
+        is_remote = remote_data and remote_data.get("remote")
 
-        if remote_data and remote_data.get("text_input"):
+        if is_remote and remote_data.get("text_input"):
             # Use remote rejection reason
             reason = remote_data["text_input"]
+        elif is_remote:
+            # Remote rejection without reason
+            reason = "Rejected via Hub"
         else:
             reason = await app.multiline_input_async(
                 "Enter rejection reason (Ctrl+S to submit):", "Needs revision"
