@@ -47,17 +47,17 @@
         </div>
     </div>
 
-    <!-- Active Prompt -->
-    {% if agent.current_prompt %}
-    <div class="bg-gray-800 border border-gray-700 rounded-lg p-6" id="active-prompt"
-         hx-get="/partials/agent/{{ agent.agent.agent_id }}/prompt" hx-trigger="every 3s" hx-swap="innerHTML">
+    <!-- Active Prompt (always shown, content updates via HTMX) -->
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
         <h2 class="text-lg font-semibold mb-4">Active Prompt</h2>
-        {% set prompt = agent.current_prompt %}
-        {% set agent_id = agent.agent.agent_id %}
-        {% set task_name = agent.task.task_name if agent.task else '' %}
-        {% include "partials/prompt_card.html" %}
+        <div id="active-prompt"
+             hx-get="/partials/agent/{{ agent.agent.agent_id }}/prompt" hx-trigger="every 2s" hx-swap="innerHTML">
+            {% set prompt = agent.current_prompt %}
+            {% set agent_id = agent.agent.agent_id %}
+            {% set task_name = agent.task.task_name if agent.task else '' %}
+            {% include "partials/prompt_card.html" %}
+        </div>
     </div>
-    {% endif %}
 
     <!-- Current Task -->
     {% if agent.task %}

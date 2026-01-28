@@ -198,6 +198,32 @@ class HubClient:
             },
         )
 
+    async def send_idle_state(self) -> None:
+        """
+        Send an idle state to hub indicating the agent is ready for a new task.
+
+        This lets the hub UI know it can send CREATE_TASK actions.
+        """
+        if not self._connected:
+            return
+
+        await self._send(
+            MessageType.STATE_UPDATE,
+            {
+                "task_name": None,
+                "task_description": None,
+                "task_type": None,
+                "stage": "IDLE",
+                "attempt": 0,
+                "awaiting_approval": False,
+                "last_failure": None,
+                "started_at": None,
+                "stage_durations": {},
+                "github_issue": None,
+                "github_repo": None,
+            },
+        )
+
     async def send_event(
         self,
         event_type: EventType,

@@ -1359,6 +1359,62 @@ async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -
         app._workflow_result = "paused"
 
 
+async def _init_hub_for_new_task(config: GalangalConfig) -> None:
+    """Initialize hub client for new task creation (without existing state)."""
+    if not config.hub.enabled:
+        return
+
+    try:
+        from pathlib import Path
+
+        from galangal.hub.action_handler import get_action_handler
+        from galangal.hub.client import HubClient, set_hub_client
+
+        project_path = Path.cwd()
+        client = HubClient(
+            config=config.hub,
+            project_name=config.project.name,
+            project_path=project_path,
+        )
+
+        # Register action handler
+        handler = get_action_handler()
+        client.on_action(handler.handle_hub_action)
+
+        # Connect to hub
+        connected = await client.connect()
+        if connected:
+            set_hub_client(client)
+            # Send idle state to signal readiness for new task
+            await client.send_idle_state()
+    except Exception:
+        # Hub connection failure is non-fatal
+        pass
+
+
+async def _wait_for_remote_task_create(timeout: float = 0.5) -> Any | None:
+    """
+    Wait for a CREATE_TASK action from the hub with timeout.
+
+    Args:
+        timeout: Maximum seconds to wait.
+
+    Returns:
+        PendingTaskCreate if received, None otherwise.
+    """
+    from galangal.hub.action_handler import get_action_handler
+
+    handler = get_action_handler()
+    end_time = asyncio.get_event_loop().time() + timeout
+
+    while asyncio.get_event_loop().time() < end_time:
+        if handler.has_pending_task_create:
+            return handler.get_pending_task_create()
+        await asyncio.sleep(0.05)
+
+    return None
+
+
 def _start_new_task_tui() -> str:
     """
     Create a new task using TUI prompts for task type and description.
@@ -1366,6 +1422,7 @@ def _start_new_task_tui() -> str:
     Returns:
         Result string indicating outcome.
     """
+    config = get_config()
     app = WorkflowTUIApp("New Task", "SETUP", hidden_stages=frozenset())
 
     task_info: dict[str, Any] = {
@@ -1379,8 +1436,19 @@ def _start_new_task_tui() -> str:
 
     async def task_creation_loop() -> None:
         """Async task creation flow."""
+        # Initialize hub connection for receiving CREATE_TASK actions
+        await _init_hub_for_new_task(config)
+
         try:
             app.add_activity("[bold]Starting new task...[/bold]", "🆕")
+
+            # Check if there's a pending CREATE_TASK from the hub
+            pending_task = await _check_for_remote_task_create()
+            if pending_task:
+                # Use the remote task creation data
+                app.add_activity("Received task creation request from Hub", "🌐")
+                await _handle_remote_task_create(app, task_info, pending_task)
+                return
 
             # Step 0: Choose task source (manual or GitHub)
             app.set_status("setup", "select task source")
@@ -1575,6 +1643,8 @@ def _start_new_task_tui() -> str:
             app.show_error("Task creation error", str(e))
             app._workflow_result = "error"
         finally:
+            # Cleanup hub client
+            await _cleanup_hub_client()
             app.set_timer(0.5, app.exit)
 
     # Start creation as async worker
@@ -1591,3 +1661,164 @@ def _start_new_task_tui() -> str:
             return _run_workflow_with_tui(new_state)
 
     return result
+
+
+async def _check_for_remote_task_create() -> Any | None:
+    """
+    Check if there's a pending CREATE_TASK action from the hub.
+
+    Returns:
+        PendingTaskCreate if available, None otherwise.
+    """
+    from galangal.hub.action_handler import get_action_handler
+
+    handler = get_action_handler()
+    if handler.has_pending_task_create:
+        return handler.get_pending_task_create()
+    return None
+
+
+async def _handle_remote_task_create(
+    app: WorkflowTUIApp,
+    task_info: dict[str, Any],
+    pending_task: Any,
+) -> None:
+    """
+    Handle task creation from a remote CREATE_TASK action.
+
+    Args:
+        app: TUI application for status updates.
+        task_info: Dict to populate with task details.
+        pending_task: PendingTaskCreate with the remote data.
+    """
+    from galangal.commands.start import create_task
+    from galangal.core.tasks import generate_unique_task_name
+
+    try:
+        # Extract data from pending task
+        task_info["github_issue"] = pending_task.github_issue
+        task_info["github_repo"] = pending_task.github_repo
+
+        # Determine task type
+        task_type_str = pending_task.task_type or "feature"
+        task_info["type"] = TaskType.from_str(task_type_str)
+
+        # Get description from either manual input or GitHub issue
+        if pending_task.github_issue:
+            app.set_status("setup", "fetching GitHub issue")
+            app.show_message(
+                f"Creating task from GitHub issue #{pending_task.github_issue}...",
+                "info",
+            )
+
+            # Fetch issue details
+            from galangal.github.client import ensure_github_ready
+            from galangal.github.issues import get_issue
+
+            check = await asyncio.to_thread(ensure_github_ready)
+            if check:
+                task_info["github_repo"] = pending_task.github_repo or check.repo_name
+
+            issue = await asyncio.to_thread(get_issue, pending_task.github_issue)
+            if issue:
+                task_info["description"] = f"{issue.title}\n\n{issue.body}"
+                app.show_message(f"Issue #{issue.number}: {issue.title}", "info")
+
+                # Try to infer task type from labels if not specified
+                if not pending_task.task_type:
+                    type_hint = issue.get_task_type_hint()
+                    if type_hint:
+                        task_info["type"] = TaskType.from_str(type_hint)
+
+                # Check for screenshots
+                from galangal.github.images import extract_image_urls
+
+                images = extract_image_urls(issue.body)
+                issue_body_for_screenshots = issue.body if images else None
+            else:
+                app.show_message(f"Could not fetch issue #{pending_task.github_issue}", "warning")
+                task_info["description"] = pending_task.task_description or ""
+                issue_body_for_screenshots = None
+        else:
+            # Manual task creation
+            task_info["description"] = pending_task.task_description or ""
+            issue_body_for_screenshots = None
+
+        if not task_info["description"]:
+            app.show_message("No task description provided", "error")
+            app._workflow_result = "error"
+            return
+
+        app.show_message(f"Task type: {task_info['type'].display_name()}", "success")
+
+        # Generate task name
+        app.set_status("setup", "generating task name")
+        prefix = f"issue-{task_info['github_issue']}" if task_info["github_issue"] else None
+        task_info["name"] = pending_task.task_name or await asyncio.to_thread(
+            generate_unique_task_name, task_info["description"], prefix
+        )
+        app.show_message(f"Task name: {task_info['name']}", "info")
+
+        # Download screenshots if from GitHub issue
+        if issue_body_for_screenshots:
+            app.set_status("setup", "downloading screenshots")
+            try:
+                from galangal.github.issues import download_issue_screenshots
+
+                task_dir = get_task_dir(task_info["name"])
+                screenshot_paths = await asyncio.to_thread(
+                    download_issue_screenshots,
+                    issue_body_for_screenshots,
+                    task_dir,
+                )
+                if screenshot_paths:
+                    task_info["screenshots"] = screenshot_paths
+                    app.show_message(
+                        f"Downloaded {len(screenshot_paths)} screenshot(s)",
+                        "success",
+                    )
+            except Exception as e:
+                from galangal.core.utils import debug_exception
+
+                debug_exception("Screenshot download failed", e)
+                app.show_message(f"Screenshot download failed: {e}", "warning")
+
+        # Create the task
+        app.set_status("setup", "creating task")
+        success, message = await asyncio.to_thread(
+            create_task,
+            task_info["name"],
+            task_info["description"],
+            task_info["type"],
+            task_info["github_issue"],
+            task_info["github_repo"],
+            task_info["screenshots"],
+        )
+
+        if success:
+            app.show_message(message, "success")
+            app._workflow_result = "task_created"
+
+            # Mark issue as in-progress if from GitHub
+            if task_info["github_issue"]:
+                try:
+                    from galangal.github.issues import mark_issue_in_progress
+
+                    await asyncio.to_thread(mark_issue_in_progress, task_info["github_issue"])
+                    app.show_message("Marked issue as in-progress", "info")
+                except Exception:
+                    pass  # Non-critical
+        else:
+            app.show_error("Task creation failed", message)
+            app._workflow_result = "error"
+
+    except Exception as e:
+        from galangal.core.utils import debug_exception
+
+        debug_exception("Remote task creation failed", e)
+        app.show_error("Task creation error", str(e))
+        app._workflow_result = "error"
+    finally:
+        # Cleanup hub client
+        await _cleanup_hub_client()
+        app.set_timer(0.5, app.exit)

@@ -179,7 +179,13 @@ async def agent_websocket(websocket: WebSocket) -> None:
                 # Use the registered agent_id, ignore any agent_id in message
                 agent_id = registered_agent_id
 
-                # Validate required fields
+                # Handle IDLE state (no task) - clear task state
+                if payload.get("stage") == "IDLE" or payload.get("task_name") is None:
+                    await manager.update_task_state(agent_id, None)
+                    logger.info(f"Agent {agent_id}: now idle (no active task)")
+                    continue
+
+                # Validate required fields for active task
                 if "task_name" not in payload or "stage" not in payload:
                     logger.warning("STATE_UPDATE missing task_name or stage")
                     continue

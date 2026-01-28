@@ -110,6 +110,50 @@
         document.body.addEventListener('htmx:load', function(evt) {
             // Set up polling for elements with hx-trigger="every 5s"
         });
+
+        // Global function to respond to prompts (used by prompt_card.html)
+        async function respondToPrompt(agentId, taskName, promptType, result) {
+            // Validate inputs
+            if (!agentId || !taskName || !promptType) {
+                console.error('Missing required parameters for respondToPrompt:', { agentId, taskName, promptType, result });
+                alert('Error: Missing required parameters');
+                return;
+            }
+
+            // Check if this prompt type might need text input
+            const needsText = ['reject', 'no', 'fix_in_dev'].includes(result);
+
+            let textInput = null;
+            if (needsText) {
+                textInput = prompt('Enter reason/feedback (optional):');
+                if (textInput === null) return; // Cancelled
+            }
+
+            try {
+                console.log('Sending response:', { agentId, taskName, promptType, result });
+                const response = await fetch(`/api/actions/${agentId}/${taskName}/respond`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt_type: promptType,
+                        result: result,
+                        text_input: textInput
+                    })
+                });
+
+                if (response.ok) {
+                    // Refresh the page to show updated state
+                    location.reload();
+                } else {
+                    const data = await response.json();
+                    console.error('Failed to respond:', data);
+                    alert('Failed to respond: ' + (data.detail || 'Unknown error'));
+                }
+            } catch (e) {
+                console.error('Error responding to prompt:', e);
+                alert('Error: ' + e.message);
+            }
+        }
     </script>
 </body>
 </html>

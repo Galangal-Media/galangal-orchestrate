@@ -81,13 +81,13 @@ class ConnectionManager:
                 # Could add cleanup task later
         await self._notify_change()
 
-    async def update_task_state(self, agent_id: str, state: TaskState) -> None:
+    async def update_task_state(self, agent_id: str, state: TaskState | None) -> None:
         """
         Update the task state for an agent.
 
         Args:
             agent_id: Agent ID.
-            state: New task state.
+            state: New task state, or None if agent is idle.
         """
         async with self._get_lock():
             if agent_id in self._agents:
