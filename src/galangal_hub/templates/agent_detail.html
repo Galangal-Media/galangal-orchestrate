@@ -106,9 +106,13 @@
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold">Live Output</h2>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-3">
                 <span id="output-status" class="text-xs text-gray-500">Waiting for output...</span>
                 <button onclick="clearOutput()" class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs">Clear</button>
+                <label class="flex items-center gap-1 text-xs text-gray-400">
+                    <input type="checkbox" id="verbose-output" onchange="toggleVerboseMode()" class="rounded">
+                    Verbose
+                </label>
                 <label class="flex items-center gap-1 text-xs text-gray-400">
                     <input type="checkbox" id="auto-scroll" checked class="rounded">
                     Auto-scroll
@@ -498,38 +502,61 @@ async function createTaskManual(agentId) {
 // Live output handling
 let outputNextIndex = 0;
 let outputLineCount = 0;
+let verboseMode = false;
+let rawOutputBuffer = []; // Store raw lines for re-rendering on mode change
 const MAX_OUTPUT_LINES = 500;
 
-function formatOutputLine(line) {
-    // Returns { html: string, skip: boolean }
+function isVerboseMode() {
+    const checkbox = document.getElementById('verbose-output');
+    return checkbox && checkbox.checked;
+}
+
+function toggleVerboseMode() {
+    verboseMode = isVerboseMode();
+    // Re-render all output with new mode
+    const container = document.getElementById('output-lines');
+    if (container) {
+        container.innerHTML = '';
+        outputLineCount = 0;
+        for (const item of rawOutputBuffer) {
+            renderOutputLine(item.line, item.line_type);
+        }
+    }
+}
+
+function formatOutputLine(line, verbose) {
+    // Returns { html: string, skip: boolean, isClaudeText: boolean }
     try {
         const json = JSON.parse(line);
 
-        // System init message
+        // System init message - show in verbose mode only
         if (json.type === 'system' && json.subtype === 'init') {
             return {
                 html: `<span class="text-purple-400">▶ Session started</span> <span class="text-gray-500">(${json.model || 'unknown model'})</span>`,
-                skip: false
+                skip: !verbose,
+                isClaudeText: false
             };
         }
 
-        // Result message
+        // Result message - show in verbose mode only
         if (json.type === 'result') {
             const icon = json.subtype === 'success' ? '✓' : json.subtype === 'error' ? '✗' : '●';
             const color = json.subtype === 'success' ? 'text-green-400' : json.subtype === 'error' ? 'text-red-400' : 'text-purple-400';
             return {
                 html: `<span class="${color}">${icon} Result: ${json.subtype || 'done'}</span>`,
-                skip: false
+                skip: !verbose,
+                isClaudeText: false
             };
         }
 
         // Assistant message with tool calls
         if (json.type === 'assistant' && json.message?.content) {
-            const parts = [];
+            const verboseParts = [];
+            const textParts = [];
 
             for (const content of json.message.content) {
                 if (content.type === 'tool_use') {
-                    // Format tool call nicely
+                    // Format tool call nicely - verbose only
                     const toolName = content.name || 'Unknown';
                     let detail = '';
 
@@ -547,89 +574,107 @@ function formatOutputLine(line) {
                     }
 
                     const detailSpan = detail ? ` <span class="text-gray-500">${escapeHtml(detail)}</span>` : '';
-                    parts.push(`<span class="text-yellow-400">🔧 ${toolName}</span>${detailSpan}`);
+                    verboseParts.push(`<span class="text-yellow-400">🔧 ${toolName}</span>${detailSpan}`);
                 } else if (content.type === 'text' && content.text) {
-                    // Show text content (Claude's thinking/response)
+                    // Show text content (Claude's thinking/response) - always show
                     const text = content.text.trim();
                     if (text.length > 0) {
                         // Check if it's a heading or important content
                         if (text.startsWith('#')) {
-                            parts.push(`<span class="text-cyan-400 font-semibold">${escapeHtml(text.split('\n')[0])}</span>`);
+                            const heading = `<span class="text-cyan-400 font-semibold">${escapeHtml(text.split('\n')[0])}</span>`;
+                            textParts.push(heading);
+                            verboseParts.push(heading);
                         } else {
                             // Show first line or truncated content
                             const firstLine = text.split('\n')[0];
                             const display = firstLine.length > 200 ? firstLine.substring(0, 200) + '...' : firstLine;
-                            parts.push(`<span class="text-green-400">${escapeHtml(display)}</span>`);
+                            const textHtml = `<span class="text-green-400">${escapeHtml(display)}</span>`;
+                            textParts.push(textHtml);
+                            verboseParts.push(textHtml);
                         }
                     }
                 }
             }
 
-            if (parts.length > 0) {
-                return { html: parts.join('<br>'), skip: false };
+            // In non-verbose mode, only show text parts (green text)
+            if (!verbose) {
+                if (textParts.length > 0) {
+                    return { html: textParts.join('<br>'), skip: false, isClaudeText: true };
+                }
+                return { skip: true, isClaudeText: false };
             }
-            return { skip: true }; // Skip empty assistant messages
+
+            // In verbose mode, show everything
+            if (verboseParts.length > 0) {
+                return { html: verboseParts.join('<br>'), skip: false, isClaudeText: textParts.length > 0 };
+            }
+            return { skip: true, isClaudeText: false };
         }
 
-        // User message (usually tool results)
+        // User message (usually tool results) - verbose only
         if (json.type === 'user' && json.message?.content) {
-            // Check for tool results
             for (const content of json.message.content) {
                 if (content.type === 'tool_result') {
                     return {
                         html: `<span class="text-blue-400">↩ Tool result received</span>`,
-                        skip: false
+                        skip: !verbose,
+                        isClaudeText: false
                     };
                 }
             }
-            return { skip: true }; // Skip other user messages
+            return { skip: true, isClaudeText: false };
         }
 
         // Skip other JSON we don't recognize
-        return { skip: true };
+        return { skip: true, isClaudeText: false };
 
     } catch (e) {
         // Not JSON - check if it's meaningful text
         const trimmed = line.trim();
 
         // Skip empty lines
-        if (!trimmed) return { skip: true };
+        if (!trimmed) return { skip: true, isClaudeText: false };
 
-        // Check for [Tool Result] or [Result: ...] markers we added
+        // Check for [Tool Result] or [Result: ...] markers - verbose only
         if (trimmed.startsWith('[Tool Result]')) {
             return {
                 html: `<span class="text-blue-400">↩ ${escapeHtml(trimmed)}</span>`,
-                skip: false
+                skip: !verbose,
+                isClaudeText: false
             };
         }
         if (trimmed.startsWith('[Result:')) {
             return {
                 html: `<span class="text-purple-400">● ${escapeHtml(trimmed)}</span>`,
-                skip: false
+                skip: !verbose,
+                isClaudeText: false
             };
         }
 
-        // Error messages
+        // Error messages - always show
         if (trimmed.toLowerCase().includes('error')) {
             return {
                 html: `<span class="text-red-400">⚠ ${escapeHtml(trimmed)}</span>`,
-                skip: false
+                skip: false,
+                isClaudeText: false
             };
         }
 
-        // Plain text (likely Claude's output or markdown)
+        // Plain text headings - always show
         if (trimmed.startsWith('#')) {
             return {
                 html: `<span class="text-cyan-400 font-semibold">${escapeHtml(trimmed)}</span>`,
-                skip: false
+                skip: false,
+                isClaudeText: true
             };
         }
 
-        // Regular text
+        // Regular text - always show (likely Claude's output)
         const display = trimmed.length > 300 ? trimmed.substring(0, 300) + '...' : trimmed;
         return {
-            html: `<span class="text-gray-300">${escapeHtml(display)}</span>`,
-            skip: false
+            html: `<span class="text-green-400">${escapeHtml(display)}</span>`,
+            skip: false,
+            isClaudeText: true
         };
     }
 }
@@ -640,12 +685,13 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function appendOutputLine(line, lineType) {
+function renderOutputLine(line, lineType) {
+    // Internal function to render a line (called during append and re-render)
     const container = document.getElementById('output-lines');
-    if (!container) return;
+    if (!container) return false;
 
-    const formatted = formatOutputLine(line);
-    if (formatted.skip) return; // Skip uninteresting lines
+    const formatted = formatOutputLine(line, isVerboseMode());
+    if (formatted.skip) return false;
 
     const lineEl = document.createElement('div');
     lineEl.className = 'output-line py-0.5';
@@ -659,19 +705,36 @@ function appendOutputLine(line, lineType) {
         container.removeChild(container.firstChild);
     }
 
-    // Auto-scroll if enabled
-    const autoScroll = document.getElementById('auto-scroll');
-    if (autoScroll && autoScroll.checked) {
-        const outputContainer = document.getElementById('output-container');
-        if (outputContainer) {
-            outputContainer.scrollTop = outputContainer.scrollHeight;
-        }
+    return true;
+}
+
+function appendOutputLine(line, lineType) {
+    // Store in buffer for re-rendering on mode change
+    rawOutputBuffer.push({ line, line_type: lineType });
+
+    // Keep buffer limited
+    while (rawOutputBuffer.length > MAX_OUTPUT_LINES * 2) {
+        rawOutputBuffer.shift();
     }
 
-    // Update status
-    const status = document.getElementById('output-status');
-    if (status) {
-        status.textContent = `${outputLineCount} lines`;
+    // Render the line
+    const rendered = renderOutputLine(line, lineType);
+
+    // Auto-scroll if enabled and line was rendered
+    if (rendered) {
+        const autoScroll = document.getElementById('auto-scroll');
+        if (autoScroll && autoScroll.checked) {
+            const outputContainer = document.getElementById('output-container');
+            if (outputContainer) {
+                outputContainer.scrollTop = outputContainer.scrollHeight;
+            }
+        }
+
+        // Update status
+        const status = document.getElementById('output-status');
+        if (status) {
+            status.textContent = `${outputLineCount} lines`;
+        }
     }
 }
 
@@ -680,6 +743,7 @@ function clearOutput() {
     if (container) {
         container.innerHTML = '';
         outputLineCount = 0;
+        rawOutputBuffer = [];
         const status = document.getElementById('output-status');
         if (status) {
             status.textContent = 'Cleared';
@@ -692,10 +756,25 @@ async function fetchInitialOutput(agentId) {
         const response = await fetch(`/api/actions/${agentId}/output?since=0`);
         if (response.ok) {
             const data = await response.json();
+            // Store in buffer first
+            rawOutputBuffer = data.lines.map(item => ({
+                line: item.line,
+                line_type: item.line_type
+            }));
+            // Then render
             for (const item of data.lines) {
-                appendOutputLine(item.line, item.line_type);
+                renderOutputLine(item.line, item.line_type);
             }
             outputNextIndex = data.next_index;
+
+            // Auto-scroll after initial load
+            const autoScroll = document.getElementById('auto-scroll');
+            if (autoScroll && autoScroll.checked) {
+                const outputContainer = document.getElementById('output-container');
+                if (outputContainer) {
+                    outputContainer.scrollTop = outputContainer.scrollHeight;
+                }
+            }
         }
     } catch (e) {
         console.error('Failed to fetch initial output:', e);
