@@ -35,6 +35,10 @@ class PromptType(Enum):
     YES_NO = "yes_no"  # Simple yes/no prompt for discovery Q&A
     USER_DECISION = "user_decision"  # User must approve/reject when decision file missing
     TASK_SOURCE = "task_source"  # Choose between manual task or GitHub issue
+    GITHUB_ISSUE_SELECT = "github_issue_select"  # Select a GitHub issue
+    TEXT_INPUT_PROMPT = "text_input_prompt"  # Single line text input
+    MULTILINE_INPUT = "multiline_input"  # Multi-line text input
+    DISCOVERY_QA = "discovery_qa"  # Discovery Q&A session
 
 
 # Default options for prompts without specific configuration

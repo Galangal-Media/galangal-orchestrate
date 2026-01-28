@@ -774,7 +774,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         Show a text input modal and await the result.
 
         This is the async version of show_text_input() that eliminates the need
-        for callbacks and threading.Event coordination.
+        for callbacks and threading.Event coordination. Also notifies the Hub.
 
         Args:
             label: Prompt label displayed above the input field.
@@ -783,22 +783,33 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         Returns:
             The entered text, or None if cancelled.
         """
+        from galangal.ui.tui.modals import PromptOption
+
+        # Notify Hub of text input prompt
+        self._notify_hub_prompt(
+            PromptType.TEXT_INPUT_PROMPT,
+            label,
+            [PromptOption("1", "Submit", "submit", "#b8bb26")],
+        )
+
         future: asyncio.Future[str | None] = asyncio.Future()
 
         def callback(result: str | None) -> None:
             if not future.done():
-                # Callback runs in main thread, so set result directly
                 future.set_result(result)
 
         self.show_text_input(label, default, callback)
-        return await future
+        result = await future
+
+        self._notify_hub_prompt_cleared()
+        return result
 
     async def multiline_input_async(self, label: str, default: str = "") -> str | None:
         """
         Show a multiline input modal and await the result.
 
         This is the async version of show_multiline_input() that eliminates
-        the need for callbacks and threading.Event coordination.
+        the need for callbacks and threading.Event coordination. Also notifies Hub.
 
         Args:
             label: Prompt label displayed above the text area.
@@ -807,15 +818,26 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         Returns:
             The entered text, or None if cancelled.
         """
+        from galangal.ui.tui.modals import PromptOption
+
+        # Notify Hub of multiline input prompt
+        self._notify_hub_prompt(
+            PromptType.MULTILINE_INPUT,
+            label,
+            [PromptOption("1", "Submit", "submit", "#b8bb26")],
+        )
+
         future: asyncio.Future[str | None] = asyncio.Future()
 
         def callback(result: str | None) -> None:
             if not future.done():
-                # Callback runs in main thread, so set result directly
                 future.set_result(result)
 
         self.show_multiline_input(label, default, callback)
-        return await future
+        result = await future
+
+        self._notify_hub_prompt_cleared()
+        return result
 
     # -------------------------------------------------------------------------
     # Discovery Q&A async methods
@@ -826,7 +848,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         Show a Q&A modal and await all answers.
 
         Displays all questions and collects answers one at a time.
-        User answers each question sequentially.
+        User answers each question sequentially. Also notifies Hub.
 
         Args:
             questions: List of questions to ask.
@@ -834,6 +856,17 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         Returns:
             List of answers (same length as questions), or None if cancelled.
         """
+        from galangal.ui.tui.modals import PromptOption
+
+        # Notify Hub of Q&A session with questions as context
+        # Format questions for Hub display
+        questions_text = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
+        self._notify_hub_prompt(
+            PromptType.DISCOVERY_QA,
+            f"Discovery Q&A ({len(questions)} questions):\n{questions_text}",
+            [PromptOption("1", "Answer in CLI", "cli", "#83a598")],
+        )
+
         future: asyncio.Future[list[str] | None] = asyncio.Future()
 
         def _show() -> None:
@@ -845,7 +878,10 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
             self.push_screen(screen, _handle)
 
         self._safe_update(_show)
-        return await future
+        result = await future
+
+        self._notify_hub_prompt_cleared()
+        return result
 
     async def ask_yes_no_async(self, prompt: str) -> bool:
         """
@@ -884,25 +920,114 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         """
         Show a modal for selecting a GitHub issue.
 
+        Also notifies the Hub so the issue selection can happen remotely.
+
         Args:
             issues: List of (issue_number, title) tuples.
 
         Returns:
             Selected issue number, or None if cancelled.
         """
-        future: asyncio.Future[int | None] = asyncio.Future()
+        from galangal.ui.tui.modals import PromptOption
 
+        # Notify Hub of the prompt with issues as options
+        hub_options = [
+            PromptOption(str(num), title[:50], str(num), "#83a598")
+            for num, title in issues[:10]  # Limit to 10 for Hub display
+        ]
+        self._notify_hub_prompt(
+            PromptType.GITHUB_ISSUE_SELECT,
+            f"Select GitHub issue ({len(issues)} available)",
+            hub_options,
+        )
+
+        # Set up racing between local and remote
+        local_future: asyncio.Future[int | None] = asyncio.Future()
+
+        def local_callback(result: int | None) -> None:
+            if not local_future.done():
+                local_future.set_result(result)
+
+        # Show local modal
         def _show() -> None:
-            def _handle(result: int | None) -> None:
-                if not future.done():
-                    future.set_result(result)
-
             options = [GitHubIssueOption(num, title) for num, title in issues]
             screen = GitHubIssueSelectModal(options)
-            self.push_screen(screen, _handle)
+            self.push_screen(screen, local_callback)
 
         self._safe_update(_show)
-        return await future
+
+        # Small yield to ensure screen is displayed
+        await asyncio.sleep(0)
+
+        # Race local vs remote
+        remote_task = asyncio.create_task(
+            self._wait_for_remote_issue_select()
+        )
+        local_task = asyncio.ensure_future(local_future)
+
+        try:
+            done, pending = await asyncio.wait(
+                [local_task, remote_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            # Cancel the loser
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            # Clear the hub prompt
+            self._notify_hub_prompt_cleared()
+
+            # Get the result
+            completed_task = done.pop()
+            try:
+                result = completed_task.result()
+            except Exception:
+                if completed_task == remote_task and not local_future.done():
+                    result = await local_future
+                else:
+                    raise
+
+            # If remote won, dismiss the local modal
+            if local_task in pending:
+                # Pop the GitHub issue select screen
+                try:
+                    self.pop_screen()
+                except Exception:
+                    pass
+
+            return result
+
+        except Exception:
+            self._notify_hub_prompt_cleared()
+            if not local_future.done():
+                return await local_future
+            raise
+
+    async def _wait_for_remote_issue_select(self) -> int | None:
+        """Wait for a remote GitHub issue selection from the hub."""
+        from galangal.hub.action_handler import get_action_handler
+
+        handler = get_action_handler()
+
+        while True:
+            try:
+                response = handler.peek_pending_response()
+                if response and response.prompt_type == PromptType.GITHUB_ISSUE_SELECT.value:
+                    handler.get_pending_response()
+                    self.add_activity(f"Remote issue selection from hub: #{response.result}", "🌐")
+                    try:
+                        return int(response.result)
+                    except ValueError:
+                        return None
+            except Exception:
+                pass
+
+            await asyncio.sleep(0.3)
 
     def show_multiline_input(self, label: str, default: str, callback: Callable[..., None]) -> None:
         """
