@@ -324,6 +324,97 @@ async function rejectTask(agentId, taskName) {
     }
 }
 
+// Generic prompt response function
+async function respondToPrompt(agentId, taskName, promptType, result) {
+    const taskPath = taskName || '_';
+    try {
+        const response = await fetch(`/api/actions/${agentId}/${taskPath}/respond`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt_type: promptType,
+                result: result
+            })
+        });
+        if (response.ok) {
+            // Trigger HTMX refresh for the prompt card
+            htmx.trigger(document.getElementById('active-prompt'), 'refresh');
+        } else {
+            const data = await response.json();
+            alert('Failed to respond: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+// Submit Discovery Q&A answers
+async function submitQAAnswers(agentId, taskName, promptType) {
+    const taskPath = taskName || '_';
+
+    // Collect all answers from textareas
+    const textareas = document.querySelectorAll('#qa-questions .qa-answer');
+    const answers = [];
+    textareas.forEach((textarea, idx) => {
+        answers.push(textarea.value.trim() || '(no answer)');
+    });
+
+    // Join answers with newlines, numbering them
+    const combinedAnswers = answers.map((a, i) => `${i + 1}. ${a}`).join('\n');
+
+    try {
+        const response = await fetch(`/api/actions/${agentId}/${taskPath}/respond`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt_type: promptType,
+                result: 'submit',
+                text_input: combinedAnswers
+            })
+        });
+        if (response.ok) {
+            htmx.trigger(document.getElementById('active-prompt'), 'refresh');
+        } else {
+            const data = await response.json();
+            alert('Failed to submit answers: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+// Submit text input (single or multiline)
+async function submitTextInput(agentId, taskName, promptType) {
+    const taskPath = taskName || '_';
+    const textarea = document.getElementById('text-input-value');
+    const textValue = textarea ? textarea.value.trim() : '';
+
+    if (!textValue) {
+        alert('Please enter a response');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/actions/${agentId}/${taskPath}/respond`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt_type: promptType,
+                result: 'submit',
+                text_input: textValue
+            })
+        });
+        if (response.ok) {
+            htmx.trigger(document.getElementById('active-prompt'), 'refresh');
+        } else {
+            const data = await response.json();
+            alert('Failed to submit: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
 function showTab(tab) {
     // Update tab buttons
     document.getElementById('tab-issue').classList.toggle('border-purple-500', tab === 'issue');

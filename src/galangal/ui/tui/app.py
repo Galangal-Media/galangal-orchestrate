@@ -528,6 +528,37 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
 
         self._safe_update(_hide)
 
+    def _dismiss_active_modal(self) -> None:
+        """
+        Dismiss any active modal (prompt, text input, or other).
+
+        Called when a remote response arrives and we need to close
+        the local modal that was waiting for input.
+        """
+        def _dismiss() -> None:
+            # Dismiss prompt modals
+            if self._active_prompt_screen:
+                try:
+                    self._active_prompt_screen.dismiss(None)
+                except Exception:
+                    pass
+                self._active_prompt_screen = None
+
+            # Dismiss text input modals
+            if hasattr(self, "_active_input_screen") and self._active_input_screen:
+                try:
+                    self._active_input_screen.dismiss(None)
+                except Exception:
+                    pass
+                self._active_input_screen = None
+
+            # Clear callbacks
+            self._prompt_callback = None
+            self._input_callback = None
+            self._prompt_type = PromptType.NONE
+
+        self._safe_update(_dismiss)
+
     # -------------------------------------------------------------------------
     # Async prompt methods (simplified threading model)
     # -------------------------------------------------------------------------
@@ -774,7 +805,8 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         Show a text input modal and await the result.
 
         This is the async version of show_text_input() that eliminates the need
-        for callbacks and threading.Event coordination. Also notifies the Hub.
+        for callbacks and threading.Event coordination. Also notifies the Hub
+        and races local vs remote input.
 
         Args:
             label: Prompt label displayed above the input field.
@@ -792,24 +824,63 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
             [PromptOption("1", "Submit", "submit", "#b8bb26")],
         )
 
-        future: asyncio.Future[str | None] = asyncio.Future()
+        local_future: asyncio.Future[str | None] = asyncio.Future()
 
         def callback(result: str | None) -> None:
-            if not future.done():
-                future.set_result(result)
+            if not local_future.done():
+                local_future.set_result(result)
 
         self.show_text_input(label, default, callback)
-        result = await future
 
-        self._notify_hub_prompt_cleared()
-        return result
+        # Race local vs remote
+        remote_task = asyncio.create_task(
+            self._wait_for_remote_response_safe(PromptType.TEXT_INPUT_PROMPT)
+        )
+        local_task = asyncio.ensure_future(local_future)
+
+        try:
+            done, pending = await asyncio.wait(
+                [local_task, remote_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            self._notify_hub_prompt_cleared()
+
+            completed_task = done.pop()
+            if completed_task == remote_task:
+                # Remote won - check for text_input
+                remote_action = getattr(self, "_pending_remote_action", None)
+                if remote_action and remote_action.get("text_input"):
+                    self.add_activity("Remote text input received from hub", "🌐")
+                    # Dismiss local modal if shown
+                    self._dismiss_active_modal()
+                    return remote_action.get("text_input")
+                elif remote_action:
+                    # Remote sent cancel or no text
+                    result = completed_task.result()
+                    if result == "cancel":
+                        self._dismiss_active_modal()
+                        return None
+            # Local completed or remote had no text_input
+            return local_future.result() if local_future.done() else None
+        except Exception:
+            self._notify_hub_prompt_cleared()
+            return await local_future
 
     async def multiline_input_async(self, label: str, default: str = "") -> str | None:
         """
         Show a multiline input modal and await the result.
 
         This is the async version of show_multiline_input() that eliminates
-        the need for callbacks and threading.Event coordination. Also notifies Hub.
+        the need for callbacks and threading.Event coordination. Also notifies Hub
+        and races local vs remote input.
 
         Args:
             label: Prompt label displayed above the text area.
@@ -827,17 +898,55 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
             [PromptOption("1", "Submit", "submit", "#b8bb26")],
         )
 
-        future: asyncio.Future[str | None] = asyncio.Future()
+        local_future: asyncio.Future[str | None] = asyncio.Future()
 
         def callback(result: str | None) -> None:
-            if not future.done():
-                future.set_result(result)
+            if not local_future.done():
+                local_future.set_result(result)
 
         self.show_multiline_input(label, default, callback)
-        result = await future
 
-        self._notify_hub_prompt_cleared()
-        return result
+        # Race local vs remote
+        remote_task = asyncio.create_task(
+            self._wait_for_remote_response_safe(PromptType.MULTILINE_INPUT)
+        )
+        local_task = asyncio.ensure_future(local_future)
+
+        try:
+            done, pending = await asyncio.wait(
+                [local_task, remote_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            self._notify_hub_prompt_cleared()
+
+            completed_task = done.pop()
+            if completed_task == remote_task:
+                # Remote won - check for text_input
+                remote_action = getattr(self, "_pending_remote_action", None)
+                if remote_action and remote_action.get("text_input"):
+                    self.add_activity("Remote multiline input received from hub", "🌐")
+                    # Dismiss local modal if shown
+                    self._dismiss_active_modal()
+                    return remote_action.get("text_input")
+                elif remote_action:
+                    # Remote sent cancel or no text
+                    result = completed_task.result()
+                    if result == "cancel":
+                        self._dismiss_active_modal()
+                        return None
+            # Local completed or remote had no text_input
+            return local_future.result() if local_future.done() else None
+        except Exception:
+            self._notify_hub_prompt_cleared()
+            return await local_future
 
     # -------------------------------------------------------------------------
     # Discovery Q&A async methods
@@ -848,7 +957,8 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         Show a Q&A modal and await all answers.
 
         Displays all questions and collects answers one at a time.
-        User answers each question sequentially. Also notifies Hub.
+        User answers each question sequentially. Also notifies Hub and races
+        local vs remote input - user can answer from CLI or Hub.
 
         Args:
             questions: List of questions to ask.
@@ -864,24 +974,110 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         self._notify_hub_prompt(
             PromptType.DISCOVERY_QA,
             f"Discovery Q&A ({len(questions)} questions):\n{questions_text}",
-            [PromptOption("1", "Answer in CLI", "cli", "#83a598")],
+            [
+                PromptOption("1", "Submit Answers", "submit", "#b8bb26"),
+                PromptOption("2", "Skip (Answer in CLI)", "skip", "#83a598"),
+            ],
         )
 
-        future: asyncio.Future[list[str] | None] = asyncio.Future()
+        local_future: asyncio.Future[list[str] | None] = asyncio.Future()
 
         def _show() -> None:
             def _handle(result: list[str] | None) -> None:
-                if not future.done():
-                    future.set_result(result)
+                if not local_future.done():
+                    local_future.set_result(result)
 
             screen = QuestionAnswerModal(questions)
+            self._active_prompt_screen = screen
             self.push_screen(screen, _handle)
 
         self._safe_update(_show)
-        result = await future
 
-        self._notify_hub_prompt_cleared()
-        return result
+        # Race local vs remote
+        remote_task = asyncio.create_task(
+            self._wait_for_remote_response_safe(PromptType.DISCOVERY_QA)
+        )
+        local_task = asyncio.ensure_future(local_future)
+
+        try:
+            done, pending = await asyncio.wait(
+                [local_task, remote_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            self._notify_hub_prompt_cleared()
+
+            completed_task = done.pop()
+            if completed_task == remote_task:
+                # Remote won - check for text_input with answers
+                remote_action = getattr(self, "_pending_remote_action", None)
+                if remote_action and remote_action.get("text_input"):
+                    self.add_activity("Remote Q&A answers received from hub", "🌐")
+                    # Dismiss local modal if shown
+                    self._dismiss_active_modal()
+                    # Parse answers from text_input (format: "1. answer1\n2. answer2\n...")
+                    text_input = remote_action.get("text_input", "")
+                    answers = self._parse_qa_answers(text_input, len(questions))
+                    return answers
+                elif remote_action:
+                    result = completed_task.result()
+                    if result == "skip":
+                        # User wants to answer in CLI - continue with local modal
+                        self.add_activity("User chose to answer in CLI", "🌐")
+                        # Wait for local modal to complete
+                        return await local_future
+                    elif result == "cancel":
+                        self._dismiss_active_modal()
+                        return None
+            # Local completed
+            return local_future.result() if local_future.done() else None
+        except Exception:
+            self._notify_hub_prompt_cleared()
+            return await local_future
+
+    def _parse_qa_answers(self, text_input: str, num_questions: int) -> list[str]:
+        """
+        Parse Q&A answers from Hub text input.
+
+        Expected format: "1. answer1\\n2. answer2\\n..."
+        Falls back to splitting by newlines if numbered format not found.
+
+        Args:
+            text_input: The combined answers text from Hub.
+            num_questions: Expected number of answers.
+
+        Returns:
+            List of answer strings (padded with empty strings if needed).
+        """
+        import re
+
+        lines = text_input.strip().split("\n")
+        answers: list[str] = []
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            # Try to match "1. answer" format
+            match = re.match(r"^\d+\.\s*(.*)$", line)
+            if match:
+                answers.append(match.group(1).strip())
+            else:
+                # Just use the whole line
+                answers.append(line)
+
+        # Pad with empty strings if needed
+        while len(answers) < num_questions:
+            answers.append("")
+
+        return answers[:num_questions]
 
     async def ask_yes_no_async(self, prompt: str) -> bool:
         """

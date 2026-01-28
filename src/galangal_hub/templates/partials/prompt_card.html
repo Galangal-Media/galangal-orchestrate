@@ -8,6 +8,54 @@
         <span class="text-xs text-gray-500">{{ prompt.timestamp.strftime('%H:%M:%S') if prompt.timestamp else '' }}</span>
     </div>
 
+    {% if prompt.prompt_type == 'discovery_qa' %}
+    <!-- Discovery Q&A with text inputs -->
+    <div class="mb-4">
+        <div class="text-sm text-gray-400 mb-3">Answer the discovery questions below:</div>
+        <div id="qa-questions" class="space-y-4">
+            {% set questions = prompt.message.split('\n')[1:] %}
+            {% for q in questions if q.strip() and q.strip()[0].isdigit() %}
+            <div class="bg-gray-800 rounded p-3">
+                <div class="text-sm text-gray-300 mb-2">{{ q.strip() }}</div>
+                <textarea class="qa-answer w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-purple-500 focus:outline-none resize-none"
+                          rows="2" placeholder="Your answer..."></textarea>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="mt-4 flex gap-2">
+            <button onclick="submitQAAnswers('{{ agent_id }}', '{{ task_name }}', '{{ prompt.prompt_type }}')"
+                    class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded text-sm font-medium">
+                Submit Answers
+            </button>
+            <button onclick="respondToPrompt('{{ agent_id }}', '{{ task_name }}', '{{ prompt.prompt_type }}', 'skip')"
+                    class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded text-sm font-medium">
+                Skip (Answer in CLI)
+            </button>
+        </div>
+    </div>
+
+    {% elif prompt.prompt_type in ['multiline_input', 'text_input_prompt'] %}
+    <!-- Text input prompts -->
+    <div class="mb-4">
+        <div class="text-sm text-gray-300 mb-3">{{ prompt.message }}</div>
+        <textarea id="text-input-value"
+                  class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-purple-500 focus:outline-none resize-none"
+                  rows="{{ 5 if prompt.prompt_type == 'multiline_input' else 2 }}"
+                  placeholder="Enter your response..."></textarea>
+        <div class="mt-3 flex gap-2">
+            <button onclick="submitTextInput('{{ agent_id }}', '{{ task_name }}', '{{ prompt.prompt_type }}')"
+                    class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded text-sm font-medium">
+                Submit
+            </button>
+            <button onclick="respondToPrompt('{{ agent_id }}', '{{ task_name }}', '{{ prompt.prompt_type }}', 'cancel')"
+                    class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded text-sm font-medium">
+                Cancel
+            </button>
+        </div>
+    </div>
+
+    {% else %}
+    <!-- Standard prompt with options -->
     <div class="mb-4">
         <pre class="text-sm text-gray-300 whitespace-pre-wrap font-sans">{{ prompt.message[:1000] }}{% if prompt.message|length > 1000 %}...{% endif %}</pre>
     </div>
@@ -29,6 +77,7 @@
         </button>
         {% endfor %}
     </div>
+    {% endif %}
 
     {% if prompt.artifacts %}
     <div class="mt-4 pt-4 border-t border-yellow-800">
