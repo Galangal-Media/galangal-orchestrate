@@ -29,10 +29,11 @@ interface ParsedOutput {
   type: 'ai_response' | 'tool_use' | 'tool_result' | 'system' | 'result' | 'raw'
   toolName?: string
   isError?: boolean
+  id?: string  // For deduplication
 }
 
 // Parse a raw JSON line into a structured output
-function parseOutputLine(line: string): ParsedOutput | null {
+function parseOutputLine(line: string, index: number): ParsedOutput | null {
   try {
     const data = JSON.parse(line.trim())
     const msgType = data.type || ''
@@ -40,12 +41,17 @@ function parseOutputLine(line: string): ParsedOutput | null {
     // AI text response - always show
     if (msgType === 'assistant') {
       const content = data.message?.content || []
+      const results: ParsedOutput[] = []
+
       for (const item of content) {
         if (item.type === 'text' && item.text?.trim()) {
-          return { text: item.text.trim(), type: 'ai_response' }
+          // Use message id + content hash for deduplication
+          const id = `${data.message?.id || index}-text-${item.text.slice(0, 50)}`
+          results.push({ text: item.text.trim(), type: 'ai_response', id })
         }
         if (item.type === 'tool_use') {
           const toolName = item.name || 'Tool'
+          const toolId = item.id || ''
           const input = item.input || {}
           let detail = ''
           if (toolName === 'Write' || toolName === 'Edit' || toolName === 'Read') {
@@ -58,13 +64,16 @@ function parseOutputLine(line: string): ParsedOutput | null {
           } else if (toolName === 'Task') {
             detail = input.description || 'agent'
           }
-          return {
+          results.push({
             text: detail ? `${toolName}: ${detail}` : toolName,
             type: 'tool_use',
-            toolName
-          }
+            toolName,
+            id: `tool-${toolId}`
+          })
         }
       }
+      // Return first result (we'll handle multiple in the caller later if needed)
+      return results[0] || null
     }
 
     // Tool result - verbose only
@@ -75,7 +84,8 @@ function parseOutputLine(line: string): ParsedOutput | null {
           return {
             text: 'Tool completed',
             type: 'tool_result',
-            isError: item.is_error
+            isError: item.is_error,
+            id: `result-${item.tool_use_id || index}`
           }
         }
       }
@@ -84,19 +94,19 @@ function parseOutputLine(line: string): ParsedOutput | null {
     // System message - verbose only
     if (msgType === 'system') {
       const message = data.message || ''
-      return { text: message, type: 'system' }
+      return { text: message, type: 'system', id: `system-${index}` }
     }
 
     // Final result - always show
     if (msgType === 'result') {
-      return { text: data.result || 'Completed', type: 'result' }
+      return { text: data.result || 'Completed', type: 'result', id: 'final-result' }
     }
 
     return null
   } catch {
     // Not JSON or parse error - treat as raw
     if (line.trim()) {
-      return { text: line, type: 'raw' }
+      return { text: line, type: 'raw', id: `raw-${index}` }
     }
     return null
   }
@@ -112,6 +122,7 @@ export function TaskDetail() {
   const outputRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
   const [verboseMode, setVerboseMode] = useState(false)
+  const [showDescription, setShowDescription] = useState(false)
 
   const { lastMessage } = useWebSocket("/ws/dashboard")
 
@@ -318,18 +329,37 @@ export function TaskDetail() {
         {/* Description & Last Failure */}
         <Card className="card-hover">
           <CardHeader className="pb-4">
-            <CardTitle className="flex items-center gap-2">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <Target className="h-4 w-4 text-primary" />
+            <CardTitle className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <Target className="h-4 w-4 text-primary" />
+                </div>
+                Description
               </div>
-              Description
+              {(task.description || task.task_description) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowDescription(!showDescription)}
+                >
+                  {showDescription ? "Hide" : "Show"}
+                </Button>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {(task.description || task.task_description) ? (
-              <p className="text-sm text-muted-foreground">
-                {task.description || task.task_description}
-              </p>
+              showDescription ? (
+                <div className="text-sm text-muted-foreground prose prose-sm prose-invert max-w-none">
+                  <pre className="whitespace-pre-wrap font-sans bg-muted/50 p-4 rounded-lg overflow-x-auto">
+                    {task.description || task.task_description}
+                  </pre>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">
+                  Click "Show" to view description
+                </p>
+              )
             ) : (
               <p className="text-sm text-muted-foreground italic">No description provided</p>
             )}
@@ -386,50 +416,67 @@ export function TaskDetail() {
                   <span>Waiting for output...</span>
                 </div>
               ) : (
-                outputLines.map((rawLine, index) => {
-                  const parsed = parseOutputLine(rawLine.line)
-                  if (!parsed) return null
+                (() => {
+                  // Parse and deduplicate output lines
+                  const seenIds = new Set<string>()
+                  const seenTexts = new Set<string>()
 
-                  // In non-verbose mode, only show AI responses and results
-                  if (!verboseMode && parsed.type !== 'ai_response' && parsed.type !== 'result') {
-                    return null
-                  }
+                  return outputLines.map((rawLine, index) => {
+                    const parsed = parseOutputLine(rawLine.line, index)
+                    if (!parsed) return null
 
-                  // Style based on type
-                  let className = 'py-1 '
-                  let icon = ''
-                  switch (parsed.type) {
-                    case 'ai_response':
-                      className += 'text-foreground pl-4 border-l-2 border-primary/30'
-                      icon = '💬 '
-                      break
-                    case 'tool_use':
-                      className += 'text-muted-foreground text-[11px]'
-                      icon = '🔧 '
-                      break
-                    case 'tool_result':
-                      className += parsed.isError ? 'text-destructive text-[11px]' : 'text-muted-foreground/60 text-[11px]'
-                      icon = parsed.isError ? '❌ ' : '✓ '
-                      break
-                    case 'system':
-                      className += 'text-warning text-[11px]'
-                      icon = '⚡ '
-                      break
-                    case 'result':
-                      className += 'text-success font-medium'
-                      icon = '✅ '
-                      break
-                    default:
-                      className += 'text-muted-foreground/50 text-[11px]'
-                  }
+                    // Deduplicate by ID or text content
+                    if (parsed.type === 'ai_response') {
+                      // For AI responses, use first 100 chars of text as dedup key
+                      const textKey = parsed.text.slice(0, 100)
+                      if (seenTexts.has(textKey)) return null
+                      seenTexts.add(textKey)
+                    } else if (parsed.id) {
+                      if (seenIds.has(parsed.id)) return null
+                      seenIds.add(parsed.id)
+                    }
 
-                  return (
-                    <div key={index} className={className}>
-                      {verboseMode && <span className="opacity-60">{icon}</span>}
-                      {parsed.text}
-                    </div>
-                  )
-                })
+                    // In non-verbose mode, only show AI responses and results
+                    if (!verboseMode && parsed.type !== 'ai_response' && parsed.type !== 'result') {
+                      return null
+                    }
+
+                    // Style based on type
+                    let className = 'py-1 '
+                    let icon = ''
+                    switch (parsed.type) {
+                      case 'ai_response':
+                        className += 'text-foreground pl-4 border-l-2 border-primary/30'
+                        icon = '💬 '
+                        break
+                      case 'tool_use':
+                        className += 'text-muted-foreground text-[11px]'
+                        icon = '🔧 '
+                        break
+                      case 'tool_result':
+                        className += parsed.isError ? 'text-destructive text-[11px]' : 'text-muted-foreground/60 text-[11px]'
+                        icon = parsed.isError ? '❌ ' : '✓ '
+                        break
+                      case 'system':
+                        className += 'text-warning text-[11px]'
+                        icon = '⚡ '
+                        break
+                      case 'result':
+                        className += 'text-success font-medium'
+                        icon = '✅ '
+                        break
+                      default:
+                        className += 'text-muted-foreground/50 text-[11px]'
+                    }
+
+                    return (
+                      <div key={parsed.id || index} className={className}>
+                        {verboseMode && <span className="opacity-60">{icon}</span>}
+                        {parsed.text}
+                      </div>
+                    )
+                  })
+                })()
               )}
             </div>
           </CardContent>
