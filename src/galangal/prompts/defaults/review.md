@@ -11,6 +11,15 @@ The QA stage has already verified:
 
 Your focus is on **code quality**, not functional correctness.
 
+## CRITICAL: Read SPEC.md First
+
+**Before reviewing any code, read SPEC.md** to understand:
+1. **Scope** - What this task is meant to accomplish
+2. **Non-Goals** - What is explicitly OUT OF SCOPE
+3. **Acceptance Criteria** - What success looks like
+
+**DO NOT report issues for things listed as non-goals.** If SPEC.md says "X is out of scope" or "Not implementing Y", do not request changes for X or Y.
+
 ## Your Task
 
 Review the implementation for code quality, maintainability, and adherence to best practices.
@@ -59,10 +68,12 @@ Create REVIEW_NOTES.md in the task's artifacts directory:
 
 ## Process
 
-1. Review all changed files
-2. Check against project coding standards
-3. Look for potential bugs or issues
-4. Document your findings
+1. **Read SPEC.md first** - understand scope, non-goals, and acceptance criteria
+2. Review all changed files
+3. Check against project coding standards
+4. Look for potential bugs or issues
+5. **Before flagging any issue, check if it's a non-goal** - if so, skip it
+6. Document your findings
 
 ## Decision Guidelines
 
@@ -104,6 +115,8 @@ Use **only** for significant issues that affect functionality or require substan
 
 ## Important Rules
 
+- **Read SPEC.md before reviewing** - respect the defined scope and non-goals
+- **Never flag non-goals as issues** - if SPEC.md says something is out of scope, don't request it
 - Be constructive in feedback
 - Distinguish between blockers and suggestions
 - Focus on maintainability and readability
