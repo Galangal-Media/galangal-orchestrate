@@ -19,6 +19,7 @@ class MessageType(str, Enum):
     HEARTBEAT = "heartbeat"
     PROMPT = "prompt"  # Send current prompt with options
     ARTIFACTS = "artifacts"  # Send artifact contents
+    GITHUB_ISSUES = "github_issues"  # Response with GitHub issues list
 
     # Hub -> Agent
     ACTION = "action"
@@ -47,6 +48,7 @@ class ActionType(str, Enum):
     INTERRUPT = "interrupt"
     RESPONSE = "response"  # Response to any prompt (not just approval)
     CREATE_TASK = "create_task"  # Create a new task
+    FETCH_GITHUB_ISSUES = "fetch_github_issues"  # Request GitHub issues list
 
 
 class AgentInfo(BaseModel):
@@ -133,3 +135,13 @@ class AgentWithState(BaseModel):
     connected: bool = True
     current_prompt: PromptData | None = None  # Currently displayed prompt
     artifacts: dict[str, str] = Field(default_factory=dict)  # Artifact name -> content
+
+
+class GitHubIssueInfo(BaseModel):
+    """GitHub issue information for display in Hub UI."""
+
+    number: int
+    title: str
+    labels: list[str] = Field(default_factory=list)
+    state: str = "open"
+    author: str = ""

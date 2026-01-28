@@ -356,3 +356,60 @@ async def create_task(
         "task_name": request.task_name,
         "github_issue": request.github_issue,
     }
+
+
+@router.get("/{agent_id}/github-issues")
+async def get_github_issues(
+    agent_id: str,
+    refresh: bool = False,
+    label: str = "galangal",
+) -> dict:
+    """
+    Get GitHub issues from the connected agent.
+
+    If issues are cached and refresh=False, returns cached issues.
+    If refresh=True or no cached issues, requests fresh issues from agent.
+
+    Args:
+        agent_id: Target agent.
+        refresh: Force refresh from GitHub.
+        label: Label to filter issues by.
+    """
+    import asyncio
+
+    agent = manager.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not agent.connected:
+        raise HTTPException(status_code=400, detail="Agent not connected")
+
+    # Check if we have cached issues and don't need refresh
+    cached = manager.get_github_issues(agent_id)
+    if cached and not refresh:
+        return {"issues": cached, "cached": True}
+
+    # Request fresh issues from agent
+    action = HubAction(
+        action_type=ActionType.FETCH_GITHUB_ISSUES,
+        task_name="",  # Not task-specific
+        data={
+            "request_id": f"issues-{agent_id}",
+            "label": label,
+        },
+    )
+
+    success = await manager.send_to_agent(agent_id, action)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send request to agent")
+
+    # Wait for response (poll for up to 10 seconds)
+    for _ in range(20):
+        await asyncio.sleep(0.5)
+        issues = manager.get_github_issues(agent_id)
+        if issues:
+            return {"issues": issues, "cached": False}
+
+    # Timeout - return empty or cached
+    if cached:
+        return {"issues": cached, "cached": True, "timeout": True}
+    return {"issues": [], "cached": False, "timeout": True}

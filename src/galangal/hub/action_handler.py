@@ -23,6 +23,7 @@ class ActionType(str, Enum):
     INTERRUPT = "interrupt"
     RESPONSE = "response"  # Response to any prompt (not just approval)
     CREATE_TASK = "create_task"  # Create a new task
+    FETCH_GITHUB_ISSUES = "fetch_github_issues"  # Request GitHub issues list
 
 
 @dataclass
@@ -179,6 +180,13 @@ class ActionHandler:
                         callback(task_create)
                     except Exception:
                         pass
+            elif action.action_type == ActionType.FETCH_GITHUB_ISSUES:
+                # Handle GitHub issues fetch request asynchronously
+                import asyncio
+
+                request_id = action.data.get("request_id")
+                label = action.data.get("label", "galangal")
+                asyncio.create_task(self._handle_fetch_github_issues(request_id, label))
             else:
                 self._pending = action
 
@@ -237,6 +245,50 @@ class ActionHandler:
         self._pending = None
         self._pending_response = None
         self._pending_task_create = None
+
+    async def _handle_fetch_github_issues(
+        self,
+        request_id: str | None,
+        label: str = "galangal",
+    ) -> None:
+        """
+        Handle a request to fetch GitHub issues.
+
+        Fetches issues with the given label and sends them back to the hub.
+
+        Args:
+            request_id: Request ID for correlating with the hub request.
+            label: Label to filter issues by.
+        """
+        try:
+            from galangal.github.issues import list_issues
+            from galangal.hub.client import get_hub_client
+
+            # Fetch issues from GitHub
+            issues = list_issues(label=label)
+
+            # Convert to dict format for sending
+            issues_data = [
+                {
+                    "number": issue.number,
+                    "title": issue.title,
+                    "labels": issue.labels,
+                    "state": issue.state,
+                    "author": issue.author,
+                }
+                for issue in issues
+            ]
+
+            # Send back to hub
+            client = get_hub_client()
+            if client:
+                await client.send_github_issues(issues_data, request_id)
+
+        except Exception as e:
+            import structlog
+
+            logger = structlog.get_logger()
+            logger.warning("fetch_github_issues_failed", error=str(e))
 
 
 # Global action handler instance

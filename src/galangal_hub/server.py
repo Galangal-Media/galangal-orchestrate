@@ -287,6 +287,18 @@ async def agent_websocket(websocket: WebSocket) -> None:
                     await manager.update_artifacts(agent_id, artifacts)
                     logger.info(f"Agent {agent_id}: artifacts updated - {list(artifacts.keys())}")
 
+            elif msg_type == MessageType.GITHUB_ISSUES:
+                # Must be registered first
+                if not registered_agent_id:
+                    logger.warning("GITHUB_ISSUES received before registration")
+                    continue
+
+                agent_id = registered_agent_id
+                issues = payload.get("issues", [])
+                if isinstance(issues, list):
+                    await manager.update_github_issues(agent_id, issues)
+                    logger.info(f"Agent {agent_id}: received {len(issues)} GitHub issues")
+
     except WebSocketDisconnect:
         logger.info(f"Agent disconnected: {agent_id}")
     except Exception as e:

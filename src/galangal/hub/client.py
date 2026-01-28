@@ -36,6 +36,7 @@ class MessageType(str, Enum):
     HEARTBEAT = "heartbeat"
     PROMPT = "prompt"  # Send current prompt with options
     ARTIFACTS = "artifacts"  # Send artifact contents
+    GITHUB_ISSUES = "github_issues"  # Response with GitHub issues list
 
     # Hub -> Agent
     ACTION = "action"
@@ -316,6 +317,29 @@ class HubClient:
                 "options": [],
                 "artifacts": [],
                 "context": {},
+            },
+        )
+
+    async def send_github_issues(
+        self,
+        issues: list[dict[str, Any]],
+        request_id: str | None = None,
+    ) -> None:
+        """
+        Send GitHub issues list to hub.
+
+        Args:
+            issues: List of issue dicts with number, title, labels, state, author.
+            request_id: Optional request ID for correlating with request.
+        """
+        if not self._connected:
+            return
+
+        await self._send(
+            MessageType.GITHUB_ISSUES,
+            {
+                "issues": issues,
+                "request_id": request_id,
             },
         )
 

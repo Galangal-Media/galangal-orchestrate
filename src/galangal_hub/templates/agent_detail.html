@@ -121,7 +121,22 @@
         <!-- GitHub Issue Tab -->
         <div id="panel-issue" class="space-y-4">
             <div>
-                <label class="block text-sm text-gray-400 mb-1">GitHub Issue Number</label>
+                <label class="block text-sm text-gray-400 mb-1">Select Issue</label>
+                <div class="flex gap-2">
+                    <select id="github-issue-select"
+                            class="flex-1 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-purple-500 focus:outline-none">
+                        <option value="">Loading issues...</option>
+                    </select>
+                    <button onclick="refreshGitHubIssues('{{ agent.agent.agent_id }}')"
+                            id="refresh-issues-btn"
+                            class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm" title="Refresh issues">
+                        ↻
+                    </button>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">Issues labeled with 'galangal'</p>
+            </div>
+            <div>
+                <label class="block text-sm text-gray-400 mb-1">Or enter issue number manually</label>
                 <input type="number" id="github-issue" placeholder="e.g. 123"
                        class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-purple-500 focus:outline-none">
             </div>
@@ -302,13 +317,101 @@ function showTab(tab) {
     document.getElementById('panel-manual').classList.toggle('hidden', tab !== 'manual');
 }
 
+let cachedIssues = [];
+
+async function fetchGitHubIssues(agentId, refresh = false) {
+    const select = document.getElementById('github-issue-select');
+    const btn = document.getElementById('refresh-issues-btn');
+
+    select.innerHTML = '<option value="">Loading issues...</option>';
+    btn.disabled = true;
+    btn.textContent = '...';
+
+    try {
+        const url = `/api/actions/${agentId}/github-issues${refresh ? '?refresh=true' : ''}`;
+        const response = await fetch(url);
+
+        if (response.ok) {
+            const data = await response.json();
+            cachedIssues = data.issues || [];
+
+            if (cachedIssues.length === 0) {
+                select.innerHTML = '<option value="">No issues with "galangal" label found</option>';
+            } else {
+                select.innerHTML = '<option value="">Select an issue...</option>';
+                cachedIssues.forEach(issue => {
+                    const labels = issue.labels.filter(l => l !== 'galangal').join(', ');
+                    const labelText = labels ? ` [${labels}]` : '';
+                    select.innerHTML += `<option value="${issue.number}">#${issue.number}: ${issue.title}${labelText}</option>`;
+                });
+            }
+
+            if (data.timeout) {
+                console.warn('GitHub issues request timed out, showing cached data');
+            }
+        } else {
+            select.innerHTML = '<option value="">Failed to load issues</option>';
+        }
+    } catch (e) {
+        console.error('Failed to fetch issues:', e);
+        select.innerHTML = '<option value="">Error loading issues</option>';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '↻';
+    }
+}
+
+function refreshGitHubIssues(agentId) {
+    fetchGitHubIssues(agentId, true);
+}
+
+// Update the manual input when selection changes
+document.addEventListener('DOMContentLoaded', function() {
+    const select = document.getElementById('github-issue-select');
+    if (select) {
+        select.addEventListener('change', function() {
+            const manualInput = document.getElementById('github-issue');
+            if (this.value) {
+                manualInput.value = this.value;
+
+                // Try to infer task type from labels
+                const issue = cachedIssues.find(i => i.number === parseInt(this.value));
+                if (issue) {
+                    const labels = issue.labels.map(l => l.toLowerCase());
+                    const taskTypeSelect = document.getElementById('issue-task-type');
+                    if (labels.includes('bug') || labels.includes('bugfix')) {
+                        taskTypeSelect.value = 'bug_fix';
+                    } else if (labels.includes('enhancement') || labels.includes('feature')) {
+                        taskTypeSelect.value = 'feature';
+                    } else if (labels.includes('documentation') || labels.includes('docs')) {
+                        taskTypeSelect.value = 'docs';
+                    } else if (labels.includes('refactor')) {
+                        taskTypeSelect.value = 'refactor';
+                    } else if (labels.includes('chore') || labels.includes('maintenance')) {
+                        taskTypeSelect.value = 'chore';
+                    } else if (labels.includes('hotfix') || labels.includes('critical')) {
+                        taskTypeSelect.value = 'hotfix';
+                    }
+                }
+            }
+        });
+
+        // Fetch issues on page load
+        const agentId = '{{ agent.agent.agent_id }}';
+        fetchGitHubIssues(agentId);
+    }
+});
+
 async function createTaskFromIssue(agentId) {
-    const issue = document.getElementById('github-issue').value;
+    // Prefer selected issue, fall back to manual input
+    const selectedIssue = document.getElementById('github-issue-select').value;
+    const manualIssue = document.getElementById('github-issue').value;
+    const issue = selectedIssue || manualIssue;
     const repo = document.getElementById('github-repo').value;
     const taskType = document.getElementById('issue-task-type').value;
 
     if (!issue) {
-        alert('Please enter a GitHub issue number');
+        alert('Please select or enter a GitHub issue number');
         return;
     }
     if (!repo) {

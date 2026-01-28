@@ -29,6 +29,8 @@ class ConnectedAgent:
     connected: bool = True
     current_prompt: PromptData | None = None  # Currently displayed prompt
     artifacts: dict[str, str] = field(default_factory=dict)  # Artifact name -> content
+    github_issues: list[dict] = field(default_factory=list)  # Cached GitHub issues
+    github_issues_updated: datetime | None = None  # When issues were last updated
 
 
 @dataclass
@@ -139,6 +141,35 @@ class ConnectionManager:
             agent_id: Agent ID.
         """
         await self.update_prompt(agent_id, None)
+
+    async def update_github_issues(self, agent_id: str, issues: list[dict]) -> None:
+        """
+        Update the cached GitHub issues for an agent.
+
+        Args:
+            agent_id: Agent ID.
+            issues: List of issue dicts.
+        """
+        async with self._get_lock():
+            if agent_id in self._agents:
+                self._agents[agent_id].github_issues = issues
+                self._agents[agent_id].github_issues_updated = datetime.now(timezone.utc)
+        await self._notify_change()
+
+    def get_github_issues(self, agent_id: str) -> list[dict]:
+        """
+        Get cached GitHub issues for an agent.
+
+        Args:
+            agent_id: Agent ID.
+
+        Returns:
+            List of issue dicts, or empty list if not available.
+        """
+        agent = self._agents.get(agent_id)
+        if agent:
+            return agent.github_issues
+        return []
 
     async def send_to_agent(self, agent_id: str, action: HubAction) -> bool:
         """
