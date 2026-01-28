@@ -1,7 +1,8 @@
 """
-HTML views for the dashboard UI.
+Authentication views for the dashboard UI.
 
-Uses Jinja2 templates with HTMX for interactivity.
+Uses Jinja2 templates for the login page only.
+The rest of the UI is served by the React SPA.
 """
 
 from pathlib import Path
@@ -17,10 +18,8 @@ from galangal_hub.auth import (
     verify_dashboard_credentials,
     verify_session_token,
 )
-from galangal_hub.connection import manager
-from galangal_hub.storage import storage
 
-router = APIRouter(tags=["views"])
+login_router = APIRouter(tags=["auth"])
 
 # Template directory
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -35,7 +34,7 @@ async def check_auth(request: Request) -> bool:
     return session_token is not None and verify_session_token(session_token)
 
 
-@router.get("/login", response_model=None)
+@login_router.get("/login", response_model=None)
 async def login_page(request: Request) -> Response:
     """Login page."""
     # If already authenticated, redirect to dashboard
@@ -48,7 +47,7 @@ async def login_page(request: Request) -> Response:
     )
 
 
-@router.post("/login", response_model=None)
+@login_router.post("/login", response_model=None)
 async def login_submit(
     request: Request,
     username: str = Form(...),
@@ -76,167 +75,9 @@ async def login_submit(
         )
 
 
-@router.get("/logout", response_model=None)
+@login_router.get("/logout", response_model=None)
 async def logout(request: Request) -> Response:
     """Logout and clear session."""
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(SESSION_COOKIE)
     return response
-
-
-@router.get("/", response_model=None)
-async def dashboard(request: Request) -> Response:
-    """Main dashboard view."""
-    if not await check_auth(request):
-        return RedirectResponse(url="/login", status_code=302)
-
-    agents = manager.get_connected_agents()
-    needs_attention = manager.get_agents_needing_attention()
-    recent_tasks = await storage.get_recent_tasks(limit=10)
-
-    return templates.TemplateResponse(
-        "dashboard.html",
-        {
-            "request": request,
-            "agents": agents,
-            "needs_attention": needs_attention,
-            "recent_tasks": recent_tasks,
-            "auth_enabled": is_dashboard_auth_enabled(),
-        },
-    )
-
-
-@router.get("/agent/{agent_id}", response_model=None)
-async def agent_detail(request: Request, agent_id: str) -> Response:
-    """Agent detail view."""
-    if not await check_auth(request):
-        return RedirectResponse(url="/login", status_code=302)
-
-    agent = manager.get_agent(agent_id)
-    if not agent:
-        return templates.TemplateResponse(
-            "404.html",
-            {"request": request, "message": "Agent not found"},
-            status_code=404,
-        )
-
-    events = await storage.get_recent_events(agent_id=agent_id, limit=50)
-    tasks = await storage.get_recent_tasks(agent_id=agent_id, limit=20)
-
-    return templates.TemplateResponse(
-        "agent_detail.html",
-        {
-            "request": request,
-            "agent": agent,
-            "events": events,
-            "tasks": tasks,
-            "auth_enabled": is_dashboard_auth_enabled(),
-        },
-    )
-
-
-@router.get("/task/{agent_id}/{task_name}", response_model=None)
-async def task_detail(request: Request, agent_id: str, task_name: str) -> Response:
-    """Task detail view."""
-    if not await check_auth(request):
-        return RedirectResponse(url="/login", status_code=302)
-
-    agent = manager.get_agent(agent_id)
-
-    # Check if it's an active task
-    if agent and agent.task and agent.task.task_name == task_name:
-        events = await storage.get_recent_events(agent_id=agent_id, limit=50)
-        return templates.TemplateResponse(
-            "task_detail.html",
-            {
-                "request": request,
-                "agent": agent,
-                "task": agent.task,
-                "events": events,
-                "active": True,
-                "auth_enabled": is_dashboard_auth_enabled(),
-            },
-        )
-
-    # Check historical tasks
-    tasks = await storage.get_recent_tasks(agent_id=agent_id)
-    for task in tasks:
-        if task["task_name"] == task_name:
-            events = await storage.get_recent_events(agent_id=agent_id, limit=50)
-            return templates.TemplateResponse(
-                "task_detail.html",
-                {
-                    "request": request,
-                    "task": task,
-                    "events": events,
-                    "active": False,
-                    "auth_enabled": is_dashboard_auth_enabled(),
-                },
-            )
-
-    return templates.TemplateResponse(
-        "404.html",
-        {"request": request, "message": "Task not found"},
-        status_code=404,
-    )
-
-
-# HTMX partial endpoints for live updates
-
-
-@router.get("/partials/agents", response_model=None)
-async def agents_partial(request: Request) -> Response:
-    """Partial view of agent list for HTMX updates."""
-    if not await check_auth(request):
-        return RedirectResponse(url="/login", status_code=302)
-
-    agents = manager.get_connected_agents()
-    return templates.TemplateResponse(
-        "partials/agent_list.html",
-        {"request": request, "agents": agents},
-    )
-
-
-@router.get("/partials/needs-attention", response_model=None)
-async def needs_attention_partial(request: Request) -> Response:
-    """Partial view of agents needing attention for HTMX updates."""
-    if not await check_auth(request):
-        return RedirectResponse(url="/login", status_code=302)
-
-    agents = manager.get_agents_needing_attention()
-    return templates.TemplateResponse(
-        "partials/needs_attention.html",
-        {"request": request, "agents": agents},
-    )
-
-
-@router.get("/partials/agent/{agent_id}/task", response_model=None)
-async def agent_task_partial(request: Request, agent_id: str) -> Response:
-    """Partial view of agent's current task for HTMX updates."""
-    if not await check_auth(request):
-        return RedirectResponse(url="/login", status_code=302)
-
-    agent = manager.get_agent(agent_id)
-    return templates.TemplateResponse(
-        "partials/task_card.html",
-        {"request": request, "agent": agent},
-    )
-
-
-@router.get("/partials/agent/{agent_id}/prompt", response_model=None)
-async def agent_prompt_partial(request: Request, agent_id: str) -> Response:
-    """Partial view of agent's current prompt for HTMX updates."""
-    if not await check_auth(request):
-        return RedirectResponse(url="/login", status_code=302)
-
-    agent = manager.get_agent(agent_id)
-    task_name = agent.task.task_name if agent and agent.task else ""
-    return templates.TemplateResponse(
-        "partials/prompt_card.html",
-        {
-            "request": request,
-            "prompt": agent.current_prompt if agent else None,
-            "agent_id": agent_id,
-            "task_name": task_name,
-        },
-    )

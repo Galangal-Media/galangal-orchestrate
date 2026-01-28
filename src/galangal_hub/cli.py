@@ -56,10 +56,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print("Dashboard authentication disabled (set HUB_USERNAME and HUB_PASSWORD to enable)")
 
     # Create app with configuration
-    app = create_app(
-        db_path=db_path,
-        static_dir=Path(__file__).parent / "static" if (Path(__file__).parent / "static").exists() else None,
-    )
+    app = create_app(db_path=db_path)
 
     # Print version
     from galangal_hub import __version__

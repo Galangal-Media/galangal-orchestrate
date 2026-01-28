@@ -418,14 +418,12 @@ async def agent_websocket(websocket: WebSocket) -> None:
 
 def create_app(
     db_path: str | Path = "hub.db",
-    static_dir: str | Path | None = None,
 ) -> FastAPI:
     """
     Create and configure the FastAPI application.
 
     Args:
         db_path: Path to SQLite database.
-        static_dir: Path to static files directory (optional).
 
     Returns:
         Configured FastAPI application.
@@ -440,18 +438,25 @@ def create_app(
         lifespan=lifespan,
     )
 
-    # Mount static files if directory provided
-    if static_dir:
-        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-
-    # Register HTTP routes
-    from galangal_hub import views
+    # Register API routes
     from galangal_hub.api import actions, agents, tasks
 
     app.include_router(agents.router)
     app.include_router(tasks.router)
     app.include_router(actions.router)
-    app.include_router(views.router)
+
+    # Mount React SPA
+    from galangal_hub.spa import get_spa_router, mount_spa_static
+
+    # Mount SPA static assets
+    mount_spa_static(app)
+
+    # Register auth routes (login still uses Jinja2 for simplicity)
+    from galangal_hub import views
+    app.include_router(views.login_router)
+
+    # SPA routes
+    app.include_router(get_spa_router())
 
     # Register WebSocket routes
     app.websocket("/ws/dashboard")(dashboard_websocket)
