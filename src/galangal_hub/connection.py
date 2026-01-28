@@ -80,9 +80,8 @@ class ConnectionManager:
         """
         async with self._get_lock():
             if agent_id in self._agents:
-                self._agents[agent_id].connected = False
-                # Keep agent info for a bit for UI display
-                # Could add cleanup task later
+                # Remove the agent entirely - they'll reconnect with same ID if they come back
+                del self._agents[agent_id]
         await self._notify_change()
 
     async def update_task_state(self, agent_id: str, state: TaskState | None) -> TaskState | None:
@@ -255,6 +254,8 @@ class ConnectionManager:
         """
         Get all connected agents with their current state.
 
+        Only returns agents that are currently connected (filters out stale disconnected agents).
+
         Returns:
             List of agents with their task states.
         """
@@ -267,6 +268,7 @@ class ConnectionManager:
                 artifacts=agent.artifacts,
             )
             for agent in self._agents.values()
+            if agent.connected  # Only show connected agents
         ]
 
     def get_agent(self, agent_id: str) -> AgentWithState | None:

@@ -98,13 +98,29 @@ class HubClient:
     )
 
     def __post_init__(self) -> None:
+        # Generate deterministic agent_id from hostname + project_path
+        # This ensures reconnects from the same project use the same ID
+        hostname = platform.node()
+        project_path_str = str(self.project_path)
+        agent_id = self._generate_agent_id(hostname, project_path_str)
+
         self.agent_info = AgentInfo(
-            agent_id=str(uuid.uuid4()),
-            hostname=platform.node(),
+            agent_id=agent_id,
+            hostname=hostname,
             project_name=self.project_name,
-            project_path=str(self.project_path),
+            project_path=project_path_str,
             agent_name=self.config.agent_name,
         )
+
+    @staticmethod
+    def _generate_agent_id(hostname: str, project_path: str) -> str:
+        """Generate a deterministic agent ID from hostname and project path."""
+        import hashlib
+        # Create a stable hash from hostname + project_path
+        key = f"{hostname}:{project_path}"
+        hash_bytes = hashlib.sha256(key.encode()).digest()
+        # Use first 16 bytes as UUID (UUID v4 format for compatibility)
+        return str(uuid.UUID(bytes=hash_bytes[:16], version=4))
 
     @property
     def connected(self) -> bool:
