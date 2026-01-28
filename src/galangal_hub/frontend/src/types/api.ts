@@ -45,7 +45,7 @@ export interface PromptData {
 }
 
 export interface AgentWithState {
-  info: AgentInfo
+  agent: AgentInfo
   task: TaskState | null
   connected: boolean
   current_prompt: PromptData | null

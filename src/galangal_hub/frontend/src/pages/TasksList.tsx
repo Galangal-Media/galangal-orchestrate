@@ -25,7 +25,7 @@ export function TasksList() {
         if (agent.task && agent.connected) {
           allTasks.push({
             task: agent.task,
-            agentId: agent.info.agent_id,
+            agentId: agent.agent.agent_id,
           })
         }
       }

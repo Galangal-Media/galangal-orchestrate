@@ -26,7 +26,7 @@ export function Dashboard() {
       const data = await api.getAgents()
       setAgents(
         data.map((item) => ({
-          agent: item.info,
+          agent: item.agent,
           task: item.task,
           prompt: item.current_prompt,
           connected: item.connected,

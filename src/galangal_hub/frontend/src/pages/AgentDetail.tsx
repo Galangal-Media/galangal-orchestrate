@@ -12,7 +12,7 @@ import { formatRelativeTime } from "@/lib/utils"
 import { ArrowLeft, Monitor, FolderGit2, Clock, GitBranch, Target } from "lucide-react"
 
 interface AgentDetailData {
-  info: AgentInfo
+  agent: AgentInfo
   task: TaskState | null
   current_prompt: PromptData | null
   artifacts: Record<string, string>
@@ -92,7 +92,7 @@ export function AgentDetail() {
             Back
           </Button>
         </Link>
-        <h1 className="text-3xl font-bold">{agent.info.agent_id}</h1>
+        <h1 className="text-3xl font-bold">{agent.agent.agent_id}</h1>
         <Badge variant={agent.connected ? "success" : "secondary"}>
           {agent.connected ? "Connected" : "Disconnected"}
         </Badge>
@@ -102,7 +102,7 @@ export function AgentDetail() {
       {agent.current_prompt && agent.task && (
         <PromptCard
           prompt={agent.current_prompt}
-          agentId={agent.info.agent_id}
+          agentId={agent.agent.agent_id}
           taskName={agent.task.task_name}
           onResponse={fetchAgent}
         />
@@ -118,25 +118,25 @@ export function AgentDetail() {
             <div className="flex items-center gap-2">
               <Monitor className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm font-medium">Hostname:</span>
-              <span className="text-sm text-muted-foreground">{agent.info.hostname}</span>
+              <span className="text-sm text-muted-foreground">{agent.agent.hostname}</span>
             </div>
             <div className="flex items-center gap-2">
               <FolderGit2 className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm font-medium">Project:</span>
-              <span className="text-sm text-muted-foreground truncate">{agent.info.project_path}</span>
+              <span className="text-sm text-muted-foreground truncate">{agent.agent.project_path}</span>
             </div>
-            {agent.info.version && (
+            {agent.agent.version && (
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">Version:</span>
-                <Badge variant="outline">{agent.info.version}</Badge>
+                <Badge variant="outline">{agent.agent.version}</Badge>
               </div>
             )}
-            {agent.info.connected_at && (
+            {agent.agent.connected_at && (
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-medium">Connected:</span>
                 <span className="text-sm text-muted-foreground">
-                  {formatRelativeTime(agent.info.connected_at)}
+                  {formatRelativeTime(agent.agent.connected_at)}
                 </span>
               </div>
             )}
