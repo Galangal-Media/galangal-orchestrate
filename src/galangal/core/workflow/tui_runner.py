@@ -56,6 +56,10 @@ async def _init_hub_client(config: GalangalConfig, state: WorkflowState) -> None
 
         from galangal.hub.action_handler import get_action_handler
         from galangal.hub.client import HubClient, set_hub_client
+        from galangal.hub.hooks import set_main_loop
+
+        # Store main loop for thread-safe async scheduling
+        set_main_loop(asyncio.get_running_loop())
 
         project_path = Path.cwd()
         client = HubClient(
@@ -1369,6 +1373,10 @@ async def _init_hub_for_new_task(config: GalangalConfig) -> None:
 
         from galangal.hub.action_handler import get_action_handler
         from galangal.hub.client import HubClient, set_hub_client
+        from galangal.hub.hooks import set_main_loop
+
+        # Store main loop for thread-safe async scheduling
+        set_main_loop(asyncio.get_running_loop())
 
         project_path = Path.cwd()
         client = HubClient(

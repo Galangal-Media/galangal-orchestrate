@@ -8,12 +8,44 @@ and events with the hub server.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Coroutine, Any
 
 if TYPE_CHECKING:
     from galangal.core.state import Stage, WorkflowState
 
 from galangal.hub.client import EventType, get_hub_client
+
+# Store reference to the main event loop for thread-safe scheduling
+_main_loop: asyncio.AbstractEventLoop | None = None
+
+
+def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Set the main event loop for thread-safe async scheduling."""
+    global _main_loop
+    _main_loop = loop
+
+
+def _schedule_async(coro: Coroutine[Any, Any, Any]) -> None:
+    """
+    Schedule an async coroutine in a thread-safe manner.
+
+    Works whether called from the main thread (with event loop) or
+    from a background thread (e.g., inside asyncio.to_thread).
+    """
+    try:
+        # Try to get the running loop (works if we're in async context)
+        loop = asyncio.get_running_loop()
+        asyncio.create_task(coro)
+    except RuntimeError:
+        # No running loop - we're in a thread
+        # Use the stored main loop or try to get one
+        loop = _main_loop
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+        else:
+            # Can't schedule - silently skip (hub is optional)
+            # Close the coroutine to avoid warning
+            coro.close()
 
 
 def notify_state_saved(state: WorkflowState) -> None:
@@ -27,8 +59,8 @@ def notify_state_saved(state: WorkflowState) -> None:
     """
     client = get_hub_client()
     if client and client.connected:
-        # Run async in background
-        asyncio.create_task(_send_state_update(state))
+        # Run async in background (thread-safe)
+        _schedule_async(_send_state_update(state))
 
 
 async def _send_state_update(state: WorkflowState) -> None:
@@ -48,7 +80,7 @@ def notify_stage_start(state: WorkflowState, stage: Stage) -> None:
     """
     client = get_hub_client()
     if client and client.connected:
-        asyncio.create_task(
+        _schedule_async(
             _send_event(
                 EventType.STAGE_START,
                 {
@@ -70,7 +102,7 @@ def notify_stage_complete(state: WorkflowState, stage: Stage) -> None:
     """
     client = get_hub_client()
     if client and client.connected:
-        asyncio.create_task(
+        _schedule_async(
             _send_event(
                 EventType.STAGE_COMPLETE,
                 {
@@ -93,7 +125,7 @@ def notify_stage_fail(state: WorkflowState, stage: Stage, error: str) -> None:
     """
     client = get_hub_client()
     if client and client.connected:
-        asyncio.create_task(
+        _schedule_async(
             _send_event(
                 EventType.STAGE_FAIL,
                 {
@@ -116,7 +148,7 @@ def notify_approval_needed(state: WorkflowState, stage: Stage) -> None:
     """
     client = get_hub_client()
     if client and client.connected:
-        asyncio.create_task(
+        _schedule_async(
             _send_event(
                 EventType.APPROVAL_NEEDED,
                 {
@@ -139,7 +171,7 @@ def notify_rollback(state: WorkflowState, from_stage: Stage, to_stage: Stage, re
     """
     client = get_hub_client()
     if client and client.connected:
-        asyncio.create_task(
+        _schedule_async(
             _send_event(
                 EventType.ROLLBACK,
                 {
@@ -163,7 +195,7 @@ def notify_task_complete(state: WorkflowState, success: bool) -> None:
     client = get_hub_client()
     if client and client.connected:
         event_type = EventType.TASK_COMPLETE if success else EventType.TASK_ERROR
-        asyncio.create_task(
+        _schedule_async(
             _send_event(
                 event_type,
                 {
@@ -216,7 +248,7 @@ def notify_prompt(
                 # It's already a dict
                 option_dicts.append(opt)
 
-        asyncio.create_task(
+        _schedule_async(
             _send_prompt(prompt_type, message, option_dicts, artifacts, context)
         )
 
@@ -238,7 +270,7 @@ def notify_prompt_cleared() -> None:
     """Notify hub that the current prompt has been answered/cleared."""
     client = get_hub_client()
     if client and client.connected:
-        asyncio.create_task(_clear_prompt())
+        _schedule_async(_clear_prompt())
 
 
 async def _clear_prompt() -> None:
@@ -257,7 +289,7 @@ def notify_artifacts_updated(artifacts: dict[str, str]) -> None:
     """
     client = get_hub_client()
     if client and client.connected:
-        asyncio.create_task(_send_artifacts(artifacts))
+        _schedule_async(_send_artifacts(artifacts))
 
 
 async def _send_artifacts(artifacts: dict[str, str]) -> None:
