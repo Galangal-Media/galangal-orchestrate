@@ -23,9 +23,8 @@ on:
       - main
     paths:
       - 'src/galangal_hub/**'
-      - 'src/galangal/hub/**'
       - 'docker/Dockerfile.hub'
-      - 'pyproject.toml'
+      - 'VERSION'
       - '.github/workflows/docker-hub.yml'
     tags:
       - 'v*'
