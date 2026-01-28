@@ -81,3 +81,13 @@ async def logout(request: Request) -> Response:
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(SESSION_COOKIE)
     return response
+
+
+@login_router.get("/api/auth/status")
+async def auth_status(request: Request) -> dict:
+    """Check authentication status for the SPA."""
+    authenticated = await check_auth(request)
+    return {
+        "authenticated": authenticated,
+        "auth_required": is_dashboard_auth_enabled(),
+    }

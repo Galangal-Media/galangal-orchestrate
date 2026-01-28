@@ -1,9 +1,9 @@
 import { Link, useLocation } from "react-router-dom"
-import { Moon, Sun, Menu, X, Sparkles } from "lucide-react"
+import { Moon, Sun, Menu, X, Sparkles, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useTheme } from "@/hooks/useTheme"
 import { cn } from "@/lib/utils"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
 const navItems = [
   { path: "/", label: "Dashboard" },
@@ -15,6 +15,19 @@ export function Header() {
   const { theme, toggleTheme } = useTheme()
   const location = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [authRequired, setAuthRequired] = useState(false)
+
+  // Check if auth is required
+  useEffect(() => {
+    fetch('/api/auth/status')
+      .then(res => res.json())
+      .then(data => setAuthRequired(data.auth_required))
+      .catch(() => setAuthRequired(false))
+  }, [])
+
+  const handleLogout = () => {
+    window.location.href = '/logout'
+  }
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-header-border bg-header/95 backdrop-blur supports-[backdrop-filter]:bg-header/80">
@@ -57,6 +70,18 @@ export function Header() {
               <Moon className="h-5 w-5 text-muted-foreground" />
             )}
           </Button>
+          {authRequired && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleLogout}
+              aria-label="Logout"
+              className="rounded-lg hover:bg-muted"
+              title="Logout"
+            >
+              <LogOut className="h-5 w-5 text-muted-foreground" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -91,6 +116,15 @@ export function Header() {
                 {item.label}
               </Link>
             ))}
+            {authRequired && (
+              <button
+                onClick={handleLogout}
+                className="px-4 py-3 rounded-lg transition-all duration-200 font-medium text-left text-muted-foreground hover:text-foreground hover:bg-muted/50 flex items-center gap-2"
+              >
+                <LogOut className="h-4 w-4" />
+                Logout
+              </button>
+            )}
           </nav>
         </div>
       )}

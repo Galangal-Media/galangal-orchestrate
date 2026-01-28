@@ -92,6 +92,9 @@ class HubClient:
     _heartbeat_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _receive_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
 
+    # Last known state (for resending on reconnect)
+    _last_state: dict[str, Any] | None = field(default=None, init=False, repr=False)
+
     # Callbacks
     _action_handlers: list[Callable[[dict[str, Any]], None]] = field(
         default_factory=list, init=False, repr=False
@@ -196,25 +199,26 @@ class HubClient:
         Args:
             state: Current workflow state.
         """
+        # Store state for resending on reconnect
+        state_data = {
+            "task_name": state.task_name,
+            "task_description": state.task_description,
+            "task_type": state.task_type.value,
+            "stage": state.stage.value,
+            "attempt": state.attempt,
+            "awaiting_approval": state.awaiting_approval,
+            "last_failure": state.last_failure,
+            "started_at": state.started_at,
+            "stage_durations": state.stage_durations,
+            "github_issue": state.github_issue,
+            "github_repo": state.github_repo,
+        }
+        self._last_state = state_data
+
         if not self._connected:
             return
 
-        await self._send(
-            MessageType.STATE_UPDATE,
-            {
-                "task_name": state.task_name,
-                "task_description": state.task_description,
-                "task_type": state.task_type.value,
-                "stage": state.stage.value,
-                "attempt": state.attempt,
-                "awaiting_approval": state.awaiting_approval,
-                "last_failure": state.last_failure,
-                "started_at": state.started_at,
-                "stage_durations": state.stage_durations,
-                "github_issue": state.github_issue,
-                "github_repo": state.github_repo,
-            },
-        )
+        await self._send(MessageType.STATE_UPDATE, state_data)
 
     async def send_idle_state(self) -> None:
         """
@@ -444,6 +448,12 @@ class HubClient:
         while not self._connected:
             await asyncio.sleep(self.config.reconnect_interval)
             if await self.connect():
+                # Resend last known state on reconnect
+                if self._last_state:
+                    try:
+                        await self._send(MessageType.STATE_UPDATE, self._last_state)
+                    except Exception:
+                        pass
                 break
 
     def _get_auth_headers(self) -> dict[str, str]:

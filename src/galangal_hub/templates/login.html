@@ -4,23 +4,72 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Galangal Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#8b5cf6',
+                        'primary-hover': '#7c3aed',
+                        background: '#09090b',
+                        card: '#18181b',
+                        muted: '#27272a',
+                        'muted-foreground': '#a1a1aa',
+                        border: '#3f3f46',
+                        destructive: '#ef4444',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-logo {
+            background: linear-gradient(135deg, #8b5cf6 0%, #c084fc 100%);
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #8b5cf6 0%, #c084fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        input:focus {
+            outline: none;
+            box-shadow: 0 0 0 2px #8b5cf6;
+        }
+    </style>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen flex items-center justify-center">
+<body class="bg-background text-gray-100 min-h-screen flex items-center justify-center font-sans p-4">
     <div class="w-full max-w-md">
-        <div class="bg-gray-800 rounded-lg shadow-xl p-8">
+        <div class="bg-card rounded-xl shadow-2xl p-8 border border-border">
+            <!-- Logo -->
             <div class="text-center mb-8">
-                <h1 class="text-2xl font-bold text-purple-400">Galangal Hub</h1>
-                <p class="text-gray-400 mt-2">Sign in to access the dashboard</p>
+                <div class="inline-flex items-center justify-center w-14 h-14 rounded-xl gradient-logo shadow-lg shadow-primary/25 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+                        <path d="M5 3v4"/>
+                        <path d="M19 17v4"/>
+                        <path d="M3 5h4"/>
+                        <path d="M17 19h4"/>
+                    </svg>
+                </div>
+                <h1 class="text-2xl font-bold gradient-text">Galangal Hub</h1>
+                <p class="text-muted-foreground mt-2 text-sm">Sign in to access the dashboard</p>
             </div>
 
             {% if error %}
-            <div class="bg-red-900/50 border border-red-500 text-red-200 px-4 py-3 rounded mb-6">
+            <div class="bg-destructive/10 border border-destructive/50 text-red-300 px-4 py-3 rounded-lg mb-6 text-sm">
                 {{ error }}
             </div>
             {% endif %}
 
-            <form method="POST" action="/login" class="space-y-6">
+            <form method="POST" action="/login" class="space-y-5">
                 <div>
                     <label for="username" class="block text-sm font-medium text-gray-300 mb-2">
                         Username
@@ -31,7 +80,7 @@
                         name="username"
                         required
                         autocomplete="username"
-                        class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-100 placeholder-gray-400"
+                        class="w-full px-4 py-3 bg-muted border border-border rounded-lg text-gray-100 placeholder-muted-foreground transition-all"
                         placeholder="Enter username"
                     >
                 </div>
@@ -46,22 +95,22 @@
                         name="password"
                         required
                         autocomplete="current-password"
-                        class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-100 placeholder-gray-400"
+                        class="w-full px-4 py-3 bg-muted border border-border rounded-lg text-gray-100 placeholder-muted-foreground transition-all"
                         placeholder="Enter password"
                     >
                 </div>
 
                 <button
                     type="submit"
-                    class="w-full py-2 px-4 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition duration-200 focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 focus:ring-offset-gray-800"
+                    class="w-full py-3 px-4 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-all duration-200 shadow-lg shadow-primary/25 hover:shadow-primary/40"
                 >
                     Sign In
                 </button>
             </form>
         </div>
 
-        <p class="text-center text-gray-500 text-sm mt-6">
-            Galangal Orchestrate - AI Development Workflows
+        <p class="text-center text-muted-foreground text-xs mt-6">
+            Galangal Orchestrate &middot; AI Development Workflows
         </p>
     </div>
 </body>
