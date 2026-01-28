@@ -392,6 +392,12 @@ async function respondToPrompt(agentId, taskName, promptType, result) {
 // Submit Discovery Q&A answers
 async function submitQAAnswers(agentId, taskName, promptType) {
     const taskPath = taskName || '_';
+    const submitBtn = event.target;
+
+    // Disable button and show feedback
+    submitBtn.disabled = true;
+    const originalText = submitBtn.textContent;
+    submitBtn.textContent = 'Submitting...';
 
     // Collect all answers from textareas
     const textareas = document.querySelectorAll('#qa-questions .qa-answer');
@@ -414,19 +420,32 @@ async function submitQAAnswers(agentId, taskName, promptType) {
             })
         });
         if (response.ok) {
-            htmx.trigger(document.getElementById('active-prompt'), 'refresh');
+            // Clear inputs and allow refresh
+            textareas.forEach(t => t.value = '');
+            window.promptInputFocused = false;
+            // Force refresh to show next prompt
+            htmx.trigger(document.getElementById('active-prompt'), 'htmx:load');
+            // Also do a manual refresh after short delay
+            setTimeout(() => {
+                htmx.trigger(document.getElementById('active-prompt'), 'refresh');
+            }, 500);
         } else {
             const data = await response.json();
             alert('Failed to submit answers: ' + (data.detail || 'Unknown error'));
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
         }
     } catch (e) {
         alert('Error: ' + e.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
     }
 }
 
 // Submit text input (single or multiline)
 async function submitTextInput(agentId, taskName, promptType) {
     const taskPath = taskName || '_';
+    const submitBtn = event.target;
     const textarea = document.getElementById('text-input-value');
     const textValue = textarea ? textarea.value.trim() : '';
 
@@ -434,6 +453,11 @@ async function submitTextInput(agentId, taskName, promptType) {
         alert('Please enter a response');
         return;
     }
+
+    // Disable button and show feedback
+    submitBtn.disabled = true;
+    const originalText = submitBtn.textContent;
+    submitBtn.textContent = 'Submitting...';
 
     try {
         const response = await fetch(`/api/actions/${agentId}/${taskPath}/respond`, {
@@ -446,13 +470,23 @@ async function submitTextInput(agentId, taskName, promptType) {
             })
         });
         if (response.ok) {
-            htmx.trigger(document.getElementById('active-prompt'), 'refresh');
+            // Clear input and allow refresh
+            if (textarea) textarea.value = '';
+            window.promptInputFocused = false;
+            // Force refresh to show next prompt
+            setTimeout(() => {
+                htmx.trigger(document.getElementById('active-prompt'), 'refresh');
+            }, 500);
         } else {
             const data = await response.json();
             alert('Failed to submit: ' + (data.detail || 'Unknown error'));
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
         }
     } catch (e) {
         alert('Error: ' + e.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
     }
 }
 
