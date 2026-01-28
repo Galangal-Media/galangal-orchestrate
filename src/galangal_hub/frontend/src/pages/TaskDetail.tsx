@@ -24,6 +24,84 @@ interface OutputLine {
   line_type: string
 }
 
+interface ParsedOutput {
+  text: string
+  type: 'ai_response' | 'tool_use' | 'tool_result' | 'system' | 'result' | 'raw'
+  toolName?: string
+  isError?: boolean
+}
+
+// Parse a raw JSON line into a structured output
+function parseOutputLine(line: string): ParsedOutput | null {
+  try {
+    const data = JSON.parse(line.trim())
+    const msgType = data.type || ''
+
+    // AI text response - always show
+    if (msgType === 'assistant') {
+      const content = data.message?.content || []
+      for (const item of content) {
+        if (item.type === 'text' && item.text?.trim()) {
+          return { text: item.text.trim(), type: 'ai_response' }
+        }
+        if (item.type === 'tool_use') {
+          const toolName = item.name || 'Tool'
+          const input = item.input || {}
+          let detail = ''
+          if (toolName === 'Write' || toolName === 'Edit' || toolName === 'Read') {
+            const path = input.file_path || input.path || ''
+            detail = path.split('/').pop() || path
+          } else if (toolName === 'Bash') {
+            detail = (input.command || '').slice(0, 60)
+          } else if (toolName === 'Grep' || toolName === 'Glob') {
+            detail = (input.pattern || '').slice(0, 40)
+          } else if (toolName === 'Task') {
+            detail = input.description || 'agent'
+          }
+          return {
+            text: detail ? `${toolName}: ${detail}` : toolName,
+            type: 'tool_use',
+            toolName
+          }
+        }
+      }
+    }
+
+    // Tool result - verbose only
+    if (msgType === 'user') {
+      const content = data.message?.content || []
+      for (const item of content) {
+        if (item.type === 'tool_result') {
+          return {
+            text: 'Tool completed',
+            type: 'tool_result',
+            isError: item.is_error
+          }
+        }
+      }
+    }
+
+    // System message - verbose only
+    if (msgType === 'system') {
+      const message = data.message || ''
+      return { text: message, type: 'system' }
+    }
+
+    // Final result - always show
+    if (msgType === 'result') {
+      return { text: data.result || 'Completed', type: 'result' }
+    }
+
+    return null
+  } catch {
+    // Not JSON or parse error - treat as raw
+    if (line.trim()) {
+      return { text: line, type: 'raw' }
+    }
+    return null
+  }
+}
+
 export function TaskDetail() {
   const { agentId, taskName } = useParams<{ agentId: string; taskName: string }>()
   const [agent, setAgent] = useState<AgentDetailData | null>(null)
@@ -33,6 +111,7 @@ export function TaskDetail() {
   const [outputIndex, setOutputIndex] = useState(0)
   const outputRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
+  const [verboseMode, setVerboseMode] = useState(false)
 
   const { lastMessage } = useWebSocket("/ws/dashboard")
 
@@ -147,23 +226,6 @@ export function TaskDetail() {
         </div>
       </div>
     )
-  }
-
-  const getLineColor = (lineType: string) => {
-    switch (lineType) {
-      case 'error':
-        return 'text-destructive'
-      case 'warning':
-        return 'text-warning'
-      case 'success':
-        return 'text-success'
-      case 'info':
-        return 'text-info'
-      case 'stage':
-        return 'text-primary font-semibold'
-      default:
-        return 'text-muted-foreground'
-    }
   }
 
   return (
@@ -287,20 +349,29 @@ export function TaskDetail() {
 
       {/* Live Output */}
       <section className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-3">
             <div className="w-1 h-6 rounded-full bg-success" />
             <h2 className="text-xl font-semibold">Live Output</h2>
             <span className="text-sm text-muted-foreground">({outputLines.length} lines)</span>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setAutoScroll(!autoScroll)}
-            className={autoScroll ? "text-success" : "text-muted-foreground"}
-          >
-            {autoScroll ? "Auto-scroll ON" : "Auto-scroll OFF"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant={verboseMode ? "default" : "outline"}
+              size="sm"
+              onClick={() => setVerboseMode(!verboseMode)}
+            >
+              {verboseMode ? "Verbose" : "AI Only"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAutoScroll(!autoScroll)}
+              className={autoScroll ? "text-success" : "text-muted-foreground"}
+            >
+              {autoScroll ? "Auto-scroll ON" : "Auto-scroll OFF"}
+            </Button>
+          </div>
         </div>
         <Card>
           <CardContent className="p-0">
@@ -315,11 +386,50 @@ export function TaskDetail() {
                   <span>Waiting for output...</span>
                 </div>
               ) : (
-                outputLines.map((line, index) => (
-                  <div key={index} className={`py-0.5 ${getLineColor(line.line_type)}`}>
-                    {line.line}
-                  </div>
-                ))
+                outputLines.map((rawLine, index) => {
+                  const parsed = parseOutputLine(rawLine.line)
+                  if (!parsed) return null
+
+                  // In non-verbose mode, only show AI responses and results
+                  if (!verboseMode && parsed.type !== 'ai_response' && parsed.type !== 'result') {
+                    return null
+                  }
+
+                  // Style based on type
+                  let className = 'py-1 '
+                  let icon = ''
+                  switch (parsed.type) {
+                    case 'ai_response':
+                      className += 'text-foreground pl-4 border-l-2 border-primary/30'
+                      icon = '💬 '
+                      break
+                    case 'tool_use':
+                      className += 'text-muted-foreground text-[11px]'
+                      icon = '🔧 '
+                      break
+                    case 'tool_result':
+                      className += parsed.isError ? 'text-destructive text-[11px]' : 'text-muted-foreground/60 text-[11px]'
+                      icon = parsed.isError ? '❌ ' : '✓ '
+                      break
+                    case 'system':
+                      className += 'text-warning text-[11px]'
+                      icon = '⚡ '
+                      break
+                    case 'result':
+                      className += 'text-success font-medium'
+                      icon = '✅ '
+                      break
+                    default:
+                      className += 'text-muted-foreground/50 text-[11px]'
+                  }
+
+                  return (
+                    <div key={index} className={className}>
+                      {verboseMode && <span className="opacity-60">{icon}</span>}
+                      {parsed.text}
+                    </div>
+                  )
+                })
               )}
             </div>
           </CardContent>
