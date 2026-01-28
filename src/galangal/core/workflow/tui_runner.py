@@ -923,16 +923,62 @@ def _parse_discovery_questions(output: str) -> list[str]:
             in_questions = True
             continue
 
+        # Stop at next header or marker
+        if in_questions and line.startswith("#"):
+            break
+
         if in_questions and line:
             # Match numbered questions (1. Question text)
             match = re.match(r"^\d+[\.\)]\s*(.+)$", line)
             if match:
-                questions.append(match.group(1))
+                question = match.group(1).strip()
+                # Extract only up to the first question mark (strips trailing explanations)
+                question = _extract_question_only(question)
+                if question:
+                    questions.append(question)
             elif line.startswith("-"):
                 # Also accept bullet points
-                questions.append(line[1:].strip())
+                question = line[1:].strip()
+                question = _extract_question_only(question)
+                if question:
+                    questions.append(question)
 
     return questions
+
+
+def _extract_question_only(text: str) -> str:
+    """
+    Extract just the question from text, stripping trailing explanations.
+
+    Handles cases like:
+    - "What tech to use? (this is important because...)" -> "What tech to use?"
+    - "What tech to use - this affects X and Y" -> "What tech to use"
+    - "Since X, what should we do? Because Y..." -> "what should we do?"
+    """
+    # Find the first question mark
+    q_idx = text.find("?")
+    if q_idx != -1:
+        # Keep everything up to and including the question mark
+        return text[: q_idx + 1].strip()
+
+    # No question mark - strip common trailing patterns
+    # Strip parenthetical explanations
+    paren_idx = text.find("(")
+    if paren_idx > 10:  # Only if there's substantial text before
+        text = text[:paren_idx].strip()
+
+    # Strip dash-separated explanations
+    dash_idx = text.find(" - ")
+    if dash_idx > 10:
+        text = text[:dash_idx].strip()
+
+    # Strip "because", "since", "as" clauses at the end
+    for separator in [" because ", " since ", " as this "]:
+        idx = text.lower().find(separator)
+        if idx > 10:
+            text = text[:idx].strip()
+
+    return text
 
 
 def _write_discovery_log(task_name: str, qa_rounds: list[dict[str, Any]]) -> None:

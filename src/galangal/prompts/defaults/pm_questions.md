@@ -46,15 +46,22 @@ Brief: "Build a user notification system"
 
 ## Output Format
 
-Generate 3-5 focused questions as a numbered list:
+Generate 3-5 focused questions as a numbered list. **CRITICAL: Output ONLY the questions - no explanations, no context, no reasoning.**
 
 ```
 # DISCOVERY_QUESTIONS
 
-1. [Specific question about the brief]
-2. [Question about technology or approach]
-3. [Question about scope or user experience]
+1. What search technology should we use: PostgreSQL full-text, Elasticsearch, or Algolia?
+2. Should search results appear as-you-type or only after form submission?
+3. Which fields should be searchable: name only, or also description and tags?
 ```
+
+**DO NOT include any of the following:**
+- Explanatory text before or after questions
+- Reasoning like "Since the brief mentions X..."
+- Parenthetical context like "(this affects Y)"
+- Multiple sentences - just the question
+- Anything other than the numbered question itself
 
 ## When NO_QUESTIONS is Appropriate
 
