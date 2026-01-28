@@ -279,6 +279,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         level: ActivityLevel = ActivityLevel.INFO,
         category: ActivityCategory = ActivityCategory.SYSTEM,
         details: str | None = None,
+        verbose_only: bool = False,
     ) -> None:
         """
         Add activity to log.
@@ -289,6 +290,8 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
             level: Severity level (info, success, warning, error).
             category: Category for filtering (stage, validation, claude, file, system).
             details: Optional additional details for export.
+            verbose_only: If True, only show in verbose mode (e.g., tool calls).
+                         If False, show in both modes (e.g., Claude's text responses).
         """
         entry = ActivityEntry(
             message=activity,
@@ -296,6 +299,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
             level=level,
             category=category,
             details=details,
+            verbose_only=verbose_only,
         )
         self._activity_entries.append(entry)
         if self._activity_log_handle:
@@ -303,9 +307,13 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
                 self._activity_log_handle.write(entry.format_export() + "\n")
             except OSError:
                 self._activity_log_handle = None
+
         def _add() -> None:
-            # Only show activity in compact (non-verbose) mode
-            if not self.verbose:
+            # Filtering logic:
+            # - In verbose mode: show everything
+            # - In compact mode: only show items where verbose_only=False (AI responses)
+            should_display = self.verbose or not verbose_only
+            if should_display:
                 log = self._safe_query("#activity-log", RichLog)
                 if log:
                     log.write(entry.format_display())
@@ -1036,15 +1044,15 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         log.clear()
 
         if self.verbose:
-            log.write("[#83a598]Switched to VERBOSE mode - showing raw JSON[/]")
-            # Replay last 30 raw lines
-            for line in self._raw_lines[-30:]:
-                display = line.strip()[:150]
-                log.write(f"[#7c6f64]{display}[/]")
+            log.write("[#83a598]Switched to VERBOSE mode - showing all activity[/]")
+            # Replay last 50 activity entries (includes tool calls)
+            for entry in list(self._activity_entries)[-50:]:
+                log.write(entry.format_display())
         else:
-            log.write("[#b8bb26]Switched to COMPACT mode[/]")
-            # Replay recent activity entries
-            for entry in list(self._activity_entries)[-30:]:
+            log.write("[#b8bb26]Switched to COMPACT mode - showing AI responses only[/]")
+            # Replay recent activity entries, excluding verbose_only items
+            non_verbose = [e for e in self._activity_entries if not e.verbose_only]
+            for entry in non_verbose[-30:]:
                 log.write(entry.format_display())
 
     def action_toggle_files(self) -> None:

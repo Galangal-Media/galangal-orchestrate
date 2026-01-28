@@ -124,7 +124,7 @@ class StageUI:
     def set_status(self, status: str, detail: str = "") -> None:
         pass
 
-    def add_activity(self, activity: str, icon: str = "•") -> None:
+    def add_activity(self, activity: str, icon: str = "•", verbose_only: bool = False) -> None:
         pass
 
     def add_raw_line(self, line: str) -> None:
@@ -146,16 +146,17 @@ class TUIAdapter(StageUI):
     def set_status(self, status: str, detail: str = "") -> None:
         self.app.set_status(status, detail)
 
-    def add_activity(self, activity: str, icon: str = "•") -> None:
-        self.app.add_activity(activity, icon)
+    def add_activity(self, activity: str, icon: str = "•", verbose_only: bool = False) -> None:
+        self.app.add_activity(activity, icon, verbose_only=verbose_only)
 
-        # Track file operations
-        if "Read:" in activity or "📖" in activity:
-            path = activity.split(":")[-1].strip() if ":" in activity else activity
-            self.app.add_file("read", path)
-        elif "Edit:" in activity or "Write:" in activity or "✏️" in activity:
-            path = activity.split(":")[-1].strip() if ":" in activity else activity
-            self.app.add_file("write", path)
+        # Track file operations (only for verbose items)
+        if verbose_only:
+            if "Read:" in activity or "📖" in activity:
+                path = activity.split(":")[-1].strip() if ":" in activity else activity
+                self.app.add_file("read", path)
+            elif "Edit:" in activity or "Write:" in activity or "✏️" in activity:
+                path = activity.split(":")[-1].strip() if ":" in activity else activity
+                self.app.add_file("write", path)
 
     def add_raw_line(self, line: str) -> None:
         """Pass raw line to app for storage and display."""

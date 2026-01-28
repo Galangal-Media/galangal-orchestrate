@@ -45,6 +45,8 @@ class ActivityEntry:
         message: Human-readable message.
         icon: Deprecated, kept for backwards compatibility.
         details: Optional additional details (e.g., stack trace, full output).
+        verbose_only: If True, only show in verbose mode (tool calls).
+                     If False, show in all modes (AI text responses).
     """
 
     message: str
@@ -52,6 +54,7 @@ class ActivityEntry:
     category: ActivityCategory = ActivityCategory.SYSTEM
     icon: str = "•"
     details: str | None = None
+    verbose_only: bool = False
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def format_display(self, show_timestamp: bool = True) -> str:

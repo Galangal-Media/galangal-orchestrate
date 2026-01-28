@@ -241,7 +241,7 @@ class ClaudeBackend(AIBackend):
                         file_path = tool_input.get("file_path", "") or tool_input.get("path", "")
                         if file_path:
                             short_path = file_path.split("/")[-1] if "/" in file_path else file_path
-                            ui.add_activity(f"{tool_name}: {short_path}", "✏️")
+                            ui.add_activity(f"{tool_name}: {short_path}", "✏️", verbose_only=True)
                             ui.set_status("writing", short_path)
 
                     elif tool_name == "Read":
@@ -249,27 +249,34 @@ class ClaudeBackend(AIBackend):
                         file_path = tool_input.get("file_path", "") or tool_input.get("path", "")
                         if file_path:
                             short_path = file_path.split("/")[-1] if "/" in file_path else file_path
-                            ui.add_activity(f"Read: {short_path}", "📖")
+                            ui.add_activity(f"Read: {short_path}", "📖", verbose_only=True)
                             ui.set_status("reading", short_path)
 
                     elif tool_name == "Bash":
                         cmd_preview = item.get("input", {}).get("command", "")[:140]
-                        ui.add_activity(f"Bash: {cmd_preview}", "🔧")
+                        ui.add_activity(f"Bash: {cmd_preview}", "🔧", verbose_only=True)
                         ui.set_status("running", "bash")
 
                     elif tool_name in ["Grep", "Glob"]:
                         pattern = item.get("input", {}).get("pattern", "")[:80]
-                        ui.add_activity(f"{tool_name}: {pattern}", "🔍")
+                        ui.add_activity(f"{tool_name}: {pattern}", "🔍", verbose_only=True)
                         ui.set_status("searching", pattern[:40])
 
                     elif tool_name == "Task":
                         desc = item.get("input", {}).get("description", "agent")
-                        ui.add_activity(f"Task: {desc}", "🤖")
+                        ui.add_activity(f"Task: {desc}", "🤖", verbose_only=True)
                         ui.set_status("agent", desc[:25])
 
                     elif tool_name not in ["TodoWrite"]:
-                        ui.add_activity(f"{tool_name}", "⚡")
+                        ui.add_activity(f"{tool_name}", "⚡", verbose_only=True)
                         ui.set_status("executing", tool_name)
+
+            elif item.get("type") == "text":
+                # Show Claude's text responses (always visible, not verbose-only)
+                text = item.get("text", "").strip()
+                if text and ui:
+                    # Show full text content
+                    ui.add_activity(text, "💬", verbose_only=False)
 
             elif item.get("type") == "thinking":
                 if ui:

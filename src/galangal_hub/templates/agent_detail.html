@@ -585,10 +585,8 @@ function formatOutputLine(line, verbose) {
                             textParts.push(heading);
                             verboseParts.push(heading);
                         } else {
-                            // Show first line or truncated content
-                            const firstLine = text.split('\n')[0];
-                            const display = firstLine.length > 200 ? firstLine.substring(0, 200) + '...' : firstLine;
-                            const textHtml = `<span class="text-green-400">${escapeHtml(display)}</span>`;
+                            // Show full text content (may be multi-line)
+                            const textHtml = `<span class="text-green-400">${escapeHtml(text)}</span>`;
                             textParts.push(textHtml);
                             verboseParts.push(textHtml);
                         }
