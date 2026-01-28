@@ -500,54 +500,156 @@ let outputNextIndex = 0;
 let outputLineCount = 0;
 const MAX_OUTPUT_LINES = 500;
 
+function formatOutputLine(line) {
+    // Returns { html: string, skip: boolean }
+    try {
+        const json = JSON.parse(line);
+
+        // System init message
+        if (json.type === 'system' && json.subtype === 'init') {
+            return {
+                html: `<span class="text-purple-400">▶ Session started</span> <span class="text-gray-500">(${json.model || 'unknown model'})</span>`,
+                skip: false
+            };
+        }
+
+        // Result message
+        if (json.type === 'result') {
+            const icon = json.subtype === 'success' ? '✓' : json.subtype === 'error' ? '✗' : '●';
+            const color = json.subtype === 'success' ? 'text-green-400' : json.subtype === 'error' ? 'text-red-400' : 'text-purple-400';
+            return {
+                html: `<span class="${color}">${icon} Result: ${json.subtype || 'done'}</span>`,
+                skip: false
+            };
+        }
+
+        // Assistant message with tool calls
+        if (json.type === 'assistant' && json.message?.content) {
+            const parts = [];
+
+            for (const content of json.message.content) {
+                if (content.type === 'tool_use') {
+                    // Format tool call nicely
+                    const toolName = content.name || 'Unknown';
+                    let detail = '';
+
+                    if (content.input) {
+                        if (content.input.file_path) {
+                            detail = content.input.file_path.split('/').pop();
+                        } else if (content.input.pattern) {
+                            detail = `"${content.input.pattern}"`;
+                        } else if (content.input.command) {
+                            const cmd = content.input.command.substring(0, 60);
+                            detail = cmd + (content.input.command.length > 60 ? '...' : '');
+                        } else if (content.input.query) {
+                            detail = `"${content.input.query.substring(0, 40)}..."`;
+                        }
+                    }
+
+                    const detailSpan = detail ? ` <span class="text-gray-500">${escapeHtml(detail)}</span>` : '';
+                    parts.push(`<span class="text-yellow-400">🔧 ${toolName}</span>${detailSpan}`);
+                } else if (content.type === 'text' && content.text) {
+                    // Show text content (Claude's thinking/response)
+                    const text = content.text.trim();
+                    if (text.length > 0) {
+                        // Check if it's a heading or important content
+                        if (text.startsWith('#')) {
+                            parts.push(`<span class="text-cyan-400 font-semibold">${escapeHtml(text.split('\n')[0])}</span>`);
+                        } else {
+                            // Show first line or truncated content
+                            const firstLine = text.split('\n')[0];
+                            const display = firstLine.length > 200 ? firstLine.substring(0, 200) + '...' : firstLine;
+                            parts.push(`<span class="text-green-400">${escapeHtml(display)}</span>`);
+                        }
+                    }
+                }
+            }
+
+            if (parts.length > 0) {
+                return { html: parts.join('<br>'), skip: false };
+            }
+            return { skip: true }; // Skip empty assistant messages
+        }
+
+        // User message (usually tool results)
+        if (json.type === 'user' && json.message?.content) {
+            // Check for tool results
+            for (const content of json.message.content) {
+                if (content.type === 'tool_result') {
+                    return {
+                        html: `<span class="text-blue-400">↩ Tool result received</span>`,
+                        skip: false
+                    };
+                }
+            }
+            return { skip: true }; // Skip other user messages
+        }
+
+        // Skip other JSON we don't recognize
+        return { skip: true };
+
+    } catch (e) {
+        // Not JSON - check if it's meaningful text
+        const trimmed = line.trim();
+
+        // Skip empty lines
+        if (!trimmed) return { skip: true };
+
+        // Check for [Tool Result] or [Result: ...] markers we added
+        if (trimmed.startsWith('[Tool Result]')) {
+            return {
+                html: `<span class="text-blue-400">↩ ${escapeHtml(trimmed)}</span>`,
+                skip: false
+            };
+        }
+        if (trimmed.startsWith('[Result:')) {
+            return {
+                html: `<span class="text-purple-400">● ${escapeHtml(trimmed)}</span>`,
+                skip: false
+            };
+        }
+
+        // Error messages
+        if (trimmed.toLowerCase().includes('error')) {
+            return {
+                html: `<span class="text-red-400">⚠ ${escapeHtml(trimmed)}</span>`,
+                skip: false
+            };
+        }
+
+        // Plain text (likely Claude's output or markdown)
+        if (trimmed.startsWith('#')) {
+            return {
+                html: `<span class="text-cyan-400 font-semibold">${escapeHtml(trimmed)}</span>`,
+                skip: false
+            };
+        }
+
+        // Regular text
+        const display = trimmed.length > 300 ? trimmed.substring(0, 300) + '...' : trimmed;
+        return {
+            html: `<span class="text-gray-300">${escapeHtml(display)}</span>`,
+            skip: false
+        };
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 function appendOutputLine(line, lineType) {
     const container = document.getElementById('output-lines');
     if (!container) return;
 
+    const formatted = formatOutputLine(line);
+    if (formatted.skip) return; // Skip uninteresting lines
+
     const lineEl = document.createElement('div');
-    lineEl.className = 'output-line';
-
-    // Parse JSON lines for better display
-    let displayText = line;
-    let lineClass = 'text-gray-400';
-
-    try {
-        const json = JSON.parse(line);
-        if (json.type === 'assistant' && json.message?.content) {
-            // Assistant message - extract text
-            const text = json.message.content
-                .filter(c => c.type === 'text')
-                .map(c => c.text)
-                .join('');
-            if (text) {
-                displayText = text;
-                lineClass = 'text-green-400';
-            }
-        } else if (json.type === 'user' && json.message?.content) {
-            // Tool results
-            displayText = '[Tool Result]';
-            lineClass = 'text-blue-400';
-        } else if (json.type === 'result') {
-            displayText = `[Result: ${json.subtype || 'done'}]`;
-            lineClass = 'text-purple-400';
-        } else if (json.tool_name) {
-            displayText = `[Tool: ${json.tool_name}]`;
-            lineClass = 'text-yellow-400';
-        }
-    } catch (e) {
-        // Not JSON, show as-is
-        if (line.includes('error') || line.includes('Error')) {
-            lineClass = 'text-red-400';
-        }
-    }
-
-    // Truncate very long lines
-    if (displayText.length > 500) {
-        displayText = displayText.substring(0, 500) + '...';
-    }
-
-    lineEl.textContent = displayText;
-    lineEl.className += ' ' + lineClass;
+    lineEl.className = 'output-line py-0.5';
+    lineEl.innerHTML = formatted.html;
     container.appendChild(lineEl);
 
     outputLineCount++;
