@@ -205,7 +205,16 @@ async def agent_websocket(websocket: WebSocket) -> None:
 
                 # Handle IDLE state (no task) - clear task state
                 if payload.get("stage") == "IDLE" or payload.get("task_name") is None:
-                    await manager.update_task_state(agent_id, None)
+                    previous_state = await manager.update_task_state(agent_id, None)
+                    # If previous task was active (not completed), record completion as abandoned
+                    if previous_state and previous_state.stage != "COMPLETE":
+                        await storage.record_task_complete(
+                            agent_id=agent_id,
+                            task_name=previous_state.task_name,
+                            final_stage=previous_state.stage,
+                            success=False,
+                            metadata={"status": "abandoned"},
+                        )
                     logger.info(f"Agent {agent_id}: now idle (no active task)")
                     continue
 
@@ -227,7 +236,37 @@ async def agent_websocket(websocket: WebSocket) -> None:
                     github_issue=payload.get("github_issue"),
                     github_repo=payload.get("github_repo"),
                 )
-                await manager.update_task_state(agent_id, state)
+                previous_state = await manager.update_task_state(agent_id, state)
+
+                # Check if this is a new task (task name changed or no previous task)
+                is_new_task = (
+                    previous_state is None or
+                    previous_state.task_name != state.task_name
+                )
+
+                if is_new_task:
+                    # If previous task existed and wasn't completed, mark it
+                    if previous_state and previous_state.stage != "COMPLETE":
+                        await storage.record_task_complete(
+                            agent_id=agent_id,
+                            task_name=previous_state.task_name,
+                            final_stage=previous_state.stage,
+                            success=False,
+                            metadata={"status": "superseded"},
+                        )
+                    # Record new task start
+                    await storage.record_task_start(agent_id, state)
+                    logger.info(f"Agent {agent_id}: started task '{state.task_name}'")
+
+                # Check if task just completed
+                if state.stage == "COMPLETE":
+                    await storage.record_task_complete(
+                        agent_id=agent_id,
+                        task_name=state.task_name,
+                        final_stage="COMPLETE",
+                        success=True,
+                    )
+                    logger.info(f"Agent {agent_id}: completed task '{state.task_name}'")
 
             elif msg_type == MessageType.EVENT:
                 # Must be registered first
