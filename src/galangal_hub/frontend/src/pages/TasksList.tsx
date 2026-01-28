@@ -3,7 +3,6 @@ import { TaskList } from "@/components/task/TaskList"
 import { useWebSocket } from "@/hooks/useWebSocket"
 import { api } from "@/lib/api"
 import type { TaskState } from "@/types/api"
-import { Activity } from "lucide-react"
 
 interface TaskWithAgent {
   task: TaskState
@@ -57,22 +56,29 @@ export function TasksList() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Tasks</h1>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Activity className={`h-4 w-4 ${wsConnected ? "text-success" : "text-destructive"}`} />
-          <span>{wsConnected ? "Live" : "Disconnected"}</span>
+        <div className="flex items-center gap-3 text-sm">
+          <span className={`status-dot ${wsConnected ? "status-connected" : "status-disconnected"}`} />
+          <span className="text-muted-foreground">{wsConnected ? "Live updates" : "Disconnected"}</span>
         </div>
       </div>
 
       {error && (
-        <div className="p-4 bg-destructive/10 border border-destructive/50 rounded-lg text-destructive">
+        <div className="p-4 bg-destructive/10 border border-destructive/50 rounded-xl text-destructive">
           {error}
         </div>
       )}
 
-      <TaskList tasks={tasks} emptyMessage="No active tasks" />
+      <section className="space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-1 h-6 rounded-full bg-info" />
+          <h2 className="text-xl font-semibold">Active Tasks</h2>
+          <span className="text-sm text-muted-foreground">({tasks.length})</span>
+        </div>
+        <TaskList tasks={tasks} emptyMessage="No active tasks" />
+      </section>
     </div>
   )
 }

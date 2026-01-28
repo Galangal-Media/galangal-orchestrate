@@ -20,38 +20,38 @@ const stageBadgeVariant = (stage: string): "default" | "success" | "warning" | "
 
 export function TaskCard({ task, agentId }: TaskCardProps) {
   return (
-    <Link to={`/agents/${agentId}/tasks/${task.task_name}`}>
-      <Card className="transition-all hover:border-primary/50 hover:shadow-lg">
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-lg truncate">{task.task_name}</CardTitle>
-            <Badge variant={stageBadgeVariant(task.stage)}>{task.stage}</Badge>
+    <Link to={`/agents/${agentId}`}>
+      <Card className="card-hover">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-lg font-semibold truncate">{task.task_name}</CardTitle>
+            <Badge variant={stageBadgeVariant(task.stage)} className="text-xs">{task.stage}</Badge>
           </div>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="space-y-3">
           {task.task_type && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Target className="h-4 w-4" />
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <Target className="h-4 w-4 flex-shrink-0" />
               <span>{task.task_type}</span>
             </div>
           )}
 
           {task.branch && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <GitBranch className="h-4 w-4" />
-              <span className="truncate">{task.branch}</span>
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <GitBranch className="h-4 w-4 flex-shrink-0" />
+              <span className="truncate font-mono text-xs">{task.branch}</span>
             </div>
           )}
 
           {task.started_at && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground pt-2">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground pt-3 mt-3 border-t border-border">
               <Clock className="h-3 w-3" />
               <span>Started {formatRelativeTime(task.started_at)}</span>
             </div>
           )}
 
           {task.description && (
-            <p className="text-sm text-muted-foreground line-clamp-2 pt-2 border-t border-border">
+            <p className="text-sm text-muted-foreground line-clamp-2 pt-3 mt-3 border-t border-border">
               {task.description}
             </p>
           )}

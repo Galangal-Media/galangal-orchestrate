@@ -82,58 +82,76 @@ export function Dashboard() {
       )}
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
+      <div className="grid gap-6 md:grid-cols-3">
+        <Card className="card-hover">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Connected Agents</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium text-muted-foreground">Connected Agents</CardTitle>
+            <div className="p-2 rounded-lg bg-primary/10">
+              <Users className="h-4 w-4 text-primary" />
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{connectedAgents.length}</div>
+            <div className="text-3xl font-bold">{connectedAgents.length}</div>
+            <p className="text-xs text-muted-foreground mt-1">Active connections</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="card-hover">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Tasks</CardTitle>
-            <ListTodo className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium text-muted-foreground">Active Tasks</CardTitle>
+            <div className="p-2 rounded-lg bg-info/10">
+              <ListTodo className="h-4 w-4 text-info" />
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{activeTasks.length}</div>
+            <div className="text-3xl font-bold">{activeTasks.length}</div>
+            <p className="text-xs text-muted-foreground mt-1">In progress</p>
           </CardContent>
         </Card>
-        <Card className={activePrompts.length > 0 ? "border-warning/50" : ""}>
+        <Card className={activePrompts.length > 0 ? "border-warning/50 card-hover" : "card-hover"}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Actions</CardTitle>
-            <AlertCircle className={`h-4 w-4 ${activePrompts.length > 0 ? "text-warning" : "text-muted-foreground"}`} />
+            <CardTitle className="text-sm font-medium text-muted-foreground">Pending Actions</CardTitle>
+            <div className={`p-2 rounded-lg ${activePrompts.length > 0 ? "bg-warning/10" : "bg-muted"}`}>
+              <AlertCircle className={`h-4 w-4 ${activePrompts.length > 0 ? "text-warning" : "text-muted-foreground"}`} />
+            </div>
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${activePrompts.length > 0 ? "text-warning" : ""}`}>
+            <div className={`text-3xl font-bold ${activePrompts.length > 0 ? "text-warning" : ""}`}>
               {activePrompts.length}
             </div>
+            <p className="text-xs text-muted-foreground mt-1">Awaiting response</p>
           </CardContent>
         </Card>
       </div>
 
       {/* Agents needing attention */}
       {activePrompts.length > 0 && (
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold text-warning">Needs Attention</h2>
+        <section className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-1 h-6 rounded-full bg-warning" />
+            <h2 className="text-xl font-semibold text-warning">Needs Attention</h2>
+          </div>
           <AgentList agents={activePrompts} />
-        </div>
+        </section>
       )}
 
       {/* All connected agents */}
-      <div className="space-y-4">
-        <h2 className="text-xl font-semibold">Connected Agents</h2>
+      <section className="space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-1 h-6 rounded-full bg-primary" />
+          <h2 className="text-xl font-semibold">Connected Agents</h2>
+        </div>
         <AgentList agents={connectedAgents} emptyMessage="No agents connected. Start a Galangal workflow to connect." />
-      </div>
+      </section>
 
       {/* Active tasks */}
       {activeTasks.length > 0 && (
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Active Tasks</h2>
+        <section className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-1 h-6 rounded-full bg-info" />
+            <h2 className="text-xl font-semibold">Active Tasks</h2>
+          </div>
           <TaskList tasks={activeTasks} />
-        </div>
+        </section>
       )}
     </div>
   )

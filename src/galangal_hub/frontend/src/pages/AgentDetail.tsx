@@ -9,7 +9,7 @@ import { useWebSocket } from "@/hooks/useWebSocket"
 import { api } from "@/lib/api"
 import type { AgentInfo, TaskState, PromptData } from "@/types/api"
 import { formatRelativeTime } from "@/lib/utils"
-import { ArrowLeft, Monitor, FolderGit2, Clock, GitBranch, Target } from "lucide-react"
+import { ArrowLeft, Monitor, GitBranch, Target } from "lucide-react"
 
 interface AgentDetailData {
   agent: AgentInfo
@@ -83,19 +83,34 @@ export function AgentDetail() {
     )
   }
 
+  // Display title - use task name if available, otherwise agent ID
+  const displayTitle = agent.task?.task_name || agent.agent.agent_id
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Link to="/">
-          <Button variant="ghost" size="sm">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back
-          </Button>
-        </Link>
-        <h1 className="text-3xl font-bold">{agent.agent.agent_id}</h1>
-        <Badge variant={agent.connected ? "success" : "secondary"}>
-          {agent.connected ? "Connected" : "Disconnected"}
-        </Badge>
+    <div className="space-y-8">
+      <div className="space-y-2">
+        <div className="flex items-center gap-4">
+          <Link to="/">
+            <Button variant="ghost" size="sm" className="gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Button>
+          </Link>
+          <div className="flex items-center gap-4 flex-1">
+            <h1 className="text-3xl font-bold truncate">{displayTitle}</h1>
+            <div className="flex items-center gap-2">
+              <span className={`status-dot ${agent.connected ? "status-connected" : "status-disconnected"}`} />
+              <Badge variant={agent.connected ? "success" : "secondary"}>
+                {agent.connected ? "Connected" : "Disconnected"}
+              </Badge>
+            </div>
+          </div>
+        </div>
+        {agent.task && (
+          <p className="text-sm text-muted-foreground ml-[84px] font-mono">
+            Agent: {agent.agent.agent_id}
+          </p>
+        )}
       </div>
 
       {/* Prompt Card - Show first if there's an active prompt */}
@@ -110,31 +125,33 @@ export function AgentDetail() {
 
       {/* Agent Info */}
       <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Agent Information</CardTitle>
+        <Card className="card-hover">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Monitor className="h-4 w-4 text-primary" />
+              </div>
+              Agent Information
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Monitor className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Hostname:</span>
-              <span className="text-sm text-muted-foreground">{agent.agent.hostname}</span>
+            <div className="flex items-start gap-3">
+              <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Hostname</span>
+              <span className="text-sm">{agent.agent.hostname}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <FolderGit2 className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Project:</span>
-              <span className="text-sm text-muted-foreground truncate">{agent.agent.project_path}</span>
+            <div className="flex items-start gap-3">
+              <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Project</span>
+              <span className="text-sm truncate font-mono text-xs">{agent.agent.project_path}</span>
             </div>
             {agent.agent.version && (
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">Version:</span>
-                <Badge variant="outline">{agent.agent.version}</Badge>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Version</span>
+                <Badge variant="outline" className="text-xs">{agent.agent.version}</Badge>
               </div>
             )}
             {agent.agent.connected_at && (
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Connected:</span>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Connected</span>
                 <span className="text-sm text-muted-foreground">
                   {formatRelativeTime(agent.agent.connected_at)}
                 </span>
@@ -145,29 +162,34 @@ export function AgentDetail() {
 
         {/* Task Info */}
         {agent.task && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Current Task</CardTitle>
+          <Card className="card-hover">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-info/10">
+                  <Target className="h-4 w-4 text-info" />
+                </div>
+                Current Task
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-lg font-medium">{agent.task.task_name}</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-lg font-semibold">{agent.task.task_name}</span>
                 <Badge>{agent.task.stage}</Badge>
               </div>
               {agent.task.task_type && (
-                <div className="flex items-center gap-2">
-                  <Target className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">{agent.task.task_type}</span>
+                <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                  <Target className="h-4 w-4 flex-shrink-0" />
+                  <span>{agent.task.task_type}</span>
                 </div>
               )}
               {agent.task.branch && (
-                <div className="flex items-center gap-2">
-                  <GitBranch className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">{agent.task.branch}</span>
+                <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                  <GitBranch className="h-4 w-4 flex-shrink-0" />
+                  <span className="font-mono text-xs">{agent.task.branch}</span>
                 </div>
               )}
               {agent.task.description && (
-                <p className="text-sm text-muted-foreground border-t border-border pt-4">
+                <p className="text-sm text-muted-foreground border-t border-border pt-4 mt-4">
                   {agent.task.description}
                 </p>
               )}
@@ -178,10 +200,13 @@ export function AgentDetail() {
 
       {/* Artifacts */}
       {agent.artifacts && Object.keys(agent.artifacts).length > 0 && (
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Artifacts</h2>
+        <section className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-1 h-6 rounded-full bg-primary" />
+            <h2 className="text-xl font-semibold">Artifacts</h2>
+          </div>
           <ArtifactViewer artifacts={agent.artifacts} />
-        </div>
+        </section>
       )}
     </div>
   )

@@ -9,14 +9,14 @@ interface TaskListProps {
 export function TaskList({ tasks, emptyMessage = "No active tasks" }: TaskListProps) {
   if (tasks.length === 0) {
     return (
-      <div className="text-center py-12 text-muted-foreground">
-        <p>{emptyMessage}</p>
+      <div className="text-center py-16 px-4 rounded-xl border border-dashed border-border bg-card/50">
+        <p className="text-muted-foreground">{emptyMessage}</p>
       </div>
     )
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
       {tasks.map((item) => (
         <TaskCard
           key={`${item.agentId}-${item.task.task_name}`}
