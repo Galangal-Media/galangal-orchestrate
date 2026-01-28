@@ -291,8 +291,22 @@
 </div>
 
 <script>
-// Track when user is typing in prompt inputs to pause HTMX refresh
+// Track when user is interacting with prompt inputs to pause HTMX refresh
+// Stays true as long as any input has content (not just focus)
 window.promptInputFocused = false;
+
+function checkPromptInputs() {
+    const promptCard = document.getElementById('active-prompt');
+    if (!promptCard) return false;
+
+    const inputs = promptCard.querySelectorAll('textarea, input[type="text"]');
+    for (const input of inputs) {
+        if (input.value && input.value.trim().length > 0) {
+            return true; // Has content - don't refresh
+        }
+    }
+    return false; // All empty - safe to refresh
+}
 
 document.addEventListener('focusin', function(e) {
     if (e.target.closest('#active-prompt') && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) {
@@ -302,10 +316,17 @@ document.addEventListener('focusin', function(e) {
 
 document.addEventListener('focusout', function(e) {
     if (e.target.closest('#active-prompt') && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) {
-        // Small delay to allow click on submit button before resuming refresh
+        // Check if any input still has content
         setTimeout(() => {
-            window.promptInputFocused = false;
-        }, 500);
+            window.promptInputFocused = checkPromptInputs();
+        }, 100);
+    }
+});
+
+// Also check on input to catch typing
+document.addEventListener('input', function(e) {
+    if (e.target.closest('#active-prompt') && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) {
+        window.promptInputFocused = true;
     }
 });
 
