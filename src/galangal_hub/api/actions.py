@@ -287,3 +287,72 @@ async def respond_to_prompt(
         "prompt_type": request.prompt_type,
         "result": request.result,
     }
+
+
+class CreateTaskRequest(BaseModel):
+    """Request to create a new task."""
+
+    task_name: str | None = None  # Manual task name
+    task_description: str | None = None  # Manual description
+    task_type: str = "feature"  # Task type (feature, bug_fix, etc.)
+    github_issue: int | None = None  # GitHub issue number
+    github_repo: str | None = None  # GitHub repo (owner/repo)
+
+
+@router.post("/{agent_id}/create-task")
+async def create_task(
+    agent_id: str,
+    request: CreateTaskRequest,
+) -> dict:
+    """
+    Create a new task on an agent.
+
+    Can create a task from:
+    - Manual input (task_name + task_description)
+    - GitHub issue (github_issue + github_repo)
+
+    Args:
+        agent_id: Target agent.
+        request: Task creation parameters.
+    """
+    agent = manager.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not agent.connected:
+        raise HTTPException(status_code=400, detail="Agent not connected")
+
+    # Validate request - need either manual input or GitHub issue
+    if not request.task_name and not request.github_issue:
+        raise HTTPException(
+            status_code=400,
+            detail="Must provide either task_name or github_issue"
+        )
+
+    # If GitHub issue provided, repo is required
+    if request.github_issue and not request.github_repo:
+        raise HTTPException(
+            status_code=400,
+            detail="github_repo is required when providing github_issue"
+        )
+
+    action = HubAction(
+        action_type=ActionType.CREATE_TASK,
+        task_name=request.task_name or f"issue-{request.github_issue}",
+        data={
+            "task_name": request.task_name,
+            "task_description": request.task_description,
+            "task_type": request.task_type,
+            "github_issue": request.github_issue,
+            "github_repo": request.github_repo,
+        },
+    )
+
+    success = await manager.send_to_agent(agent_id, action)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send action to agent")
+
+    return {
+        "status": "creating",
+        "task_name": request.task_name,
+        "github_issue": request.github_issue,
+    }

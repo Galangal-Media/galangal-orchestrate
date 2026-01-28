@@ -101,6 +101,85 @@
     </div>
     {% endif %}
 
+    <!-- Create Task -->
+    {% if agent.connected and not agent.task %}
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
+        <h2 class="text-lg font-semibold mb-4">Create New Task</h2>
+
+        <!-- Tab buttons -->
+        <div class="flex border-b border-gray-700 mb-4">
+            <button id="tab-issue" onclick="showTab('issue')"
+                    class="px-4 py-2 text-sm font-medium border-b-2 border-purple-500 text-purple-400">
+                From GitHub Issue
+            </button>
+            <button id="tab-manual" onclick="showTab('manual')"
+                    class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">
+                Manual
+            </button>
+        </div>
+
+        <!-- GitHub Issue Tab -->
+        <div id="panel-issue" class="space-y-4">
+            <div>
+                <label class="block text-sm text-gray-400 mb-1">GitHub Issue Number</label>
+                <input type="number" id="github-issue" placeholder="e.g. 123"
+                       class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-purple-500 focus:outline-none">
+            </div>
+            <div>
+                <label class="block text-sm text-gray-400 mb-1">Repository (owner/repo)</label>
+                <input type="text" id="github-repo" placeholder="e.g. owner/repo"
+                       class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-purple-500 focus:outline-none">
+            </div>
+            <div>
+                <label class="block text-sm text-gray-400 mb-1">Task Type</label>
+                <select id="issue-task-type"
+                        class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-purple-500 focus:outline-none">
+                    <option value="feature">Feature</option>
+                    <option value="bug_fix">Bug Fix</option>
+                    <option value="refactor">Refactor</option>
+                    <option value="chore">Chore</option>
+                    <option value="docs">Docs</option>
+                    <option value="hotfix">Hotfix</option>
+                </select>
+            </div>
+            <button onclick="createTaskFromIssue('{{ agent.agent.agent_id }}')"
+                    class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded text-sm font-medium">
+                Create Task from Issue
+            </button>
+        </div>
+
+        <!-- Manual Tab -->
+        <div id="panel-manual" class="space-y-4 hidden">
+            <div>
+                <label class="block text-sm text-gray-400 mb-1">Task Name</label>
+                <input type="text" id="task-name" placeholder="e.g. add-user-authentication"
+                       class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-purple-500 focus:outline-none">
+            </div>
+            <div>
+                <label class="block text-sm text-gray-400 mb-1">Description</label>
+                <textarea id="task-description" rows="3" placeholder="Describe what needs to be done..."
+                          class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-purple-500 focus:outline-none resize-none"></textarea>
+            </div>
+            <div>
+                <label class="block text-sm text-gray-400 mb-1">Task Type</label>
+                <select id="manual-task-type"
+                        class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-purple-500 focus:outline-none">
+                    <option value="feature">Feature</option>
+                    <option value="bug_fix">Bug Fix</option>
+                    <option value="refactor">Refactor</option>
+                    <option value="chore">Chore</option>
+                    <option value="docs">Docs</option>
+                    <option value="hotfix">Hotfix</option>
+                </select>
+            </div>
+            <button onclick="createTaskManual('{{ agent.agent.agent_id }}')"
+                    class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded text-sm font-medium">
+                Create Task
+            </button>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Artifacts -->
     {% if agent.artifacts %}
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
@@ -200,6 +279,93 @@ async function rejectTask(agentId, taskName) {
             location.reload();
         } else {
             alert('Failed to reject task');
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+function showTab(tab) {
+    // Update tab buttons
+    document.getElementById('tab-issue').classList.toggle('border-purple-500', tab === 'issue');
+    document.getElementById('tab-issue').classList.toggle('text-purple-400', tab === 'issue');
+    document.getElementById('tab-issue').classList.toggle('border-transparent', tab !== 'issue');
+    document.getElementById('tab-issue').classList.toggle('text-gray-400', tab !== 'issue');
+
+    document.getElementById('tab-manual').classList.toggle('border-purple-500', tab === 'manual');
+    document.getElementById('tab-manual').classList.toggle('text-purple-400', tab === 'manual');
+    document.getElementById('tab-manual').classList.toggle('border-transparent', tab !== 'manual');
+    document.getElementById('tab-manual').classList.toggle('text-gray-400', tab !== 'manual');
+
+    // Show/hide panels
+    document.getElementById('panel-issue').classList.toggle('hidden', tab !== 'issue');
+    document.getElementById('panel-manual').classList.toggle('hidden', tab !== 'manual');
+}
+
+async function createTaskFromIssue(agentId) {
+    const issue = document.getElementById('github-issue').value;
+    const repo = document.getElementById('github-repo').value;
+    const taskType = document.getElementById('issue-task-type').value;
+
+    if (!issue) {
+        alert('Please enter a GitHub issue number');
+        return;
+    }
+    if (!repo) {
+        alert('Please enter the repository (owner/repo)');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/actions/${agentId}/create-task`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                github_issue: parseInt(issue),
+                github_repo: repo,
+                task_type: taskType
+            })
+        });
+
+        if (response.ok) {
+            alert('Task creation request sent! The agent will start the task.');
+            location.reload();
+        } else {
+            const data = await response.json();
+            alert('Failed to create task: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+async function createTaskManual(agentId) {
+    const taskName = document.getElementById('task-name').value;
+    const taskDescription = document.getElementById('task-description').value;
+    const taskType = document.getElementById('manual-task-type').value;
+
+    if (!taskName) {
+        alert('Please enter a task name');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/actions/${agentId}/create-task`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                task_name: taskName,
+                task_description: taskDescription,
+                task_type: taskType
+            })
+        });
+
+        if (response.ok) {
+            alert('Task creation request sent! The agent will start the task.');
+            location.reload();
+        } else {
+            const data = await response.json();
+            alert('Failed to create task: ' + (data.detail || 'Unknown error'));
         }
     } catch (e) {
         alert('Error: ' + e.message);

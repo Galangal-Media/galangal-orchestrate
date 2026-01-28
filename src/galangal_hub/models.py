@@ -46,6 +46,7 @@ class ActionType(str, Enum):
     ROLLBACK = "rollback"
     INTERRUPT = "interrupt"
     RESPONSE = "response"  # Response to any prompt (not just approval)
+    CREATE_TASK = "create_task"  # Create a new task
 
 
 class AgentInfo(BaseModel):
