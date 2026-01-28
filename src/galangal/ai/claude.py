@@ -275,8 +275,23 @@ class ClaudeBackend(AIBackend):
                 # Show Claude's text responses (always visible, not verbose-only)
                 text = item.get("text", "").strip()
                 if text and ui:
-                    # Show full text content
-                    ui.add_activity(text, "💬", verbose_only=False)
+                    # Wrap long lines to avoid horizontal scrolling
+                    import textwrap
+                    wrapped_lines = []
+                    for line in text.split("\n"):
+                        if len(line) > 100:
+                            # Wrap long lines, preserving any leading whitespace
+                            wrapped = textwrap.fill(
+                                line,
+                                width=100,
+                                break_long_words=False,
+                                break_on_hyphens=False,
+                            )
+                            wrapped_lines.append(wrapped)
+                        else:
+                            wrapped_lines.append(line)
+                    wrapped_text = "\n".join(wrapped_lines)
+                    ui.add_activity(wrapped_text, "💬", verbose_only=False)
 
             elif item.get("type") == "thinking":
                 if ui:
