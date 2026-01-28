@@ -628,11 +628,23 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         Use this when already in the Textual event loop context (e.g., from
         prompt_async) instead of hide_prompt() which uses call_from_thread.
         """
+        self.add_activity(f"[DEBUG] _dismiss_prompt_directly called, screen={self._active_prompt_screen}", "🔍")
         self._prompt_type = PromptType.NONE
         self._prompt_callback = None
         if self._active_prompt_screen:
-            self._active_prompt_screen.dismiss(None)
+            screen = self._active_prompt_screen
             self._active_prompt_screen = None
+            self.add_activity("[DEBUG] Calling pop_screen()", "🔍")
+            # Use pop_screen instead of dismiss for more reliable dismissal
+            try:
+                self.pop_screen()
+            except Exception as e:
+                self.add_activity(f"[DEBUG] pop_screen failed: {e}", "🔍")
+                # Fallback to dismiss
+                try:
+                    screen.dismiss(None)
+                except Exception as e2:
+                    self.add_activity(f"[DEBUG] dismiss also failed: {e2}", "🔍")
 
     def _notify_hub_prompt(
         self,
