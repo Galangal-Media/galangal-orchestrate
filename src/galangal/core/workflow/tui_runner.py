@@ -872,16 +872,50 @@ async def _generate_discovery_questions(
 
 
 def _parse_discovery_questions(output: str) -> list[str]:
-    """Parse questions from AI output."""
+    """Parse questions from AI output.
+
+    The output may be raw JSON stream from Claude CLI, so we first
+    extract text content from any JSON lines before parsing.
+    """
+    import json
+    import re
+
+    # First, extract text content from JSON stream if present
+    text_content = []
+    for line in output.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+
+        # Try to parse as JSON (Claude CLI stream format)
+        try:
+            data = json.loads(line)
+            # Extract text from assistant messages
+            if data.get("type") == "assistant":
+                content = data.get("message", {}).get("content", [])
+                for item in content:
+                    if item.get("type") == "text":
+                        text_content.append(item.get("text", ""))
+            # Also check for result type
+            elif data.get("type") == "result":
+                result_text = data.get("result", "")
+                if result_text:
+                    text_content.append(result_text)
+        except (json.JSONDecodeError, TypeError, KeyError):
+            # Not JSON, treat as plain text
+            text_content.append(line)
+
+    # Join all text content
+    full_text = "\n".join(text_content)
+
     # Check for NO_QUESTIONS marker
-    if "# NO_QUESTIONS" in output or "#NO_QUESTIONS" in output:
+    if "# NO_QUESTIONS" in full_text or "#NO_QUESTIONS" in full_text:
         return []
 
     questions = []
-    lines = output.split("\n")
     in_questions = False
 
-    for line in lines:
+    for line in full_text.split("\n"):
         line = line.strip()
 
         # Start capturing after DISCOVERY_QUESTIONS header
@@ -891,8 +925,6 @@ def _parse_discovery_questions(output: str) -> list[str]:
 
         if in_questions and line:
             # Match numbered questions (1. Question text)
-            import re
-
             match = re.match(r"^\d+[\.\)]\s*(.+)$", line)
             if match:
                 questions.append(match.group(1))
