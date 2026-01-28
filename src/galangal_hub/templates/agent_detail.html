@@ -51,7 +51,9 @@
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
         <h2 class="text-lg font-semibold mb-4">Active Prompt</h2>
         <div id="active-prompt"
-             hx-get="/partials/agent/{{ agent.agent.agent_id }}/prompt" hx-trigger="every 2s" hx-swap="innerHTML">
+             hx-get="/partials/agent/{{ agent.agent.agent_id }}/prompt"
+             hx-trigger="every 2s [!window.promptInputFocused]"
+             hx-swap="innerHTML">
             {% set prompt = agent.current_prompt %}
             {% set agent_id = agent.agent.agent_id %}
             {% set task_name = agent.task.task_name if agent.task else '' %}
@@ -289,6 +291,24 @@
 </div>
 
 <script>
+// Track when user is typing in prompt inputs to pause HTMX refresh
+window.promptInputFocused = false;
+
+document.addEventListener('focusin', function(e) {
+    if (e.target.closest('#active-prompt') && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) {
+        window.promptInputFocused = true;
+    }
+});
+
+document.addEventListener('focusout', function(e) {
+    if (e.target.closest('#active-prompt') && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) {
+        // Small delay to allow click on submit button before resuming refresh
+        setTimeout(() => {
+            window.promptInputFocused = false;
+        }, 500);
+    }
+});
+
 async function approveTask(agentId, taskName) {
     try {
         const response = await fetch(`/api/actions/${agentId}/${taskName}/approve`, {
