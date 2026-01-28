@@ -31,6 +31,8 @@ class ConnectedAgent:
     artifacts: dict[str, str] = field(default_factory=dict)  # Artifact name -> content
     github_issues: list[dict] = field(default_factory=list)  # Cached GitHub issues
     github_issues_updated: datetime | None = None  # When issues were last updated
+    output_lines: list[dict] = field(default_factory=list)  # Recent output lines (ring buffer)
+    output_max_lines: int = 200  # Max lines to keep
 
 
 @dataclass
@@ -170,6 +172,50 @@ class ConnectionManager:
         if agent:
             return agent.github_issues
         return []
+
+    async def append_output(self, agent_id: str, line: str, line_type: str) -> None:
+        """
+        Append an output line for an agent.
+
+        Args:
+            agent_id: Agent ID.
+            line: Output line content.
+            line_type: Type of line (raw, activity, tool, error).
+        """
+        async with self._get_lock():
+            if agent_id in self._agents:
+                agent = self._agents[agent_id]
+                agent.output_lines.append({
+                    "line": line,
+                    "line_type": line_type,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+                # Keep only recent lines (ring buffer)
+                if len(agent.output_lines) > agent.output_max_lines:
+                    agent.output_lines = agent.output_lines[-agent.output_max_lines:]
+        # Don't call _notify_change for every line - too noisy
+
+    def get_output_lines(self, agent_id: str, since_index: int = 0) -> list[dict]:
+        """
+        Get output lines for an agent.
+
+        Args:
+            agent_id: Agent ID.
+            since_index: Return lines after this index (for incremental fetch).
+
+        Returns:
+            List of output line dicts.
+        """
+        agent = self._agents.get(agent_id)
+        if agent:
+            return agent.output_lines[since_index:]
+        return []
+
+    def clear_output(self, agent_id: str) -> None:
+        """Clear output lines for an agent (e.g., when new task starts)."""
+        agent = self._agents.get(agent_id)
+        if agent:
+            agent.output_lines = []
 
     async def send_to_agent(self, agent_id: str, action: HubAction) -> bool:
         """

@@ -37,6 +37,7 @@ class MessageType(str, Enum):
     PROMPT = "prompt"  # Send current prompt with options
     ARTIFACTS = "artifacts"  # Send artifact contents
     GITHUB_ISSUES = "github_issues"  # Response with GitHub issues list
+    OUTPUT = "output"  # Streaming CLI output lines
 
     # Hub -> Agent
     ACTION = "action"
@@ -340,6 +341,29 @@ class HubClient:
             {
                 "issues": issues,
                 "request_id": request_id,
+            },
+        )
+
+    async def send_output(
+        self,
+        line: str,
+        line_type: str = "raw",
+    ) -> None:
+        """
+        Send a CLI output line to hub.
+
+        Args:
+            line: The output line content.
+            line_type: Type of line (raw, activity, tool, error).
+        """
+        if not self._connected:
+            return
+
+        await self._send(
+            MessageType.OUTPUT,
+            {
+                "line": line,
+                "line_type": line_type,
             },
         )
 

@@ -63,6 +63,30 @@ async def notify_dashboards() -> None:
             _dashboard_connections.remove(ws)
 
 
+async def notify_dashboards_output(agent_id: str, line: str, line_type: str) -> None:
+    """Send output line to all connected dashboards for live streaming."""
+    import json
+
+    message = json.dumps({
+        "type": "output",
+        "agent_id": agent_id,
+        "line": line,
+        "line_type": line_type,
+    })
+
+    disconnected = []
+    for ws in _dashboard_connections:
+        try:
+            await ws.send_text(message)
+        except Exception:
+            disconnected.append(ws)
+
+    # Clean up disconnected
+    for ws in disconnected:
+        if ws in _dashboard_connections:
+            _dashboard_connections.remove(ws)
+
+
 async def dashboard_websocket(websocket: WebSocket) -> None:
     """
     WebSocket endpoint for dashboard live updates.
@@ -298,6 +322,18 @@ async def agent_websocket(websocket: WebSocket) -> None:
                 if isinstance(issues, list):
                     await manager.update_github_issues(agent_id, issues)
                     logger.info(f"Agent {agent_id}: received {len(issues)} GitHub issues")
+
+            elif msg_type == MessageType.OUTPUT:
+                # Must be registered first
+                if not registered_agent_id:
+                    continue  # Silently skip - too noisy to log
+
+                agent_id = registered_agent_id
+                line = payload.get("line", "")
+                line_type = payload.get("line_type", "raw")
+                await manager.append_output(agent_id, line, line_type)
+                # Push to dashboards immediately for live updates
+                await notify_dashboards_output(agent_id, line, line_type)
 
     except WebSocketDisconnect:
         logger.info(f"Agent disconnected: {agent_id}")

@@ -20,6 +20,7 @@ class MessageType(str, Enum):
     PROMPT = "prompt"  # Send current prompt with options
     ARTIFACTS = "artifacts"  # Send artifact contents
     GITHUB_ISSUES = "github_issues"  # Response with GitHub issues list
+    OUTPUT = "output"  # Streaming CLI output lines
 
     # Hub -> Agent
     ACTION = "action"

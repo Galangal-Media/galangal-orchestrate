@@ -113,12 +113,15 @@
 
         // Global function to respond to prompts (used by prompt_card.html)
         async function respondToPrompt(agentId, taskName, promptType, result) {
-            // Validate inputs
-            if (!agentId || !taskName || !promptType) {
+            // Validate inputs - taskName can be empty for task creation prompts
+            if (!agentId || !promptType) {
                 console.error('Missing required parameters for respondToPrompt:', { agentId, taskName, promptType, result });
                 alert('Error: Missing required parameters');
                 return;
             }
+
+            // Use placeholder for empty task name (e.g., during task creation)
+            const effectiveTaskName = taskName || '__prompt__';
 
             // Check if this prompt type might need text input
             const needsText = ['reject', 'no', 'fix_in_dev'].includes(result);
@@ -130,8 +133,8 @@
             }
 
             try {
-                console.log('Sending response:', { agentId, taskName, promptType, result });
-                const response = await fetch(`/api/actions/${agentId}/${taskName}/respond`, {
+                console.log('Sending response:', { agentId, taskName: effectiveTaskName, promptType, result });
+                const response = await fetch(`/api/actions/${agentId}/${effectiveTaskName}/respond`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

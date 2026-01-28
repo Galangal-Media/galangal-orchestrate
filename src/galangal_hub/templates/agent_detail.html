@@ -101,6 +101,26 @@
     </div>
     {% endif %}
 
+    <!-- Live Output -->
+    {% if agent.task %}
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">Live Output</h2>
+            <div class="flex items-center gap-2">
+                <span id="output-status" class="text-xs text-gray-500">Waiting for output...</span>
+                <button onclick="clearOutput()" class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs">Clear</button>
+                <label class="flex items-center gap-1 text-xs text-gray-400">
+                    <input type="checkbox" id="auto-scroll" checked class="rounded">
+                    Auto-scroll
+                </label>
+            </div>
+        </div>
+        <div id="output-container" class="bg-gray-900 rounded-lg p-3 h-64 overflow-y-auto font-mono text-xs">
+            <div id="output-lines"></div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Create Task -->
     {% if agent.connected and not agent.task %}
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
@@ -474,5 +494,135 @@ async function createTaskManual(agentId) {
         alert('Error: ' + e.message);
     }
 }
+
+// Live output handling
+let outputNextIndex = 0;
+let outputLineCount = 0;
+const MAX_OUTPUT_LINES = 500;
+
+function appendOutputLine(line, lineType) {
+    const container = document.getElementById('output-lines');
+    if (!container) return;
+
+    const lineEl = document.createElement('div');
+    lineEl.className = 'output-line';
+
+    // Parse JSON lines for better display
+    let displayText = line;
+    let lineClass = 'text-gray-400';
+
+    try {
+        const json = JSON.parse(line);
+        if (json.type === 'assistant' && json.message?.content) {
+            // Assistant message - extract text
+            const text = json.message.content
+                .filter(c => c.type === 'text')
+                .map(c => c.text)
+                .join('');
+            if (text) {
+                displayText = text;
+                lineClass = 'text-green-400';
+            }
+        } else if (json.type === 'user' && json.message?.content) {
+            // Tool results
+            displayText = '[Tool Result]';
+            lineClass = 'text-blue-400';
+        } else if (json.type === 'result') {
+            displayText = `[Result: ${json.subtype || 'done'}]`;
+            lineClass = 'text-purple-400';
+        } else if (json.tool_name) {
+            displayText = `[Tool: ${json.tool_name}]`;
+            lineClass = 'text-yellow-400';
+        }
+    } catch (e) {
+        // Not JSON, show as-is
+        if (line.includes('error') || line.includes('Error')) {
+            lineClass = 'text-red-400';
+        }
+    }
+
+    // Truncate very long lines
+    if (displayText.length > 500) {
+        displayText = displayText.substring(0, 500) + '...';
+    }
+
+    lineEl.textContent = displayText;
+    lineEl.className += ' ' + lineClass;
+    container.appendChild(lineEl);
+
+    outputLineCount++;
+
+    // Remove old lines if too many
+    while (container.children.length > MAX_OUTPUT_LINES) {
+        container.removeChild(container.firstChild);
+    }
+
+    // Auto-scroll if enabled
+    const autoScroll = document.getElementById('auto-scroll');
+    if (autoScroll && autoScroll.checked) {
+        const outputContainer = document.getElementById('output-container');
+        if (outputContainer) {
+            outputContainer.scrollTop = outputContainer.scrollHeight;
+        }
+    }
+
+    // Update status
+    const status = document.getElementById('output-status');
+    if (status) {
+        status.textContent = `${outputLineCount} lines`;
+    }
+}
+
+function clearOutput() {
+    const container = document.getElementById('output-lines');
+    if (container) {
+        container.innerHTML = '';
+        outputLineCount = 0;
+        const status = document.getElementById('output-status');
+        if (status) {
+            status.textContent = 'Cleared';
+        }
+    }
+}
+
+async function fetchInitialOutput(agentId) {
+    try {
+        const response = await fetch(`/api/actions/${agentId}/output?since=0`);
+        if (response.ok) {
+            const data = await response.json();
+            for (const item of data.lines) {
+                appendOutputLine(item.line, item.line_type);
+            }
+            outputNextIndex = data.next_index;
+        }
+    } catch (e) {
+        console.error('Failed to fetch initial output:', e);
+    }
+}
+
+// Set up WebSocket listener for live output
+document.addEventListener('DOMContentLoaded', function() {
+    const agentId = '{{ agent.agent.agent_id }}';
+    const outputContainer = document.getElementById('output-container');
+
+    if (outputContainer) {
+        // Fetch initial output
+        fetchInitialOutput(agentId);
+
+        // Listen for WebSocket output messages
+        const originalOnMessage = ws ? ws.onmessage : null;
+        if (ws) {
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                if (data.type === 'output' && data.agent_id === agentId) {
+                    appendOutputLine(data.line, data.line_type);
+                } else if (data.type === 'refresh') {
+                    // Trigger HTMX refresh for other content
+                    htmx.trigger(document.body, 'refresh');
+                }
+            };
+        }
+    }
+});
 </script>
 {% endblock %}

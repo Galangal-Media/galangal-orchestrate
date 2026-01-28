@@ -297,3 +297,23 @@ async def _send_artifacts(artifacts: dict[str, str]) -> None:
     client = get_hub_client()
     if client:
         await client.send_artifacts(artifacts)
+
+
+def notify_output(line: str, line_type: str = "raw") -> None:
+    """
+    Notify hub of CLI output.
+
+    Args:
+        line: The output line content.
+        line_type: Type of line (raw, activity, tool, error).
+    """
+    client = get_hub_client()
+    if client and client.connected:
+        _schedule_async(_send_output(line, line_type))
+
+
+async def _send_output(line: str, line_type: str) -> None:
+    """Send output line to hub."""
+    client = get_hub_client()
+    if client:
+        await client.send_output(line, line_type)

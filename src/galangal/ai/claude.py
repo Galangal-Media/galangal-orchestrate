@@ -90,6 +90,12 @@ class ClaudeBackend(AIBackend):
             if ui:
                 ui.add_raw_line(line)
             self._process_stream_line(line, ui, pending_tools)
+            # Stream to hub for remote monitoring
+            try:
+                from galangal.hub.hooks import notify_output
+                notify_output(line, "raw")
+            except Exception:
+                pass  # Hub streaming is non-critical
 
         def on_idle(elapsed: float) -> None:
             """Update status when idle."""

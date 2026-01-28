@@ -242,7 +242,7 @@ async def respond_to_prompt(
 
     Args:
         agent_id: Target agent.
-        task_name: Task to respond to.
+        task_name: Task to respond to (use "__prompt__" for prompts without a task).
         request: The response with prompt_type, result, and optional text_input.
     """
     agent = manager.get_agent(agent_id)
@@ -250,8 +250,11 @@ async def respond_to_prompt(
         raise HTTPException(status_code=404, detail="Agent not found")
     if not agent.connected:
         raise HTTPException(status_code=400, detail="Agent not connected")
-    if not agent.task or agent.task.task_name != task_name:
-        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Check task - allow "__prompt__" for prompts during task creation (no active task)
+    if task_name != "__prompt__":
+        if not agent.task or agent.task.task_name != task_name:
+            raise HTTPException(status_code=404, detail="Task not found")
 
     # Check if there's an active prompt
     if not agent.current_prompt:
@@ -264,9 +267,12 @@ async def respond_to_prompt(
             detail=f"Prompt type mismatch: expected {agent.current_prompt.prompt_type}, got {request.prompt_type}"
         )
 
+    # Use actual task name if available, otherwise empty string
+    actual_task_name = agent.task.task_name if agent.task else ""
+
     action = HubAction(
         action_type=ActionType.RESPONSE,
-        task_name=task_name,
+        task_name=actual_task_name,
         data={
             "prompt_type": request.prompt_type,
             "result": request.result,
@@ -283,7 +289,7 @@ async def respond_to_prompt(
 
     return {
         "status": "responded",
-        "task_name": task_name,
+        "task_name": actual_task_name,
         "prompt_type": request.prompt_type,
         "result": request.result,
     }
@@ -413,3 +419,29 @@ async def get_github_issues(
     if cached:
         return {"issues": cached, "cached": True, "timeout": True}
     return {"issues": [], "cached": False, "timeout": True}
+
+
+@router.get("/{agent_id}/output")
+async def get_output_lines(
+    agent_id: str,
+    since: int = 0,
+) -> dict:
+    """
+    Get recent output lines from an agent.
+
+    Args:
+        agent_id: Target agent.
+        since: Return lines after this index (for incremental fetch).
+
+    Returns:
+        Dict with lines array and next_index for pagination.
+    """
+    agent = manager.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    lines = manager.get_output_lines(agent_id, since)
+    return {
+        "lines": lines,
+        "next_index": since + len(lines),
+    }
