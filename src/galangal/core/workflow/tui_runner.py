@@ -881,6 +881,7 @@ def _parse_discovery_questions(output: str) -> list[str]:
     import re
 
     # First, extract text content from JSON stream if present
+    # Only extract from assistant messages - result messages duplicate content
     text_content = []
     for line in output.split("\n"):
         line = line.strip()
@@ -890,17 +891,13 @@ def _parse_discovery_questions(output: str) -> list[str]:
         # Try to parse as JSON (Claude CLI stream format)
         try:
             data = json.loads(line)
-            # Extract text from assistant messages
+            # Extract text from assistant messages only
+            # (result messages often duplicate the same content)
             if data.get("type") == "assistant":
                 content = data.get("message", {}).get("content", [])
                 for item in content:
                     if item.get("type") == "text":
                         text_content.append(item.get("text", ""))
-            # Also check for result type
-            elif data.get("type") == "result":
-                result_text = data.get("result", "")
-                if result_text:
-                    text_content.append(result_text)
         except (json.JSONDecodeError, TypeError, KeyError):
             # Not JSON, treat as plain text
             text_content.append(line)
@@ -913,6 +910,7 @@ def _parse_discovery_questions(output: str) -> list[str]:
         return []
 
     questions = []
+    seen = set()  # Track seen questions to avoid duplicates
     in_questions = False
 
     for line in full_text.split("\n"):
@@ -934,14 +932,16 @@ def _parse_discovery_questions(output: str) -> list[str]:
                 question = match.group(1).strip()
                 # Extract only up to the first question mark (strips trailing explanations)
                 question = _extract_question_only(question)
-                if question:
+                if question and question not in seen:
                     questions.append(question)
+                    seen.add(question)
             elif line.startswith("-"):
                 # Also accept bullet points
                 question = line[1:].strip()
                 question = _extract_question_only(question)
-                if question:
+                if question and question not in seen:
                     questions.append(question)
+                    seen.add(question)
 
     return questions
 
