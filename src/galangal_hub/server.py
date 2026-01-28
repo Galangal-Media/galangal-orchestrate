@@ -65,14 +65,41 @@ async def notify_dashboards() -> None:
 
 async def notify_dashboards_output(agent_id: str, line: str, line_type: str) -> None:
     """Send output line to all connected dashboards for live streaming."""
-    import json
-
     message = json.dumps({
         "type": "output",
         "agent_id": agent_id,
         "line": line,
         "line_type": line_type,
     })
+
+    disconnected = []
+    for ws in _dashboard_connections:
+        try:
+            await ws.send_text(message)
+        except Exception:
+            disconnected.append(ws)
+
+    # Clean up disconnected
+    for ws in disconnected:
+        if ws in _dashboard_connections:
+            _dashboard_connections.remove(ws)
+
+
+async def notify_dashboards_prompt(agent_id: str, agent_name: str, prompt: PromptData | None) -> None:
+    """Send prompt notification to all connected dashboards."""
+    if prompt:
+        message = json.dumps({
+            "type": "prompt",
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "message": prompt.message[:200],  # Truncate for toast
+            "prompt_type": prompt.prompt_type,
+        })
+    else:
+        message = json.dumps({
+            "type": "prompt_cleared",
+            "agent_id": agent_id,
+        })
 
     disconnected = []
     for ws in _dashboard_connections:
@@ -310,9 +337,14 @@ async def agent_websocket(websocket: WebSocket) -> None:
 
                 agent_id = registered_agent_id
 
+                # Get agent name for notification
+                agent = manager.get_agent(agent_id)
+                agent_name = agent.agent.agent_name if agent else "Agent"
+
                 # Check if prompt is being cleared
                 if payload.get("prompt_type") is None:
                     await manager.clear_prompt(agent_id)
+                    await notify_dashboards_prompt(agent_id, agent_name, None)
                     logger.info(f"Agent {agent_id}: prompt cleared")
                 else:
                     # Parse prompt data
@@ -334,6 +366,7 @@ async def agent_websocket(websocket: WebSocket) -> None:
                             context=payload.get("context", {}),
                         )
                         await manager.update_prompt(agent_id, prompt)
+                        await notify_dashboards_prompt(agent_id, agent_name, prompt)
                         logger.info(f"Agent {agent_id}: prompt updated - {prompt.prompt_type}")
                     except (KeyError, TypeError, ValueError) as e:
                         logger.warning(f"Invalid PROMPT data: {e}")

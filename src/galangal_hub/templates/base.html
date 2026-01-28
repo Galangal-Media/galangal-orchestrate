@@ -39,6 +39,10 @@
         .markdown-content table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
         .markdown-content th, .markdown-content td { border: 1px solid #4b5563; padding: 0.5rem; text-align: left; }
         .markdown-content th { background: #1f2937; }
+        /* Toast animations */
+        .toast {
+            transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
@@ -65,6 +69,10 @@
     <main class="max-w-7xl mx-auto px-4 py-8">
         {% block content %}{% endblock %}
     </main>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-md">
+    </div>
 
     <script>
         // WebSocket for live updates
@@ -99,6 +107,12 @@
                 if (data.type === 'refresh') {
                     // Trigger HTMX refresh for dynamic content
                     htmx.trigger(document.body, 'refresh');
+                } else if (data.type === 'prompt') {
+                    // Show toast notification for new prompt
+                    showPromptToast(data.agent_id, data.agent_name, data.message, data.prompt_type);
+                } else if (data.type === 'prompt_cleared') {
+                    // Remove toast for this agent
+                    removeToast(`toast-${data.agent_id}`);
                 }
             };
         }
@@ -110,6 +124,83 @@
         document.body.addEventListener('htmx:load', function(evt) {
             // Set up polling for elements with hx-trigger="every 5s"
         });
+
+        // Toast notification functions
+        function showToast(id, content, type = 'info', duration = 0) {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+
+            // Remove existing toast with same id
+            removeToast(id);
+
+            const toast = document.createElement('div');
+            toast.id = id;
+            toast.className = `toast p-4 rounded-lg shadow-lg border transition-all transform translate-x-full opacity-0 ${getToastClasses(type)}`;
+            toast.innerHTML = content;
+
+            container.appendChild(toast);
+
+            // Animate in
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-x-full', 'opacity-0');
+            });
+
+            // Auto-dismiss if duration > 0
+            if (duration > 0) {
+                setTimeout(() => removeToast(id), duration);
+            }
+
+            return toast;
+        }
+
+        function removeToast(id) {
+            const toast = document.getElementById(id);
+            if (toast) {
+                toast.classList.add('translate-x-full', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }
+        }
+
+        function getToastClasses(type) {
+            switch (type) {
+                case 'prompt':
+                    return 'bg-yellow-900/90 border-yellow-600 text-yellow-100';
+                case 'success':
+                    return 'bg-green-900/90 border-green-600 text-green-100';
+                case 'error':
+                    return 'bg-red-900/90 border-red-600 text-red-100';
+                default:
+                    return 'bg-gray-800/90 border-gray-600 text-gray-100';
+            }
+        }
+
+        function showPromptToast(agentId, agentName, message, promptType) {
+            // Don't show toast if we're already on the agent's page
+            if (window.location.pathname.includes(`/agent/${agentId}`)) {
+                return;
+            }
+
+            const truncatedMsg = message.length > 80 ? message.substring(0, 80) + '...' : message;
+            const content = `
+                <div class="flex items-start gap-3">
+                    <span class="status-dot status-attention mt-1"></span>
+                    <div class="flex-1 min-w-0">
+                        <div class="font-semibold text-sm">${agentName || 'Agent'}</div>
+                        <div class="text-xs opacity-80 truncate">${truncatedMsg}</div>
+                    </div>
+                    <a href="/agent/${agentId}" class="shrink-0 px-3 py-1 bg-yellow-600 hover:bg-yellow-700 text-white text-xs rounded font-medium">
+                        View
+                    </a>
+                    <button onclick="removeToast('toast-${agentId}')" class="shrink-0 text-yellow-400 hover:text-yellow-200">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+            `;
+
+            showToast(`toast-${agentId}`, content, 'prompt', 0); // 0 = sticky until dismissed
+        }
 
         // Global function to respond to prompts (used by prompt_card.html)
         async function respondToPrompt(agentId, taskName, promptType, result) {
