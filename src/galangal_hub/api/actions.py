@@ -251,8 +251,8 @@ async def respond_to_prompt(
     if not agent.connected:
         raise HTTPException(status_code=400, detail="Agent not connected")
 
-    # Check task - allow "__prompt__" for prompts during task creation (no active task)
-    if task_name != "__prompt__":
+    # Check task - allow "_" or "__prompt__" for prompts during task creation (no active task)
+    if task_name not in ("_", "__prompt__"):
         if not agent.task or agent.task.task_name != task_name:
             raise HTTPException(status_code=404, detail="Task not found")
 
