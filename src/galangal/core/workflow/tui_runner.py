@@ -1244,15 +1244,22 @@ def _send_artifacts_for_approval(
 
         artifacts: dict[str, str] = {}
 
-        # Determine which artifacts to send based on stage
-        if stage_name == "PM":
-            artifact_names = ["SPEC.md", "PLAN.md", "STAGE_PLAN.md"]
-        elif stage_name == "DESIGN":
-            artifact_names = ["DESIGN.md"]
-        else:
-            artifact_names = []
+        # Send all existing artifacts plus stage-specific ones
+        # Core artifacts that may exist at any point
+        all_artifacts = [
+            "SPEC.md",
+            "PLAN.md",
+            "STAGE_PLAN.md",
+            "DESIGN.md",
+            "DEVELOPMENT.md",
+            "TEST_REPORT.md",
+            "QA_REPORT.md",
+            "VALIDATION_REPORT.md",
+            "SUMMARY.md",
+            "PREFLIGHT_REPORT.md",
+        ]
 
-        for name in artifact_names:
+        for name in all_artifacts:
             content = read_artifact(name, state.task_name)
             if content:
                 # Truncate very large artifacts

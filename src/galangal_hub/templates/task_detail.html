@@ -110,15 +110,21 @@
     {% if active and agent and agent.artifacts %}
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
         <h2 class="text-lg font-semibold mb-4">Artifacts</h2>
-        <div class="space-y-2">
+        <div class="space-y-2" id="artifacts-container">
             {% for name, content in agent.artifacts.items() %}
-            <details class="bg-gray-900 rounded-lg group">
+            <details class="bg-gray-900 rounded-lg group artifact-item" data-artifact-name="{{ name }}">
                 <summary class="p-3 cursor-pointer flex items-center justify-between hover:bg-gray-850 rounded-lg">
                     <span class="font-medium text-purple-400">{{ name }}</span>
-                    <span class="text-xs text-gray-500">{{ content|length }} chars</span>
+                    <div class="flex items-center gap-2">
+                        <button onclick="event.stopPropagation(); toggleArtifactView(this)" class="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded">
+                            Raw
+                        </button>
+                        <span class="text-xs text-gray-500">{{ content|length }} chars</span>
+                    </div>
                 </summary>
                 <div class="p-4 border-t border-gray-700">
-                    <pre class="text-sm text-gray-300 whitespace-pre-wrap overflow-x-auto max-h-96">{{ content }}</pre>
+                    <div class="artifact-rendered markdown-content text-sm text-gray-300 max-h-96 overflow-y-auto"></div>
+                    <pre class="artifact-raw text-sm text-gray-300 whitespace-pre-wrap overflow-x-auto max-h-96 hidden">{{ content }}</pre>
                 </div>
             </details>
             {% endfor %}
@@ -236,6 +242,51 @@ document.addEventListener('DOMContentLoaded', function() {
             descriptionEl.innerHTML = marked.parse(rawDescription);
         }
     }
+
+    // Render artifacts as markdown
+    renderArtifacts();
 });
+
+// Artifact data for rendering
+const artifactContents = {
+    {% for name, content in (agent.artifacts if agent and agent.artifacts else {}).items() %}
+    "{{ name }}": {{ content|tojson|safe }},
+    {% endfor %}
+};
+
+function renderArtifacts() {
+    if (typeof marked === 'undefined') return;
+
+    document.querySelectorAll('.artifact-item').forEach(item => {
+        const name = item.dataset.artifactName;
+        const content = artifactContents[name];
+        const renderedEl = item.querySelector('.artifact-rendered');
+
+        if (content && renderedEl) {
+            try {
+                renderedEl.innerHTML = marked.parse(content);
+            } catch (e) {
+                // Fall back to pre-formatted text if markdown fails
+                renderedEl.textContent = content;
+            }
+        }
+    });
+}
+
+function toggleArtifactView(button) {
+    const details = button.closest('.artifact-item');
+    const rendered = details.querySelector('.artifact-rendered');
+    const raw = details.querySelector('.artifact-raw');
+
+    if (raw.classList.contains('hidden')) {
+        raw.classList.remove('hidden');
+        rendered.classList.add('hidden');
+        button.textContent = 'Formatted';
+    } else {
+        raw.classList.add('hidden');
+        rendered.classList.remove('hidden');
+        button.textContent = 'Raw';
+    }
+}
 </script>
 {% endblock %}

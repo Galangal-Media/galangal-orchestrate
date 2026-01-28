@@ -554,7 +554,25 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
             if not local_future.done():
                 local_future.set_result(result)
 
-        self.show_prompt(prompt_type, message, callback)
+        # Show the prompt - this sets _active_prompt_screen synchronously
+        # since we're in the Textual event loop context
+        self._prompt_type = prompt_type
+        self._prompt_callback = callback
+        options_list = get_prompt_options(prompt_type)
+
+        def _handle(result: str | None) -> None:
+            self._active_prompt_screen = None
+            self._prompt_callback = None
+            self._prompt_type = PromptType.NONE
+            if result:
+                callback(result)
+
+        screen = PromptModal(message, options_list)
+        self._active_prompt_screen = screen
+        self.push_screen(screen, _handle)
+
+        # Small yield to ensure the screen is displayed before racing
+        await asyncio.sleep(0)
 
         # Start remote response check (wrapped to handle errors gracefully)
         remote_task = asyncio.create_task(
@@ -592,7 +610,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
 
             # If remote won, dismiss the local prompt
             if local_task in pending:
-                self.hide_prompt()
+                self._dismiss_prompt_directly()
 
             return result
 
@@ -602,6 +620,19 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
             if not local_future.done():
                 return await local_future
             raise
+
+    def _dismiss_prompt_directly(self) -> None:
+        """
+        Dismiss the active prompt screen directly.
+
+        Use this when already in the Textual event loop context (e.g., from
+        prompt_async) instead of hide_prompt() which uses call_from_thread.
+        """
+        self._prompt_type = PromptType.NONE
+        self._prompt_callback = None
+        if self._active_prompt_screen:
+            self._active_prompt_screen.dismiss(None)
+            self._active_prompt_screen = None
 
     def _notify_hub_prompt(
         self,
