@@ -4,6 +4,7 @@ import { Dashboard } from "@/pages/Dashboard"
 import { AgentDetail } from "@/pages/AgentDetail"
 import { AgentsList } from "@/pages/AgentsList"
 import { TasksList } from "@/pages/TasksList"
+import { TaskDetail } from "@/pages/TaskDetail"
 import { useTheme } from "@/hooks/useTheme"
 import { useEffect } from "react"
 
@@ -24,6 +25,7 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/agents" element={<AgentsList />} />
           <Route path="/agents/:agentId" element={<AgentDetail />} />
+          <Route path="/agents/:agentId/tasks/:taskName" element={<TaskDetail />} />
           <Route path="/tasks" element={<TasksList />} />
         </Route>
       </Routes>

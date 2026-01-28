@@ -9,7 +9,7 @@ import { useWebSocket } from "@/hooks/useWebSocket"
 import { api } from "@/lib/api"
 import type { AgentInfo, TaskState, PromptData } from "@/types/api"
 import { formatRelativeTime } from "@/lib/utils"
-import { ArrowLeft, Monitor, GitBranch, Target } from "lucide-react"
+import { ArrowLeft, Monitor, GitBranch, Target, ChevronRight } from "lucide-react"
 
 interface AgentDetailData {
   agent: AgentInfo
@@ -83,8 +83,8 @@ export function AgentDetail() {
     )
   }
 
-  // Display title - use task name if available, otherwise agent ID
-  const displayTitle = agent.task?.task_name || agent.agent.agent_id
+  // Display title - use project name
+  const displayTitle = agent.agent.project_name || agent.agent.agent_id
 
   return (
     <div className="space-y-8">
@@ -106,11 +106,9 @@ export function AgentDetail() {
             </div>
           </div>
         </div>
-        {agent.task && (
-          <p className="text-sm text-muted-foreground ml-[84px] font-mono">
-            Agent: {agent.agent.agent_id}
-          </p>
-        )}
+        <p className="text-sm text-muted-foreground ml-[84px]">
+          {agent.agent.hostname} &middot; <span className="font-mono text-xs">{agent.agent.agent_id}</span>
+        </p>
       </div>
 
       {/* Prompt Card - Show first if there's an active prompt */}
@@ -160,41 +158,46 @@ export function AgentDetail() {
           </CardContent>
         </Card>
 
-        {/* Task Info */}
+        {/* Task Info - Clickable */}
         {agent.task && (
-          <Card className="card-hover">
-            <CardHeader className="pb-4">
-              <CardTitle className="flex items-center gap-2">
-                <div className="p-2 rounded-lg bg-info/10">
-                  <Target className="h-4 w-4 text-info" />
+          <Link to={`/agents/${agent.agent.agent_id}/tasks/${agent.task.task_name}`}>
+            <Card className="card-hover cursor-pointer group">
+              <CardHeader className="pb-4">
+                <CardTitle className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-lg bg-info/10">
+                      <Target className="h-4 w-4 text-info" />
+                    </div>
+                    Current Task
+                  </div>
+                  <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-lg font-semibold group-hover:text-primary transition-colors">{agent.task.task_name}</span>
+                  <Badge>{agent.task.stage}</Badge>
                 </div>
-                Current Task
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-lg font-semibold">{agent.task.task_name}</span>
-                <Badge>{agent.task.stage}</Badge>
-              </div>
-              {agent.task.task_type && (
-                <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Target className="h-4 w-4 flex-shrink-0" />
-                  <span>{agent.task.task_type}</span>
-                </div>
-              )}
-              {agent.task.branch && (
-                <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <GitBranch className="h-4 w-4 flex-shrink-0" />
-                  <span className="font-mono text-xs">{agent.task.branch}</span>
-                </div>
-              )}
-              {agent.task.description && (
-                <p className="text-sm text-muted-foreground border-t border-border pt-4 mt-4">
-                  {agent.task.description}
-                </p>
-              )}
-            </CardContent>
-          </Card>
+                {agent.task.task_type && (
+                  <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                    <Target className="h-4 w-4 flex-shrink-0" />
+                    <span>{agent.task.task_type}</span>
+                  </div>
+                )}
+                {agent.task.branch && (
+                  <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                    <GitBranch className="h-4 w-4 flex-shrink-0" />
+                    <span className="font-mono text-xs">{agent.task.branch}</span>
+                  </div>
+                )}
+                {agent.task.description && (
+                  <p className="text-sm text-muted-foreground border-t border-border pt-4 mt-4 line-clamp-2">
+                    {agent.task.description}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </Link>
         )}
       </div>
 

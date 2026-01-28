@@ -20,7 +20,7 @@ const stageBadgeVariant = (stage: string): "default" | "success" | "warning" | "
 
 export function TaskCard({ task, agentId }: TaskCardProps) {
   return (
-    <Link to={`/agents/${agentId}`}>
+    <Link to={`/agents/${agentId}/tasks/${task.task_name}`}>
       <Card className="card-hover">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-2">

@@ -1,0 +1,341 @@
+import { useEffect, useState, useCallback, useRef } from "react"
+import { useParams, Link } from "react-router-dom"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { PromptCard } from "@/components/prompt/PromptCard"
+import { ArtifactViewer } from "@/components/artifact/ArtifactViewer"
+import { useWebSocket } from "@/hooks/useWebSocket"
+import { api } from "@/lib/api"
+import type { AgentInfo, TaskState, PromptData } from "@/types/api"
+import { formatRelativeTime } from "@/lib/utils"
+import { ArrowLeft, GitBranch, Target, Terminal, Clock, AlertTriangle } from "lucide-react"
+
+interface AgentDetailData {
+  agent: AgentInfo
+  task: TaskState | null
+  current_prompt: PromptData | null
+  artifacts: Record<string, string>
+  connected: boolean
+}
+
+interface OutputLine {
+  line: string
+  line_type: string
+}
+
+export function TaskDetail() {
+  const { agentId, taskName } = useParams<{ agentId: string; taskName: string }>()
+  const [agent, setAgent] = useState<AgentDetailData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [outputLines, setOutputLines] = useState<OutputLine[]>([])
+  const [outputIndex, setOutputIndex] = useState(0)
+  const outputRef = useRef<HTMLDivElement>(null)
+  const [autoScroll, setAutoScroll] = useState(true)
+
+  const { lastMessage } = useWebSocket("/ws/dashboard")
+
+  const fetchAgent = useCallback(async () => {
+    if (!agentId) return
+
+    try {
+      const data = await api.getAgent(agentId)
+      setAgent(data)
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch agent")
+    } finally {
+      setLoading(false)
+    }
+  }, [agentId])
+
+  const fetchOutput = useCallback(async () => {
+    if (!agentId) return
+
+    try {
+      const result = await api.getOutputLines(agentId, outputIndex)
+      if (result.lines.length > 0) {
+        setOutputLines(prev => [...prev, ...result.lines])
+        setOutputIndex(result.next_index)
+      }
+    } catch {
+      // Ignore output fetch errors
+    }
+  }, [agentId, outputIndex])
+
+  useEffect(() => {
+    fetchAgent()
+    fetchOutput()
+  }, [fetchAgent, fetchOutput])
+
+  // Poll for output updates
+  useEffect(() => {
+    const interval = setInterval(fetchOutput, 2000)
+    return () => clearInterval(interval)
+  }, [fetchOutput])
+
+  // Refresh on WebSocket messages
+  useEffect(() => {
+    if (lastMessage) {
+      try {
+        const data = JSON.parse(lastMessage)
+        if (data.agent_id === agentId) {
+          fetchAgent()
+          if (data.type === 'output') {
+            fetchOutput()
+          }
+        }
+      } catch {
+        // Ignore parse errors
+      }
+    }
+  }, [lastMessage, agentId, fetchAgent, fetchOutput])
+
+  // Auto-scroll output
+  useEffect(() => {
+    if (autoScroll && outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight
+    }
+  }, [outputLines, autoScroll])
+
+  const handleScroll = () => {
+    if (outputRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = outputRef.current
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50
+      setAutoScroll(isAtBottom)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    )
+  }
+
+  if (error || !agent) {
+    return (
+      <div className="space-y-4">
+        <Link to={`/agents/${agentId}`}>
+          <Button variant="ghost" size="sm" className="gap-2">
+            <ArrowLeft className="h-4 w-4" />
+            Back to Agent
+          </Button>
+        </Link>
+        <div className="p-4 bg-destructive/10 border border-destructive/50 rounded-xl text-destructive">
+          {error || "Task not found"}
+        </div>
+      </div>
+    )
+  }
+
+  const task = agent.task
+
+  if (!task || task.task_name !== taskName) {
+    return (
+      <div className="space-y-4">
+        <Link to={`/agents/${agentId}`}>
+          <Button variant="ghost" size="sm" className="gap-2">
+            <ArrowLeft className="h-4 w-4" />
+            Back to Agent
+          </Button>
+        </Link>
+        <div className="p-4 bg-warning/10 border border-warning/50 rounded-xl text-warning">
+          Task "{taskName}" is not currently active on this agent.
+        </div>
+      </div>
+    )
+  }
+
+  const getLineColor = (lineType: string) => {
+    switch (lineType) {
+      case 'error':
+        return 'text-destructive'
+      case 'warning':
+        return 'text-warning'
+      case 'success':
+        return 'text-success'
+      case 'info':
+        return 'text-info'
+      case 'stage':
+        return 'text-primary font-semibold'
+      default:
+        return 'text-muted-foreground'
+    }
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-4">
+          <Link to={`/agents/${agentId}`}>
+            <Button variant="ghost" size="sm" className="gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Button>
+          </Link>
+          <div className="flex items-center gap-4 flex-1">
+            <h1 className="text-3xl font-bold truncate">{task.task_name}</h1>
+            <Badge variant="default" className="text-sm">{task.stage}</Badge>
+          </div>
+        </div>
+        <p className="text-sm text-muted-foreground ml-[84px]">
+          {agent.agent.project_name} &middot; {agent.agent.hostname}
+        </p>
+      </div>
+
+      {/* Prompt Card - Show first if there's an active prompt */}
+      {agent.current_prompt && (
+        <PromptCard
+          prompt={agent.current_prompt}
+          agentId={agent.agent.agent_id}
+          taskName={task.task_name}
+          onResponse={fetchAgent}
+        />
+      )}
+
+      {/* Task Info */}
+      <div className="grid gap-6 md:grid-cols-2">
+        <Card className="card-hover">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-info/10">
+                <Target className="h-4 w-4 text-info" />
+              </div>
+              Task Details
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {task.task_type && (
+              <div className="flex items-start gap-3">
+                <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Type</span>
+                <Badge variant="outline" className="text-xs">{task.task_type}</Badge>
+              </div>
+            )}
+            {task.branch && (
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Branch</span>
+                <div className="flex items-center gap-2">
+                  <GitBranch className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-mono text-xs">{task.branch}</span>
+                </div>
+              </div>
+            )}
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Attempt</span>
+              <span className="text-sm">{task.attempt}</span>
+            </div>
+            {task.started_at && (
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Started</span>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Clock className="h-4 w-4" />
+                  <span>{formatRelativeTime(task.started_at)}</span>
+                </div>
+              </div>
+            )}
+            {task.github_issue && task.github_repo && (
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Issue</span>
+                <a
+                  href={`https://github.com/${task.github_repo}/issues/${task.github_issue}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-primary hover:underline"
+                >
+                  #{task.github_issue}
+                </a>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Description & Last Failure */}
+        <Card className="card-hover">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Target className="h-4 w-4 text-primary" />
+              </div>
+              Description
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {(task.description || task.task_description) ? (
+              <p className="text-sm text-muted-foreground">
+                {task.description || task.task_description}
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">No description provided</p>
+            )}
+
+            {task.last_failure && (
+              <div className="pt-4 border-t border-border">
+                <div className="flex items-center gap-2 text-warning mb-2">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span className="text-sm font-medium">Last Failure</span>
+                </div>
+                <p className="text-sm text-muted-foreground">{task.last_failure}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Live Output */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-1 h-6 rounded-full bg-success" />
+            <h2 className="text-xl font-semibold">Live Output</h2>
+            <span className="text-sm text-muted-foreground">({outputLines.length} lines)</span>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setAutoScroll(!autoScroll)}
+            className={autoScroll ? "text-success" : "text-muted-foreground"}
+          >
+            {autoScroll ? "Auto-scroll ON" : "Auto-scroll OFF"}
+          </Button>
+        </div>
+        <Card>
+          <CardContent className="p-0">
+            <div
+              ref={outputRef}
+              onScroll={handleScroll}
+              className="h-[400px] overflow-y-auto font-mono text-xs p-4 bg-background/50"
+            >
+              {outputLines.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-muted-foreground">
+                  <Terminal className="h-8 w-8 mr-3 opacity-50" />
+                  <span>Waiting for output...</span>
+                </div>
+              ) : (
+                outputLines.map((line, index) => (
+                  <div key={index} className={`py-0.5 ${getLineColor(line.line_type)}`}>
+                    {line.line}
+                  </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* Artifacts */}
+      {agent.artifacts && Object.keys(agent.artifacts).length > 0 && (
+        <section className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-1 h-6 rounded-full bg-primary" />
+            <h2 className="text-xl font-semibold">Artifacts</h2>
+          </div>
+          <ArtifactViewer artifacts={agent.artifacts} />
+        </section>
+      )}
+    </div>
+  )
+}
