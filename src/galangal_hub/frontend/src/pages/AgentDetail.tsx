@@ -172,8 +172,8 @@ export function AgentDetail() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                  <span className="text-lg font-semibold group-hover:text-primary transition-colors break-words">{agent.task.task_name}</span>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 min-w-0">
+                  <span className="text-lg font-semibold group-hover:text-primary transition-colors break-all min-w-0">{agent.task.task_name}</span>
                   <Badge className="w-fit flex-shrink-0">{agent.task.stage}</Badge>
                 </div>
                 {agent.task.task_type && (

@@ -250,8 +250,8 @@ export function TaskDetail() {
             Back
           </Button>
         </Link>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-          <h1 className="text-2xl sm:text-3xl font-bold break-words">{task.task_name}</h1>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold break-all min-w-0">{task.task_name}</h1>
           <Badge variant="default" className="text-sm w-fit flex-shrink-0">{task.stage}</Badge>
         </div>
         <p className="text-sm text-muted-foreground">

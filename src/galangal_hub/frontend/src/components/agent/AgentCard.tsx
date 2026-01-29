@@ -45,9 +45,9 @@ export function AgentCard({ agent, task, prompt, connected = true }: AgentCardPr
 
           {task && (
             <div className="pt-3 mt-3 border-t border-border">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium truncate">{task.task_name}</span>
-                <Badge variant="outline" className="text-xs">{task.stage}</Badge>
+              <div className="flex items-center justify-between gap-2 min-w-0">
+                <span className="text-sm font-medium min-w-0 break-all">{task.task_name}</span>
+                <Badge variant="outline" className="text-xs flex-shrink-0">{task.stage}</Badge>
               </div>
               {task.task_type && (
                 <span className="text-xs text-muted-foreground mt-1 block">{task.task_type}</span>
