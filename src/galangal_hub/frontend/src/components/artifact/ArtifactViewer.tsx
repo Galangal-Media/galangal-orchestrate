@@ -1,9 +1,14 @@
 import { useState } from "react"
 import { ChevronDown, ChevronRight, FileText } from "lucide-react"
+import Markdown from "react-markdown"
 import { cn } from "@/lib/utils"
 
 interface ArtifactViewerProps {
   artifacts: Record<string, string>
+}
+
+function isMarkdownFile(name: string): boolean {
+  return name.toLowerCase().endsWith(".md")
 }
 
 export function ArtifactViewer({ artifacts }: ArtifactViewerProps) {
@@ -51,9 +56,15 @@ export function ArtifactViewer({ artifacts }: ArtifactViewerProps) {
               expanded[name] ? "max-h-[500px]" : "max-h-0"
             )}
           >
-            <pre className="p-4 text-sm overflow-x-auto bg-card">
-              <code>{content}</code>
-            </pre>
+            {isMarkdownFile(name) ? (
+              <div className="p-4 overflow-y-auto bg-card prose max-w-none text-foreground">
+                <Markdown>{content}</Markdown>
+              </div>
+            ) : (
+              <pre className="p-4 text-sm overflow-x-auto bg-card">
+                <code>{content}</code>
+              </pre>
+            )}
           </div>
         </div>
       ))}
