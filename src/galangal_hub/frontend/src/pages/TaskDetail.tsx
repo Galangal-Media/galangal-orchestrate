@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react"
 import { useParams, Link } from "react-router-dom"
+import Markdown from "react-markdown"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -350,10 +351,8 @@ export function TaskDetail() {
           <CardContent className="space-y-4">
             {(task.description || task.task_description) ? (
               showDescription ? (
-                <div className="text-sm text-muted-foreground prose prose-sm prose-invert max-w-none">
-                  <pre className="whitespace-pre-wrap font-sans bg-muted/50 p-4 rounded-lg overflow-x-auto">
-                    {task.description || task.task_description}
-                  </pre>
+                <div className="prose prose-sm prose-invert max-w-none prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground prose-code:text-primary prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-a:text-primary prose-li:text-muted-foreground">
+                  <Markdown>{task.description || task.task_description}</Markdown>
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground italic">
