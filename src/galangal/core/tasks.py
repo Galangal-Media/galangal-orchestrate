@@ -350,6 +350,7 @@ def create_task_from_issue(
 
     This consolidates the task creation flow that was duplicated across
     start.py, tui_runner.py, and github.py. Handles:
+    - Ensuring we're on the base branch with latest changes
     - Task name generation and validation
     - Task creation with GitHub metadata
     - Screenshot download (after task creation)
@@ -371,6 +372,24 @@ def create_task_from_issue(
         mark_issue_in_progress,
         prepare_issue_for_task,
     )
+
+    # Step 0: Ensure we're on the base branch with latest changes
+    on_base, current_branch, base_branch = is_on_base_branch()
+    if not on_base:
+        # Switch to base branch
+        success, message = switch_to_base_branch()
+        if not success:
+            return TaskFromIssueResult(
+                success=False,
+                message=f"Failed to switch to {base_branch}: {message}",
+            )
+
+    # Pull latest changes from remote
+    pull_success, pull_message = pull_base_branch()
+    if not pull_success:
+        # Non-fatal warning - log but continue (might be offline, etc.)
+        # The task can still be created on the current state
+        pass
 
     # Step 1: Extract issue data using existing helper
     issue_data = prepare_issue_for_task(issue, repo_name)
