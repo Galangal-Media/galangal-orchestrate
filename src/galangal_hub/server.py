@@ -362,6 +362,7 @@ async def agent_websocket(websocket: WebSocket) -> None:
                             prompt_type=payload["prompt_type"],
                             message=payload.get("message", ""),
                             options=options,
+                            questions=payload.get("questions", []),
                             artifacts=payload.get("artifacts", []),
                             context=payload.get("context", {}),
                         )

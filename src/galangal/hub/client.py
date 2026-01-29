@@ -277,6 +277,7 @@ class HubClient:
         options: list[dict[str, Any]],
         artifacts: list[str] | None = None,
         context: dict[str, Any] | None = None,
+        questions: list[str] | None = None,
     ) -> None:
         """
         Send current prompt to hub.
@@ -290,6 +291,7 @@ class HubClient:
             options: List of option dicts with key, label, result fields.
             artifacts: List of artifact names relevant to this prompt.
             context: Optional additional context (stage, task_name, etc.).
+            questions: List of questions for Q&A style prompts.
         """
         if not self._connected:
             return
@@ -300,6 +302,7 @@ class HubClient:
                 "prompt_type": prompt_type,
                 "message": message,
                 "options": options,
+                "questions": questions or [],
                 "artifacts": artifacts or [],
                 "context": context or {},
                 "timestamp": datetime.now(timezone.utc).isoformat(),

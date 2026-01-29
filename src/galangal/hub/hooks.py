@@ -220,6 +220,7 @@ def notify_prompt(
     options: list,
     artifacts: list[str] | None = None,
     context: dict | None = None,
+    questions: list[str] | None = None,
 ) -> None:
     """
     Notify hub that a prompt is being displayed.
@@ -230,6 +231,7 @@ def notify_prompt(
         options: List of PromptOption objects or dicts.
         artifacts: List of artifact names relevant to this prompt.
         context: Optional additional context.
+        questions: List of questions for Q&A style prompts.
     """
     client = get_hub_client()
     if client and client.connected:
@@ -249,7 +251,7 @@ def notify_prompt(
                 option_dicts.append(opt)
 
         _schedule_async(
-            _send_prompt(prompt_type, message, option_dicts, artifacts, context)
+            _send_prompt(prompt_type, message, option_dicts, artifacts, context, questions)
         )
 
 
@@ -259,11 +261,12 @@ async def _send_prompt(
     options: list[dict],
     artifacts: list[str] | None,
     context: dict | None,
+    questions: list[str] | None,
 ) -> None:
     """Send prompt to hub."""
     client = get_hub_client()
     if client:
-        await client.send_prompt(prompt_type, message, options, artifacts, context)
+        await client.send_prompt(prompt_type, message, options, artifacts, context, questions)
 
 
 def notify_prompt_cleared() -> None:

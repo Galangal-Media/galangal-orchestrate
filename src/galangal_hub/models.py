@@ -123,6 +123,7 @@ class PromptData(BaseModel):
     prompt_type: str  # PromptType enum value
     message: str  # Display message
     options: list[PromptOption]  # Available choices
+    questions: list[str] = Field(default_factory=list)  # Questions for Q&A prompts
     artifacts: list[str] = Field(default_factory=list)  # Relevant artifact names
     context: dict[str, Any] = Field(default_factory=dict)  # Optional context
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

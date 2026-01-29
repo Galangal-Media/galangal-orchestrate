@@ -36,12 +36,20 @@ class RollbackRequest(BaseModel):
     feedback: str | None = None
 
 
+class QAAnswer(BaseModel):
+    """A single question-answer pair."""
+
+    question: str
+    answer: str
+
+
 class PromptResponse(BaseModel):
     """Request to respond to any prompt."""
 
     prompt_type: str  # The prompt type being responded to
     result: str  # The selected option result (e.g., "yes", "no", "quit")
     text_input: str | None = None  # Optional text input for prompts that need it
+    answers: list[QAAnswer] | None = None  # Optional Q&A answers list
 
 
 @router.post("/{agent_id}/{task_name}/approve")
@@ -270,13 +278,21 @@ async def respond_to_prompt(
     # Use actual task name if available, otherwise empty string
     actual_task_name = agent.task.task_name if agent.task else ""
 
+    # For Q&A answers, format them as text_input for the agent
+    text_input = request.text_input
+    if request.answers:
+        # Format answers as numbered list for the agent to parse
+        text_input = "\n".join(
+            f"{i+1}. {a.answer}" for i, a in enumerate(request.answers)
+        )
+
     action = HubAction(
         action_type=ActionType.RESPONSE,
         task_name=actual_task_name,
         data={
             "prompt_type": request.prompt_type,
             "result": request.result,
-            "text_input": request.text_input,
+            "text_input": text_input,
         },
     )
 

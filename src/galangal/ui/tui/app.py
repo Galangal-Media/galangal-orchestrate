@@ -690,6 +690,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         prompt_type: PromptType,
         message: str,
         options: list,
+        questions: list[str] | None = None,
     ) -> None:
         """Notify hub of a prompt being displayed."""
         try:
@@ -710,6 +711,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
                 options=options,
                 artifacts=artifacts,
                 context=context,
+                questions=questions,
             )
         except Exception:
             # Hub notification failure is non-fatal
@@ -968,16 +970,15 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         """
         from galangal.ui.tui.modals import PromptOption
 
-        # Notify Hub of Q&A session with questions as context
-        # Format questions for Hub display
-        questions_text = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
+        # Notify Hub of Q&A session with questions
         self._notify_hub_prompt(
             PromptType.DISCOVERY_QA,
-            f"Discovery Q&A ({len(questions)} questions):\n{questions_text}",
+            f"Discovery Q&A ({len(questions)} questions)",
             [
                 PromptOption("1", "Submit Answers", "submit", "#b8bb26"),
                 PromptOption("2", "Skip (Answer in CLI)", "skip", "#83a598"),
             ],
+            questions=questions,
         )
 
         local_future: asyncio.Future[list[str] | None] = asyncio.Future()
