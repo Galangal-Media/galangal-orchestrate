@@ -21,9 +21,11 @@ export function AgentCard({ agent, task, prompt, connected = true }: AgentCardPr
         hasPrompt ? "border-warning/50" : ""
       }`}>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-lg font-semibold truncate">{agent.agent_id}</CardTitle>
-            <div className="flex items-center gap-2">
+          <div className="flex items-start justify-between gap-2">
+            <CardTitle className="text-lg font-semibold break-words min-w-0">
+              {agent.project_name || agent.hostname}
+            </CardTitle>
+            <div className="flex items-center gap-2 flex-shrink-0">
               <span className={`status-dot ${connected ? "status-connected" : "status-disconnected"}`} />
               <Badge variant={connected ? "success" : "secondary"} className="text-xs">
                 {connected ? "Connected" : "Disconnected"}

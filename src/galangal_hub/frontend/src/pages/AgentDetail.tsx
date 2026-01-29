@@ -88,26 +88,24 @@ export function AgentDetail() {
 
   return (
     <div className="space-y-8">
-      <div className="space-y-2">
-        <div className="flex items-center gap-4">
-          <Link to="/">
-            <Button variant="ghost" size="sm" className="gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              Back
-            </Button>
-          </Link>
-          <div className="flex items-center gap-4 flex-1">
-            <h1 className="text-3xl font-bold truncate">{displayTitle}</h1>
-            <div className="flex items-center gap-2">
-              <span className={`status-dot ${agent.connected ? "status-connected" : "status-disconnected"}`} />
-              <Badge variant={agent.connected ? "success" : "secondary"}>
-                {agent.connected ? "Connected" : "Disconnected"}
-              </Badge>
-            </div>
+      <div className="space-y-4">
+        <Link to="/">
+          <Button variant="ghost" size="sm" className="gap-2">
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+        </Link>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+          <h1 className="text-2xl sm:text-3xl font-bold break-words">{displayTitle}</h1>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className={`status-dot ${agent.connected ? "status-connected" : "status-disconnected"}`} />
+            <Badge variant={agent.connected ? "success" : "secondary"}>
+              {agent.connected ? "Connected" : "Disconnected"}
+            </Badge>
           </div>
         </div>
-        <p className="text-sm text-muted-foreground ml-[84px]">
-          {agent.agent.hostname} &middot; <span className="font-mono text-xs">{agent.agent.agent_id}</span>
+        <p className="text-sm text-muted-foreground">
+          {agent.agent.hostname} &middot; <span className="font-mono text-xs break-all">{agent.agent.agent_id}</span>
         </p>
       </div>
 
@@ -137,9 +135,9 @@ export function AgentDetail() {
               <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Hostname</span>
               <span className="text-sm">{agent.agent.hostname}</span>
             </div>
-            <div className="flex items-start gap-3">
-              <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Project</span>
-              <span className="text-sm truncate font-mono text-xs">{agent.agent.project_path}</span>
+            <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-3">
+              <span className="text-sm font-medium text-muted-foreground sm:min-w-[80px]">Project</span>
+              <span className="text-sm font-mono text-xs break-all">{agent.agent.project_path}</span>
             </div>
             {agent.agent.version && (
               <div className="flex items-center gap-3">
@@ -174,9 +172,9 @@ export function AgentDetail() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-lg font-semibold group-hover:text-primary transition-colors">{agent.task.task_name}</span>
-                  <Badge>{agent.task.stage}</Badge>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <span className="text-lg font-semibold group-hover:text-primary transition-colors break-words">{agent.task.task_name}</span>
+                  <Badge className="w-fit flex-shrink-0">{agent.task.stage}</Badge>
                 </div>
                 {agent.task.task_type && (
                   <div className="flex items-center gap-3 text-sm text-muted-foreground">
@@ -185,9 +183,9 @@ export function AgentDetail() {
                   </div>
                 )}
                 {agent.task.branch && (
-                  <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-3 text-sm text-muted-foreground min-w-0">
                     <GitBranch className="h-4 w-4 flex-shrink-0" />
-                    <span className="font-mono text-xs">{agent.task.branch}</span>
+                    <span className="font-mono text-xs break-all">{agent.task.branch}</span>
                   </div>
                 )}
                 {agent.task.description && (

@@ -243,20 +243,18 @@ export function TaskDetail() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-4">
-          <Link to={`/agents/${agentId}`}>
-            <Button variant="ghost" size="sm" className="gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              Back
-            </Button>
-          </Link>
-          <div className="flex items-center gap-4 flex-1">
-            <h1 className="text-3xl font-bold truncate">{task.task_name}</h1>
-            <Badge variant="default" className="text-sm">{task.stage}</Badge>
-          </div>
+      <div className="space-y-4">
+        <Link to={`/agents/${agentId}`}>
+          <Button variant="ghost" size="sm" className="gap-2">
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+        </Link>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+          <h1 className="text-2xl sm:text-3xl font-bold break-words">{task.task_name}</h1>
+          <Badge variant="default" className="text-sm w-fit flex-shrink-0">{task.stage}</Badge>
         </div>
-        <p className="text-sm text-muted-foreground ml-[84px]">
+        <p className="text-sm text-muted-foreground">
           {agent.agent.project_name} &middot; {agent.agent.hostname}
         </p>
       </div>
@@ -290,11 +288,11 @@ export function TaskDetail() {
               </div>
             )}
             {task.branch && (
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Branch</span>
-                <div className="flex items-center gap-2">
-                  <GitBranch className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-mono text-xs">{task.branch}</span>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
+                <span className="text-sm font-medium text-muted-foreground sm:min-w-[80px]">Branch</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  <span className="font-mono text-xs break-all">{task.branch}</span>
                 </div>
               </div>
             )}
