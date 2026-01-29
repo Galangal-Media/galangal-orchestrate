@@ -94,13 +94,13 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
     CSS_PATH = "styles/app.tcss"
 
     BINDINGS = [
-        Binding("ctrl+q", "quit_workflow", "^Q Quit", show=True),
-        Binding("ctrl+i", "interrupt_feedback", "^I Interrupt", show=True),
-        Binding("ctrl+n", "skip_stage", "^N Skip", show=True),
-        Binding("ctrl+b", "back_stage", "^B Back", show=True),
-        Binding("ctrl+e", "manual_edit", "^E Edit", show=True),
-        Binding("ctrl+d", "toggle_verbose", "^D Verbose", show=False),
-        Binding("ctrl+f", "toggle_files", "^F Files", show=False),
+        Binding("ctrl+q", "quit_workflow", "^Q Quit", show=True, priority=True),
+        Binding("ctrl+i", "interrupt_feedback", "^I Interrupt", show=True, priority=True),
+        Binding("ctrl+n", "skip_stage", "^N Skip", show=True, priority=True),
+        Binding("ctrl+b", "back_stage", "^B Back", show=True, priority=True),
+        Binding("ctrl+e", "manual_edit", "^E Edit", show=True, priority=True),
+        Binding("ctrl+d", "toggle_verbose", "^D Verbose", show=False, priority=True),
+        Binding("ctrl+f", "toggle_files", "^F Files", show=False, priority=True),
     ]
 
     def __init__(
