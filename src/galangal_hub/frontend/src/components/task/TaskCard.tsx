@@ -23,9 +23,9 @@ export function TaskCard({ task, agentId }: TaskCardProps) {
     <Link to={`/agents/${agentId}/tasks/${task.task_name}`}>
       <Card className="card-hover">
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-lg font-semibold truncate">{task.task_name}</CardTitle>
-            <Badge variant={stageBadgeVariant(task.stage)} className="text-xs">{task.stage}</Badge>
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+            <CardTitle className="text-lg font-semibold break-words min-w-0">{task.task_name}</CardTitle>
+            <Badge variant={stageBadgeVariant(task.stage)} className="text-xs w-fit flex-shrink-0">{task.stage}</Badge>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -37,9 +37,9 @@ export function TaskCard({ task, agentId }: TaskCardProps) {
           )}
 
           {task.branch && (
-            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <div className="flex items-center gap-3 text-sm text-muted-foreground min-w-0">
               <GitBranch className="h-4 w-4 flex-shrink-0" />
-              <span className="truncate font-mono text-xs">{task.branch}</span>
+              <span className="font-mono text-xs break-all">{task.branch}</span>
             </div>
           )}
 
