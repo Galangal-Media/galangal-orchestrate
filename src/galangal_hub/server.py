@@ -88,11 +88,26 @@ async def notify_dashboards_output(agent_id: str, line: str, line_type: str) -> 
 async def notify_dashboards_prompt(agent_id: str, agent_name: str, prompt: PromptData | None) -> None:
     """Send prompt notification to all connected dashboards."""
     if prompt:
+        # Include full prompt data for the modal to use
+        prompt_dict = {
+            "prompt_type": prompt.prompt_type,
+            "message": prompt.message,
+            "options": [
+                {"key": opt.key, "label": opt.label, "result": opt.result, "color": opt.color}
+                for opt in prompt.options
+            ],
+            "questions": prompt.questions,
+            "artifacts": prompt.artifacts,
+            "context": prompt.context,
+        }
         message = json.dumps({
             "type": "prompt",
             "agent_id": agent_id,
             "agent_name": agent_name,
-            "message": prompt.message[:200],  # Truncate for toast
+            "task_name": prompt.context.get("task_name", "_"),
+            "prompt": prompt_dict,
+            # Keep these for backwards compatibility with toast
+            "message": prompt.message[:200],
             "prompt_type": prompt.prompt_type,
         })
     else:
