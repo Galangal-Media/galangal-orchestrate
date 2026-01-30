@@ -110,11 +110,11 @@ export function AgentDetail() {
       </div>
 
       {/* Prompt Card - Show first if there's an active prompt */}
-      {agent.current_prompt && agent.task && (
+      {agent.current_prompt && (
         <PromptCard
           prompt={agent.current_prompt}
           agentId={agent.agent.agent_id}
-          taskName={agent.task.task_name}
+          taskName={agent.task?.task_name || "_"}
           onResponse={fetchAgent}
         />
       )}

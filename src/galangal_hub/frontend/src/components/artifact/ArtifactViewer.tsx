@@ -52,12 +52,12 @@ export function ArtifactViewer({ artifacts }: ArtifactViewerProps) {
           </button>
           <div
             className={cn(
-              "transition-all duration-200 overflow-hidden",
-              expanded[name] ? "max-h-[500px]" : "max-h-0"
+              "transition-all duration-200",
+              expanded[name] ? "max-h-[600px] overflow-y-auto" : "max-h-0 overflow-hidden"
             )}
           >
             {isMarkdownFile(name) ? (
-              <div className="p-4 overflow-y-auto bg-card prose max-w-none text-foreground">
+              <div className="p-4 bg-card prose max-w-none text-foreground">
                 <Markdown>{content}</Markdown>
               </div>
             ) : (
