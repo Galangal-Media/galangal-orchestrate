@@ -3,6 +3,13 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useToast } from "@/hooks/useToast"
 import { api } from "@/lib/api"
 import type { PromptData, PromptOption } from "@/types/api"
@@ -42,10 +49,12 @@ interface PromptCardProps {
 
 export function PromptCard({ prompt, agentId, taskName, onResponse }: PromptCardProps) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [selectedIssue, setSelectedIssue] = useState<string>("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { toast } = useToast()
 
   const isQA = prompt.prompt_type === "discovery_qa"
+  const isIssueSelect = prompt.prompt_type === "github_issue_select"
 
   const handleOptionClick = async (option: PromptOption) => {
     if (isSubmitting) return
@@ -106,6 +115,32 @@ export function PromptCard({ prompt, agentId, taskName, onResponse }: PromptCard
     }
   }
 
+  const handleIssueSelect = async () => {
+    if (isSubmitting || !selectedIssue) return
+
+    const option = prompt.options?.find(o => o.result === selectedIssue)
+    if (!option) return
+
+    setIsSubmitting(true)
+    try {
+      await api.respondToPrompt(agentId, taskName, prompt.prompt_type, option.result)
+      toast({
+        title: "Issue Selected",
+        description: `Selected: #${option.key} ${option.label}`,
+        variant: "success",
+      })
+      onResponse?.()
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to select issue",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   return (
     <Card className="border-warning/50 bg-warning/5">
       <CardHeader className="pb-2">
@@ -152,6 +187,28 @@ export function PromptCard({ prompt, agentId, taskName, onResponse }: PromptCard
           >
             {isSubmitting ? "Submitting..." : "Submit Answers"}
           </Button>
+        ) : isIssueSelect ? (
+          <div className="flex w-full gap-2">
+            <Select value={selectedIssue} onValueChange={setSelectedIssue}>
+              <SelectTrigger className="flex-1">
+                <SelectValue placeholder="Select an issue..." />
+              </SelectTrigger>
+              <SelectContent className="max-h-[300px]">
+                {prompt.options?.map((option) => (
+                  <SelectItem key={option.key} value={option.result}>
+                    #{option.key} {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="success"
+              onClick={handleIssueSelect}
+              disabled={isSubmitting || !selectedIssue}
+            >
+              {isSubmitting ? "Selecting..." : "Select"}
+            </Button>
+          </div>
         ) : (
           prompt.options?.map((option) => (
             <Button

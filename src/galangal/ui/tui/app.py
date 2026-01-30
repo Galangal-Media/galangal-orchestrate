@@ -1128,9 +1128,10 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         from galangal.ui.tui.modals import PromptOption
 
         # Notify Hub of the prompt with issues as options
+        # Send all issues - Hub frontend will render as dropdown/list
         hub_options = [
-            PromptOption(str(num), title[:50], str(num), "#83a598")
-            for num, title in issues[:10]  # Limit to 10 for Hub display
+            PromptOption(str(num), title[:80], str(num), "#83a598")
+            for num, title in issues
         ]
         self._notify_hub_prompt(
             PromptType.GITHUB_ISSUE_SELECT,

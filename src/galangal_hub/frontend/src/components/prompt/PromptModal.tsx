@@ -10,6 +10,13 @@ import {
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useWebSocket } from "@/hooks/useWebSocket"
 import { useToast } from "@/hooks/useToast"
 import { api } from "@/lib/api"
@@ -47,6 +54,7 @@ interface ActivePrompt extends PromptData {
 export function PromptModal() {
   const [activePrompt, setActivePrompt] = useState<ActivePrompt | null>(null)
   const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [selectedIssue, setSelectedIssue] = useState<string>("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { toast } = useToast()
 
@@ -148,9 +156,42 @@ export function PromptModal() {
     }
   }
 
+  const handleIssueSelect = async () => {
+    if (!activePrompt || isSubmitting || !selectedIssue) return
+
+    const option = activePrompt.options?.find(o => o.result === selectedIssue)
+    if (!option) return
+
+    setIsSubmitting(true)
+    try {
+      await api.respondToPrompt(
+        activePrompt.agentId,
+        activePrompt.taskName,
+        activePrompt.prompt_type,
+        option.result
+      )
+      setActivePrompt(null)
+      setSelectedIssue("")
+      toast({
+        title: "Issue Selected",
+        description: `Selected: #${option.key} ${option.label}`,
+        variant: "success",
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to select issue",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   if (!activePrompt) return null
 
   const isQA = activePrompt.prompt_type === "discovery_qa"
+  const isIssueSelect = activePrompt.prompt_type === "github_issue_select"
 
   return (
     <Dialog open={!!activePrompt} onOpenChange={() => setActivePrompt(null)}>
@@ -206,6 +247,28 @@ export function PromptModal() {
                 {isSubmitting ? "Submitting..." : "Submit Answers"}
               </Button>
             </>
+          ) : isIssueSelect ? (
+            <div className="flex w-full gap-2">
+              <Select value={selectedIssue} onValueChange={setSelectedIssue}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue placeholder="Select an issue..." />
+                </SelectTrigger>
+                <SelectContent className="max-h-[300px]">
+                  {activePrompt.options?.map((option) => (
+                    <SelectItem key={option.key} value={option.result}>
+                      #{option.key} {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                variant="success"
+                onClick={handleIssueSelect}
+                disabled={isSubmitting || !selectedIssue}
+              >
+                {isSubmitting ? "Selecting..." : "Select"}
+              </Button>
+            </div>
           ) : (
             activePrompt.options?.map((option) => (
               <Button
