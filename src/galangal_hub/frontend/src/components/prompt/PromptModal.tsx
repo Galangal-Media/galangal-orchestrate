@@ -15,6 +15,30 @@ import { useToast } from "@/hooks/useToast"
 import { api } from "@/lib/api"
 import type { PromptData, PromptOption } from "@/types/api"
 
+// Convert URLs in text to clickable links
+function linkifyText(text: string): React.ReactNode[] {
+  const urlRegex = /(https?:\/\/[^\s]+)/g
+  const parts = text.split(urlRegex)
+
+  return parts.map((part, index) => {
+    if (urlRegex.test(part)) {
+      urlRegex.lastIndex = 0
+      return (
+        <a
+          key={index}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary underline hover:text-primary/80"
+        >
+          {part}
+        </a>
+      )
+    }
+    return part
+  })
+}
+
 interface ActivePrompt extends PromptData {
   agentId: string
   taskName: string
@@ -137,7 +161,7 @@ export function PromptModal() {
             <Badge variant="secondary">{activePrompt.agentId}</Badge>
           </div>
           <DialogDescription className="text-left whitespace-pre-wrap">
-            {activePrompt.message}
+            {linkifyText(activePrompt.message)}
           </DialogDescription>
         </DialogHeader>
 

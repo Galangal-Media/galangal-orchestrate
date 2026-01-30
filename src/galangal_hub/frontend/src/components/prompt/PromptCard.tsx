@@ -8,6 +8,31 @@ import { api } from "@/lib/api"
 import type { PromptData, PromptOption } from "@/types/api"
 import { AlertCircle } from "lucide-react"
 
+// Convert URLs in text to clickable links
+function linkifyText(text: string): React.ReactNode[] {
+  const urlRegex = /(https?:\/\/[^\s]+)/g
+  const parts = text.split(urlRegex)
+
+  return parts.map((part, index) => {
+    if (urlRegex.test(part)) {
+      // Reset regex lastIndex since we're reusing it
+      urlRegex.lastIndex = 0
+      return (
+        <a
+          key={index}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary underline hover:text-primary/80"
+        >
+          {part}
+        </a>
+      )
+    }
+    return part
+  })
+}
+
 interface PromptCardProps {
   prompt: PromptData
   agentId: string
@@ -93,7 +118,7 @@ export function PromptCard({ prompt, agentId, taskName, onResponse }: PromptCard
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm whitespace-pre-wrap">{prompt.message}</p>
+        <p className="text-sm whitespace-pre-wrap">{linkifyText(prompt.message)}</p>
 
         {isQA && prompt.questions && (
           <div className="space-y-4">
