@@ -1227,7 +1227,8 @@ async def _handle_stage_approval(
 
     # Prompt for approval (prompt_async handles racing local vs remote)
     prompt_type = PromptType.PLAN_APPROVAL if stage_name == "PM" else PromptType.DESIGN_APPROVAL
-    choice = await app.prompt_async(prompt_type, f"Approve {stage_name} to continue?")
+    artifact_name = "PLAN.md" if stage_name == "PM" else "DESIGN.md"
+    choice = await app.prompt_async(prompt_type, f"Approve {artifact_name} to continue?")
 
     if choice == "yes":
         # Check if this was a remote response from the hub
