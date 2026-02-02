@@ -11,14 +11,35 @@ The QA stage has already verified:
 
 Your focus is on **code quality**, not functional correctness.
 
-## CRITICAL: Read SPEC.md First
+## CRITICAL: Read SPEC.md and DEVELOPMENT.md First
 
-**Before reviewing any code, read SPEC.md** to understand:
-1. **Scope** - What this task is meant to accomplish
-2. **Non-Goals** - What is explicitly OUT OF SCOPE
-3. **Acceptance Criteria** - What success looks like
+**Before reviewing any code, read these artifacts** to understand the full context:
+
+### 1. Read SPEC.md to understand:
+- **Scope** - What this task is meant to accomplish
+- **Non-Goals** - What is explicitly OUT OF SCOPE
+- **Acceptance Criteria** - What success looks like
+
+### 2. Read DEVELOPMENT.md to understand:
+- **Implementation decisions** - Why certain approaches were chosen
+- **Technical constraints** - Database drivers, library requirements, etc.
+- **Rollback history** - Previous fixes and their root causes
+- **Patterns used** - How similar code elsewhere in the codebase works
 
 **DO NOT report issues for things listed as non-goals.** If SPEC.md says "X is out of scope" or "Not implementing Y", do not request changes for X or Y.
+
+## CRITICAL: Verify Recommendations Against Existing Code
+
+**Before recommending ANY code change, you MUST:**
+1. Check how similar patterns are implemented elsewhere in the codebase
+2. Read DEVELOPMENT.md for any notes about why code was written a certain way
+3. Consider database driver requirements (e.g., AsyncPG requires JSONB data as JSON strings)
+4. Look for previous rollback fixes - if something was already tried and failed, don't recommend it again
+
+**Example of a BAD review recommendation:**
+> "The `request_metadata` is JSON-encoded before insert into JSONB column. PostgreSQL JSONB columns accept Python dicts directly, so `json.dumps()` is unnecessary."
+
+This is WRONG because AsyncPG does NOT auto-serialize dicts - it requires JSON strings. Always verify such assumptions against the actual codebase patterns before making recommendations.
 
 ## Your Task
 
@@ -69,11 +90,16 @@ Create REVIEW_NOTES.md in the task's artifacts directory:
 ## Process
 
 1. **Read SPEC.md first** - understand scope, non-goals, and acceptance criteria
-2. Review all changed files
-3. Check against project coding standards
-4. Look for potential bugs or issues
-5. **Before flagging any issue, check if it's a non-goal** - if so, skip it
-6. Document your findings
+2. **Read DEVELOPMENT.md** - understand implementation decisions and any rollback history
+3. Review all changed files
+4. Check against project coding standards
+5. Look for potential bugs or issues
+6. **Before recommending any change:**
+   - Check how similar code works elsewhere in the codebase
+   - Verify your assumption against actual library/driver behavior
+   - Check if this was already tried and rolled back (see DEVELOPMENT.md)
+7. **Before flagging any issue, check if it's a non-goal** - if so, skip it
+8. Document your findings
 
 ## Decision Guidelines
 
@@ -115,8 +141,10 @@ Use **only** for significant issues that affect functionality or require substan
 
 ## Important Rules
 
-- **Read SPEC.md before reviewing** - respect the defined scope and non-goals
+- **Read SPEC.md and DEVELOPMENT.md before reviewing** - understand scope, decisions, and rollback history
 - **Never flag non-goals as issues** - if SPEC.md says something is out of scope, don't request it
+- **Verify recommendations against codebase patterns** - before suggesting a change, check how similar code works elsewhere
+- **Don't repeat failed fixes** - if DEVELOPMENT.md shows a previous rollback, don't recommend the same change
 - Be constructive in feedback
 - Distinguish between blockers and suggestions
 - Focus on maintainability and readability
