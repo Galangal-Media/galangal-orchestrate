@@ -216,19 +216,28 @@ GitHubIssueSelectModal {
 #issue-select-title {
     color: #fe8019;
     text-style: bold;
-    margin-bottom: 1;
 }
 
-#issue-select-scroll {
-    height: auto;
-    max-height: 30;
-    min-height: 5;
+#issue-select-description {
+    color: #a89984;
+    margin-bottom: 1;
+    text-wrap: wrap;
+}
+
+#issue-option-list {
+    height: 25;
     background: #282828;
     border: solid #504945;
     padding: 0 1;
+    scrollbar-gutter: stable;
 }
 
-#issue-select-list {
+#issue-option-list > .option-list--option-highlighted {
+    background: #504945;
+    color: #b8bb26;
+}
+
+#issue-option-list > .option-list--option {
     color: #ebdbb2;
 }
 

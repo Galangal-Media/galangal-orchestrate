@@ -7,16 +7,10 @@ from dataclasses import dataclass
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Input, Static, TextArea
-
-
-class _KeylessScroll(VerticalScroll):
-    """VerticalScroll that doesn't capture arrow keys, allowing parent to handle them."""
-
-    BINDINGS = []
-    can_focus = False
+from textual.widgets import Input, OptionList, Static, TextArea
+from textual.widgets.option_list import Option
 
 
 @dataclass(frozen=True)
@@ -281,25 +275,6 @@ class GitHubIssueOption:
     title: str
 
 
-class _IssueItem(Static):
-    """A single issue item in the selection list."""
-
-    def __init__(self, issue_number: int, title: str, selected: bool = False) -> None:
-        self.issue_number = issue_number
-        self.title = title
-        super().__init__(self._render(selected))
-
-    def _render(self, selected: bool) -> Text:
-        prefix = "→ " if selected else "  "
-        color = "#b8bb26" if selected else "#ebdbb2"
-        # Truncate title if too long (80 chars to fit in modal)
-        title = self.title[:80] + "..." if len(self.title) > 80 else self.title
-        return Text.from_markup(f"[{color}]{prefix}#{self.issue_number} {title}[/]")
-
-    def set_selected(self, selected: bool) -> None:
-        self.update(self._render(selected))
-
-
 class GitHubIssueSelectModal(ModalScreen[int | None]):
     """Modal for selecting a GitHub issue from a list."""
 
@@ -307,60 +282,44 @@ class GitHubIssueSelectModal(ModalScreen[int | None]):
 
     BINDINGS = [
         Binding("escape", "cancel", show=False),
-        Binding("up", "move_up", show=False, priority=True),
-        Binding("down", "move_down", show=False, priority=True),
-        Binding("enter", "select", show=False),
-        Binding("k", "move_up", show=False),
-        Binding("j", "move_down", show=False),
     ]
 
     def __init__(self, issues: list[GitHubIssueOption]):
         super().__init__()
         self._issues = issues
-        self._selected_index = 0
-        self._issue_widgets: list[_IssueItem] = []
+        # Build a map from option ID to issue number
+        self._id_to_number: dict[str, int] = {}
 
     def compose(self) -> ComposeResult:
         with Vertical(id="issue-select-dialog"):
-            yield Static("Select GitHub Issue", id="issue-select-title")
-            with _KeylessScroll(id="issue-select-scroll"):
-                if not self._issues:
-                    yield Static("[dim]No issues found[/]", id="issue-select-empty")
-                else:
-                    for i, issue in enumerate(self._issues):
-                        widget = _IssueItem(
-                            issue.number, issue.title, selected=(i == 0)
-                        )
-                        widget.id = f"issue-item-{i}"
-                        self._issue_widgets.append(widget)
-                        yield widget
             yield Static(
-                "↑/↓ or j/k to navigate, Enter to select, Esc to cancel", id="issue-select-hint"
+                f"Select GitHub Issue ({len(self._issues)} issues)",
+                id="issue-select-title",
+            )
+            yield Static(
+                "If you don't see your task here, make sure to add the Galangal label to it",
+                id="issue-select-description",
+            )
+            yield OptionList(id="issue-option-list")
+            yield Static(
+                "↑/↓ to navigate, Enter to select, Esc to cancel", id="issue-select-hint"
             )
 
-    def _update_selection(self, old_index: int, new_index: int) -> None:
-        """Update the visual selection and scroll to keep it visible."""
-        if self._issue_widgets:
-            self._issue_widgets[old_index].set_selected(False)
-            self._issue_widgets[new_index].set_selected(True)
-            # Scroll the selected widget into view
-            self._issue_widgets[new_index].scroll_visible()
+    def on_mount(self) -> None:
+        option_list = self.query_one("#issue-option-list", OptionList)
+        # Add options after mount
+        for issue in self._issues:
+            # Truncate title if too long (80 chars to fit in modal)
+            title = issue.title[:80] + "..." if len(issue.title) > 80 else issue.title
+            option_id = f"issue-{issue.number}"
+            self._id_to_number[option_id] = issue.number
+            option_list.add_option(Option(f"#{issue.number} {title}", id=option_id))
+        self.set_focus(option_list)
 
-    def action_move_up(self) -> None:
-        if self._selected_index > 0:
-            old_index = self._selected_index
-            self._selected_index -= 1
-            self._update_selection(old_index, self._selected_index)
-
-    def action_move_down(self) -> None:
-        if self._selected_index < len(self._issues) - 1:
-            old_index = self._selected_index
-            self._selected_index += 1
-            self._update_selection(old_index, self._selected_index)
-
-    def action_select(self) -> None:
-        if self._issues:
-            self.dismiss(self._issues[self._selected_index].number)
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option.id:
+            issue_number = self._id_to_number.get(event.option.id)
+            self.dismiss(issue_number)
         else:
             self.dismiss(None)
 
