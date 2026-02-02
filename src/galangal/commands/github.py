@@ -237,7 +237,7 @@ def cmd_github_issues(args: argparse.Namespace) -> int:
     label = getattr(args, "label", GALANGAL_LABEL) or GALANGAL_LABEL
 
     try:
-        issues = list_issues(label=label, limit=args.limit if hasattr(args, "limit") else 50)
+        issues = list_issues(label=label, limit=args.limit if hasattr(args, "limit") else 200)
     except GitHubError as e:
         print_error(f"Failed to list issues: {e}")
         return 1

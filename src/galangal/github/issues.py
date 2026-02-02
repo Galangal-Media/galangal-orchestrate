@@ -94,7 +94,7 @@ class GitHubIssue:
 def list_issues(
     label: str = GALANGAL_LABEL,
     state: str = "open",
-    limit: int = 50,
+    limit: int = 200,
 ) -> list[GitHubIssue]:
     """
     List issues from the current repository with the given label.
