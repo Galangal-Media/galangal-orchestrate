@@ -332,9 +332,24 @@ class GitHubIssueSelectModal(ModalScreen[int | None]):
     def _scroll_to_selected(self) -> None:
         """Scroll the list to ensure the selected item is visible."""
         scroll = self.query_one("#issue-select-scroll", _KeylessScroll)
-        # Each issue is approximately 1 line tall
-        # Scroll to center the selected item
-        scroll.scroll_to(y=max(0, self._selected_index - 5), animate=False)
+        list_widget = self.query_one("#issue-select-list", Static)
+
+        # Get the content and viewport dimensions
+        content_height = list_widget.size.height
+        viewport_height = scroll.size.height
+
+        if viewport_height <= 0 or content_height <= viewport_height:
+            return  # No scrolling needed
+
+        # Calculate the maximum scroll position
+        max_scroll = content_height - viewport_height
+
+        # Target: keep selected item roughly centered, but clamp to valid range
+        # Each line is 1 unit high in the content
+        target_scroll = self._selected_index - (viewport_height // 2)
+        target_scroll = max(0, min(target_scroll, max_scroll))
+
+        scroll.scroll_to(y=target_scroll, animate=False)
 
     def action_move_up(self) -> None:
         if self._selected_index > 0:
