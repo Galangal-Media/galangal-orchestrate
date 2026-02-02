@@ -281,6 +281,25 @@ class GitHubIssueOption:
     title: str
 
 
+class _IssueItem(Static):
+    """A single issue item in the selection list."""
+
+    def __init__(self, issue_number: int, title: str, selected: bool = False) -> None:
+        self.issue_number = issue_number
+        self.title = title
+        super().__init__(self._render(selected))
+
+    def _render(self, selected: bool) -> Text:
+        prefix = "→ " if selected else "  "
+        color = "#b8bb26" if selected else "#ebdbb2"
+        # Truncate title if too long (80 chars to fit in modal)
+        title = self.title[:80] + "..." if len(self.title) > 80 else self.title
+        return Text.from_markup(f"[{color}]{prefix}#{self.issue_number} {title}[/]")
+
+    def set_selected(self, selected: bool) -> None:
+        self.update(self._render(selected))
+
+
 class GitHubIssueSelectModal(ModalScreen[int | None]):
     """Modal for selecting a GitHub issue from a list."""
 
@@ -299,69 +318,45 @@ class GitHubIssueSelectModal(ModalScreen[int | None]):
         super().__init__()
         self._issues = issues
         self._selected_index = 0
+        self._issue_widgets: list[_IssueItem] = []
 
     def compose(self) -> ComposeResult:
         with Vertical(id="issue-select-dialog"):
             yield Static("Select GitHub Issue", id="issue-select-title")
             with _KeylessScroll(id="issue-select-scroll"):
-                yield Static(self._render_issue_list(), id="issue-select-list")
+                if not self._issues:
+                    yield Static("[dim]No issues found[/]", id="issue-select-empty")
+                else:
+                    for i, issue in enumerate(self._issues):
+                        widget = _IssueItem(
+                            issue.number, issue.title, selected=(i == 0)
+                        )
+                        widget.id = f"issue-item-{i}"
+                        self._issue_widgets.append(widget)
+                        yield widget
             yield Static(
                 "↑/↓ or j/k to navigate, Enter to select, Esc to cancel", id="issue-select-hint"
             )
 
-    def _render_issue_list(self) -> str:
-        if not self._issues:
-            return "[dim]No issues found[/]"
-
-        lines = []
-        for i, issue in enumerate(self._issues):
-            prefix = "→ " if i == self._selected_index else "  "
-            color = "#b8bb26" if i == self._selected_index else "#ebdbb2"
-            # Truncate title if too long (80 chars to fit in modal)
-            title = issue.title[:80] + "..." if len(issue.title) > 80 else issue.title
-            lines.append(f"[{color}]{prefix}#{issue.number} {title}[/]")
-
-        return "\n".join(lines)
-
-    def _update_display(self) -> None:
-        list_widget = self.query_one("#issue-select-list", Static)
-        list_widget.update(Text.from_markup(self._render_issue_list()))
-        # Scroll to keep selected item visible
-        self._scroll_to_selected()
-
-    def _scroll_to_selected(self) -> None:
-        """Scroll the list to ensure the selected item is visible."""
-        scroll = self.query_one("#issue-select-scroll", _KeylessScroll)
-
-        # Get visible height (in lines, from CSS max-height: 20)
-        visible_lines = scroll.size.height
-        if visible_lines <= 0:
-            visible_lines = 20  # fallback to CSS value
-
-        total_issues = len(self._issues)
-        if total_issues <= visible_lines:
-            return  # No scrolling needed
-
-        # Keep selected item visible with some context
-        # scroll_y is the first visible line index
-        current_scroll = int(scroll.scroll_y)
-
-        # If selected is above visible area
-        if self._selected_index < current_scroll + 2:
-            scroll.scroll_to(y=max(0, self._selected_index - 2), animate=False)
-        # If selected is below visible area
-        elif self._selected_index >= current_scroll + visible_lines - 2:
-            scroll.scroll_to(y=self._selected_index - visible_lines + 3, animate=False)
+    def _update_selection(self, old_index: int, new_index: int) -> None:
+        """Update the visual selection and scroll to keep it visible."""
+        if self._issue_widgets:
+            self._issue_widgets[old_index].set_selected(False)
+            self._issue_widgets[new_index].set_selected(True)
+            # Scroll the selected widget into view
+            self._issue_widgets[new_index].scroll_visible()
 
     def action_move_up(self) -> None:
         if self._selected_index > 0:
+            old_index = self._selected_index
             self._selected_index -= 1
-            self._update_display()
+            self._update_selection(old_index, self._selected_index)
 
     def action_move_down(self) -> None:
         if self._selected_index < len(self._issues) - 1:
+            old_index = self._selected_index
             self._selected_index += 1
-            self._update_display()
+            self._update_selection(old_index, self._selected_index)
 
     def action_select(self) -> None:
         if self._issues:
