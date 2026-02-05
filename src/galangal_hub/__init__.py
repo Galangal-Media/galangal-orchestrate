@@ -11,16 +11,24 @@ from pathlib import Path
 
 
 def _read_version() -> str:
-    """Read version from VERSION file."""
-    # Try various locations (Docker vs development)
+    """Read version from package metadata or VERSION file."""
+    # First, try to read from installed package metadata (works after pip install)
+    try:
+        from importlib.metadata import version
+
+        return version("galangal-orchestrate")
+    except Exception:
+        pass
+
+    # Fallback: try VERSION file (for Docker and development)
     locations = [
         Path("/app/VERSION"),  # Docker location
         Path(__file__).parent.parent.parent / "VERSION",  # src/../VERSION (dev)
-        Path(__file__).parent.parent / "VERSION",  # Installed location
     ]
     for path in locations:
         if path.exists():
             return path.read_text().strip()
+
     return "0.0.0"
 
 
