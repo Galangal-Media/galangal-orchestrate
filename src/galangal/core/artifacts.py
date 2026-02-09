@@ -41,6 +41,21 @@ def read_artifact(name: str, task_name: str | None = None) -> str | None:
     return None
 
 
+def delete_artifact(name: str, task_name: str | None = None) -> bool:
+    """Delete an artifact file if it exists.
+
+    Returns True if the file was deleted, False if it didn't exist.
+    """
+    try:
+        path = artifact_path(name, task_name)
+        if path.exists():
+            path.unlink()
+            return True
+    except TaskError:
+        pass
+    return False
+
+
 def write_artifact(
     name: str,
     content: str,

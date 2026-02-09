@@ -152,6 +152,9 @@ def _run_workflow_with_tui(
     # Track if we've already checked staleness on this resume
     staleness_checked = False
 
+    # Track peer review auto-accept loops per stage (runtime only, not persisted)
+    peer_review_loops: dict[str, int] = {}
+
     async def workflow_loop() -> None:
         """Async workflow loop running within Textual's event loop."""
         nonlocal staleness_checked
@@ -218,7 +221,9 @@ def _run_workflow_with_tui(
                     break
 
                 # Handle the workflow event
-                result = await _handle_workflow_event(app, engine, workflow_event, config)
+                result = await _handle_workflow_event(
+                    app, engine, workflow_event, config, peer_review_loops
+                )
                 if result == "break":
                     break
                 elif result == "continue":
@@ -275,6 +280,7 @@ async def _handle_workflow_event(
     engine: WorkflowEngine,
     event: WorkflowEvent,
     config: GalangalConfig,
+    peer_review_loops: dict[str, int] | None = None,
 ) -> str:
     """
     Handle a workflow event from the engine.
@@ -302,7 +308,7 @@ async def _handle_workflow_event(
         return await _handle_advance_event(app, engine, advance_event, config)
 
     if event.type == EventType.PEER_REVIEW_REQUIRED:
-        result = await _handle_peer_review(app, engine, config)
+        result = await _handle_peer_review(app, engine, config, peer_review_loops)
         if result == "break":
             return "break"
         if result == "rollback":
@@ -646,21 +652,32 @@ async def _handle_peer_review(
     app: WorkflowTUIApp,
     engine: WorkflowEngine,
     config: GalangalConfig,
+    peer_review_loops: dict[str, int] | None = None,
 ) -> str:
     """Handle peer review for the current stage.
 
     Invokes the reviewer backend, parses the decision, and if the reviewer
-    disagrees, shows a comparison modal for the user to decide.
+    disagrees, either auto-accepts the feedback (default) or shows a
+    comparison modal for the user to decide.
+
+    When ``config.peer_review.auto_accept`` is True (the default), reviewer
+    feedback is automatically accepted and the stage re-runs.  If this loops
+    more than ``config.peer_review.max_auto_loops`` times, the user is asked
+    for advice.
 
     Returns:
         "continue" - peer review passed (APPROVE), proceed to approval/advance
-        "rollback" - user accepted reviewer's changes, stage will re-run
+        "rollback" - reviewer's changes accepted, stage will re-run
         "break" - user quit
     """
-    from galangal.core.artifacts import read_artifact
+    from galangal.core.artifacts import delete_artifact, read_artifact
 
     state = engine.state
     stage = state.stage
+    pr_config = config.peer_review
+
+    if peer_review_loops is None:
+        peer_review_loops = {}
 
     app.add_activity("Starting peer review...", "🔍")
     app.set_status("peer_review", f"reviewing {stage.value}")
@@ -677,10 +694,41 @@ async def _handle_peer_review(
     if decision == "APPROVE":
         app.add_activity("Peer review: APPROVED", "✅")
         app.show_message("Peer review passed", "success")
+        # Reset loop counter on approval
+        peer_review_loops.pop(stage.value, None)
         return "continue"
 
-    # Reviewer disagrees - show comparison
+    # Reviewer disagrees
     app.add_activity("Peer review: REQUEST_CHANGES", "⚠")
+
+    # Track loop count
+    loop_count = peer_review_loops.get(stage.value, 0)
+
+    # Auto-accept: roll back automatically unless we've hit the loop limit
+    if pr_config.auto_accept and loop_count < pr_config.max_auto_loops:
+        peer_review_loops[stage.value] = loop_count + 1
+        app.add_activity(
+            f"Auto-accepting reviewer feedback (loop {loop_count + 1}/{pr_config.max_auto_loops})",
+            "🔄",
+        )
+        app.show_message(
+            f"Rolling back {stage.value} with reviewer feedback", "warning"
+        )
+        # Delete peer review artifact so review re-triggers after re-run
+        artifact_name = f"{stage.value}_PEER_REVIEW.md"
+        delete_artifact(artifact_name, state.task_name)
+        # Set up rollback
+        state.last_failure = f"Peer review feedback: {review_notes[:1500]}"
+        state.reset_attempts(clear_failure=False)
+        save_state(state)
+        return "rollback"
+
+    # Hit loop limit or auto_accept disabled - ask the user
+    if pr_config.auto_accept and loop_count >= pr_config.max_auto_loops:
+        app.add_activity(
+            f"Peer review loop limit reached ({pr_config.max_auto_loops} attempts), asking for advice",
+            "⚠",
+        )
 
     # Get the primary artifact for comparison
     stage_artifacts = {"PM": "SPEC.md", "DESIGN": "DESIGN.md"}
@@ -696,8 +744,15 @@ async def _handle_peer_review(
     if len(review_notes) > 500:
         review_preview += "..."
 
+    loop_info = ""
+    if pr_config.auto_accept and loop_count >= pr_config.max_auto_loops:
+        loop_info = (
+            f"\n⚠ Auto-accept has looped {loop_count} times without resolution.\n"
+        )
+
     comparison_msg = (
-        f"Peer reviewer DISAGREES with {stage.value} output.\n\n"
+        f"Peer reviewer DISAGREES with {stage.value} output.\n"
+        f"{loop_info}\n"
         f"--- Primary Output ({primary_artifact_name}) ---\n"
         f"{primary_preview}\n\n"
         f"--- Reviewer Notes ---\n"
@@ -719,11 +774,15 @@ async def _handle_peer_review(
         if choice == "accept_primary":
             app.add_activity("User accepted primary output, continuing", "✅")
             app.show_message("Primary output accepted", "success")
+            peer_review_loops.pop(stage.value, None)
             return "continue"
 
         if choice == "accept_reviewer":
             app.add_activity("User accepted reviewer feedback, rolling back", "🔄")
             app.show_message(f"Rolling back {stage.value} with reviewer feedback", "warning")
+            # Delete peer review artifact so review re-triggers after re-run
+            artifact_name = f"{stage.value}_PEER_REVIEW.md"
+            delete_artifact(artifact_name, state.task_name)
             # Set up rollback
             state.last_failure = f"Peer review feedback: {review_notes[:1500]}"
             state.reset_attempts(clear_failure=False)

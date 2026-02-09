@@ -355,8 +355,9 @@ class PeerReviewConfig(BaseModel):
     """Configuration for peer review hook.
 
     When enabled, runs a second AI backend after configured stages to get
-    an independent assessment. If the reviewer disagrees, both opinions
-    are shown to the user who makes the final call.
+    an independent assessment. By default, reviewer feedback is auto-accepted
+    and the stage re-runs with the feedback. If auto-accept loops more than
+    ``max_auto_loops`` times, the user is asked for advice.
 
     Off by default. Does not add new stages to the pipeline.
     """
@@ -366,6 +367,14 @@ class PeerReviewConfig(BaseModel):
     stages: list[str] = Field(
         default_factory=lambda: ["PM", "DESIGN"],
         description="Which stages get peer reviewed (e.g., ['PM', 'DESIGN'])",
+    )
+    auto_accept: bool = Field(
+        default=True,
+        description="Auto-accept reviewer feedback and re-run the stage without prompting",
+    )
+    max_auto_loops: int = Field(
+        default=5,
+        description="Max auto-accept loops before asking user for advice",
     )
 
 

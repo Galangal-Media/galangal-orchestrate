@@ -42,8 +42,14 @@ class WizardConfig:
 
     # AI configuration
     ai_backend: str = "claude"
+    stage_backends: dict[str, str] = field(default_factory=dict)
     codex_review: bool = False
     base_branch: str = "main"
+
+    # Peer review
+    peer_review_enabled: bool = False
+    peer_review_backend: str = "codex"
+    peer_review_stages: list[str] = field(default_factory=lambda: ["PM", "DESIGN"])
 
     # Docs configuration
     changelog_dir: str = "docs/changelog"
@@ -97,22 +103,25 @@ def run_wizard(
     # Step 2: AI backend
     _step_ai_backend(config, is_update, existing_config)
 
-    # Step 3: Test gate
+    # Step 3: Peer review
+    _step_peer_review(config, is_update, existing_config)
+
+    # Step 4: Test gate
     _step_test_gate(config, is_update, existing_config)
 
-    # Step 4: Preflight checks
+    # Step 5: Preflight checks
     _step_preflight(config, is_update, existing_config)
 
-    # Step 5: Stages to skip
+    # Step 6: Stages to skip
     _step_stages(config, is_update, existing_config)
 
-    # Step 6: Documentation
+    # Step 7: Documentation
     _step_docs(config, is_update, existing_config)
 
-    # Step 7: Custom prompt context
+    # Step 8: Custom prompt context
     _step_prompt_context(config, is_update, existing_config)
 
-    # Step 8: Artifact context filtering
+    # Step 9: Artifact context filtering
     _step_artifact_context(config, is_update, existing_config)
 
     # Summary
@@ -182,13 +191,78 @@ def _step_ai_backend(
     _section_header("2. AI Backend")
 
     console.print("[dim]Galangal uses Claude Code CLI by default.[/dim]")
+    console.print("[dim]You can override the backend for specific stages (e.g., use Codex for REVIEW).[/dim]\n")
 
-    config.codex_review = Confirm.ask(
-        "Use Codex for independent code review? (adds @codex to PRs)",
-        default=config.codex_review,
+    add_overrides = Confirm.ask(
+        "Add per-stage backend overrides?",
+        default=bool(config.stage_backends),
     )
 
-    print_success(f"AI backend: {config.ai_backend}" + (" + Codex review" if config.codex_review else ""))
+    if add_overrides:
+        config.stage_backends = {}
+        console.print("\n[dim]Enter stage name and backend. Leave stage empty when done.[/dim]\n")
+
+        while True:
+            stage = Prompt.ask("Stage name (empty to finish)", default="").upper()
+            if not stage:
+                break
+            backend = Prompt.ask(f"Backend for {stage}", default="codex")
+            config.stage_backends[stage] = backend
+            print_success(f"  {stage} -> {backend}")
+    else:
+        config.stage_backends = {}
+
+    if config.stage_backends:
+        overrides = ", ".join(f"{s}: {b}" for s, b in config.stage_backends.items())
+        print_success(f"AI backend: {config.ai_backend} (overrides: {overrides})")
+    else:
+        print_success(f"AI backend: {config.ai_backend}")
+
+
+def _step_peer_review(
+    config: WizardConfig,
+    is_update: bool,
+    existing: dict[str, Any] | None,
+) -> None:
+    """Step 3: Peer review configuration."""
+    if is_update and _section_exists(existing, "peer_review", "enabled"):
+        if not Confirm.ask("Update peer review settings?", default=False):
+            return
+
+    _section_header("3. Peer Review")
+
+    console.print("[dim]Peer review runs a second AI backend after configured stages[/dim]")
+    console.print("[dim]to get an independent assessment. Off by default.[/dim]\n")
+
+    config.peer_review_enabled = Confirm.ask(
+        "Enable peer review?",
+        default=config.peer_review_enabled,
+    )
+
+    if not config.peer_review_enabled:
+        print_info("Peer review disabled")
+        return
+
+    config.peer_review_backend = Prompt.ask(
+        "Review backend",
+        default=config.peer_review_backend,
+    )
+
+    # Stage selection
+    reviewable_stages = ["PM", "DESIGN", "DEV", "TEST", "SECURITY", "REVIEW", "DOCS"]
+    console.print("\n[dim]Select which stages get peer reviewed:[/dim]\n")
+
+    selected: list[str] = []
+    for stage in reviewable_stages:
+        default_on = stage in config.peer_review_stages
+        if Confirm.ask(f"  Review {stage}?", default=default_on):
+            selected.append(stage)
+
+    config.peer_review_stages = selected if selected else ["PM", "DESIGN"]
+
+    print_success(
+        f"Peer review: {config.peer_review_backend} on {', '.join(config.peer_review_stages)}"
+    )
 
 
 def _step_test_gate(
@@ -196,12 +270,12 @@ def _step_test_gate(
     is_update: bool,
     existing: dict[str, Any] | None,
 ) -> None:
-    """Step 3: Test gate configuration."""
+    """Step 4: Test gate configuration."""
     if is_update and _section_exists(existing, "test_gate", "enabled"):
         if not Confirm.ask("Update test gate settings?", default=False):
             return
 
-    _section_header("3. Test Gate")
+    _section_header("4. Test Gate")
 
     console.print("[dim]The Test Gate runs configured test suites as a quality gate.[/dim]")
     console.print("[dim]Tests must pass before QA stage can begin.[/dim]\n")
@@ -258,12 +332,12 @@ def _step_preflight(
     is_update: bool,
     existing: dict[str, Any] | None,
 ) -> None:
-    """Step 4: Preflight checks."""
+    """Step 5: Preflight checks."""
     if is_update and _section_exists(existing, "validation", "preflight"):
         if not Confirm.ask("Update preflight check settings?", default=False):
             return
 
-    _section_header("4. Preflight Checks")
+    _section_header("5. Preflight Checks")
 
     console.print("[dim]Preflight checks run before DEV stage to verify environment.[/dim]\n")
 
@@ -286,12 +360,12 @@ def _step_stages(
     is_update: bool,
     existing: dict[str, Any] | None,
 ) -> None:
-    """Step 5: Stages to skip."""
+    """Step 6: Stages to skip."""
     if is_update and _section_exists(existing, "stages", "skip"):
         if not Confirm.ask("Update stage skip settings?", default=False):
             return
 
-    _section_header("5. Stages to Skip")
+    _section_header("6. Stages to Skip")
 
     console.print("[dim]Some stages are optional. Skip stages that don't apply to your project.[/dim]\n")
 
@@ -319,12 +393,12 @@ def _step_docs(
     is_update: bool,
     existing: dict[str, Any] | None,
 ) -> None:
-    """Step 6: Documentation settings."""
+    """Step 7: Documentation settings."""
     if is_update and _section_exists(existing, "docs"):
         if not Confirm.ask("Update documentation settings?", default=False):
             return
 
-    _section_header("6. Documentation")
+    _section_header("7. Documentation")
 
     console.print("[dim]Configure where documentation artifacts are stored.[/dim]\n")
 
@@ -347,13 +421,13 @@ def _step_prompt_context(
     is_update: bool,
     existing: dict[str, Any] | None,
 ) -> None:
-    """Step 7: Custom prompt context."""
+    """Step 8: Custom prompt context."""
     if is_update and _section_exists(existing, "prompt_context"):
         if existing.get("prompt_context", "").strip():
             if not Confirm.ask("Update custom prompt context?", default=False):
                 return
 
-    _section_header("7. Custom Instructions")
+    _section_header("8. Custom Instructions")
 
     console.print("[dim]Add project-specific instructions for the AI.[/dim]")
     console.print("[dim]Examples: coding standards, patterns to follow, tech stack details.[/dim]\n")
@@ -377,12 +451,12 @@ def _step_artifact_context(
     is_update: bool,
     existing: dict[str, Any] | None,
 ) -> None:
-    """Step 8: Artifact context filtering."""
+    """Step 9: Artifact context filtering."""
     if is_update and _section_exists(existing, "artifact_context"):
         if not Confirm.ask("Update artifact context filtering?", default=False):
             return
 
-    _section_header("8. Artifact Context Filtering")
+    _section_header("9. Artifact Context Filtering")
 
     console.print("[dim]Control which artifacts are included in prompts for each stage.[/dim]")
     console.print("[dim]This can reduce token usage by 30-50% on later stages (REVIEW, DOCS, etc.).[/dim]\n")
@@ -413,7 +487,19 @@ def _show_summary(config: WizardConfig) -> None:
     if config.approver_name:
         table.add_row("Approver", config.approver_name)
     table.add_row("Base branch", config.base_branch)
-    table.add_row("AI backend", config.ai_backend + (" + Codex review" if config.codex_review else ""))
+    ai_desc = config.ai_backend
+    if config.stage_backends:
+        overrides = ", ".join(f"{s}: {b}" for s, b in config.stage_backends.items())
+        ai_desc += f" ({overrides})"
+    table.add_row("AI backend", ai_desc)
+
+    if config.peer_review_enabled:
+        table.add_row(
+            "Peer review",
+            f"{config.peer_review_backend} on {', '.join(config.peer_review_stages)}",
+        )
+    else:
+        table.add_row("Peer review", "Disabled")
 
     if config.test_gate_enabled:
         table.add_row("Test Gate", f"{len(config.test_gate_tests)} test(s)")
@@ -458,11 +544,18 @@ def _load_existing_config(config: WizardConfig, existing: dict[str, Any]) -> Non
     # AI
     if "ai" in existing:
         config.ai_backend = existing["ai"].get("default", "claude")
+        config.stage_backends = existing["ai"].get("stage_backends", {})
 
     # PR
     if "pr" in existing:
         config.codex_review = existing["pr"].get("codex_review", False)
         config.base_branch = existing["pr"].get("base_branch", "main")
+
+    # Peer review
+    if "peer_review" in existing:
+        config.peer_review_enabled = existing["peer_review"].get("enabled", False)
+        config.peer_review_backend = existing["peer_review"].get("backend", "codex")
+        config.peer_review_stages = existing["peer_review"].get("stages", ["PM", "DESIGN"])
 
     # Docs
     if "docs" in existing:
@@ -584,29 +677,22 @@ def generate_config_yaml(config: WizardConfig) -> str:
         })
 
     # AI
-    cfg["ai"] = {
-        "default": config.ai_backend,
-        "backends": {
-            "claude": {
-                "command": "claude",
-                "args": [
-                    "--output-format",
-                    "stream-json",
-                    "--verbose",
-                    "--max-turns",
-                    "{max_turns}",
-                    "--permission-mode",
-                    "bypassPermissions",
-                ],
-                "max_turns": 200,
-            },
-        },
-    }
+    ai_cfg: dict[str, Any] = {"default": config.ai_backend}
+    if config.stage_backends:
+        ai_cfg["stage_backends"] = config.stage_backends
+    cfg["ai"] = ai_cfg
 
     # PR
     cfg["pr"] = {
         "codex_review": config.codex_review,
         "base_branch": config.base_branch,
+    }
+
+    # Peer review
+    cfg["peer_review"] = {
+        "enabled": config.peer_review_enabled,
+        "backend": config.peer_review_backend,
+        "stages": config.peer_review_stages,
     }
 
     # GitHub
@@ -765,6 +851,18 @@ def _generate_yaml_with_comments(cfg: dict[str, Any], config: WizardConfig) -> s
     lines.append(pr_yaml.strip())
     lines.append("")
 
+    # Peer review
+    lines.append("# " + "=" * 77)
+    lines.append("# Peer Review")
+    lines.append("# Runs a second AI backend after configured stages for independent assessment")
+    lines.append("# " + "=" * 77)
+    lines.append("")
+    peer_yaml = yaml.dump(
+        {"peer_review": cfg["peer_review"]}, default_flow_style=False, sort_keys=False
+    )
+    lines.append(peer_yaml.strip())
+    lines.append("")
+
     # GitHub
     lines.append("# " + "=" * 77)
     lines.append("# GitHub Integration")
@@ -833,6 +931,7 @@ def check_missing_sections(existing_config: dict[str, Any]) -> list[str]:
         ("validation", "Validation commands"),
         ("ai", "AI backend"),
         ("pr", "Pull request settings"),
+        ("peer_review", "Peer review"),
         ("github", "GitHub integration"),
     ]
 

@@ -11,7 +11,9 @@ Tests cover:
 
 import json
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from galangal.config.schema import GalangalConfig, PeerReviewConfig
 from galangal.core.state import Stage, TaskType, WorkflowState
@@ -48,11 +50,13 @@ def make_state(
 
 class TestPeerReviewConfig:
     def test_defaults(self):
-        """PeerReviewConfig is disabled by default."""
+        """PeerReviewConfig is disabled by default with auto_accept on."""
         config = PeerReviewConfig()
         assert config.enabled is False
         assert config.backend == "codex"
         assert config.stages == ["PM", "DESIGN"]
+        assert config.auto_accept is True
+        assert config.max_auto_loops == 5
 
     def test_enabled_in_galangal_config(self):
         """peer_review field exists on GalangalConfig with defaults."""
@@ -64,6 +68,16 @@ class TestPeerReviewConfig:
         """Can customize which stages get peer reviewed."""
         config = PeerReviewConfig(enabled=True, stages=["PM"])
         assert config.stages == ["PM"]
+
+    def test_auto_accept_disabled(self):
+        """Can disable auto_accept to restore manual flow."""
+        config = PeerReviewConfig(auto_accept=False)
+        assert config.auto_accept is False
+
+    def test_custom_max_auto_loops(self):
+        """Can customize the max auto-accept loop count."""
+        config = PeerReviewConfig(max_auto_loops=3)
+        assert config.max_auto_loops == 3
 
 
 # =============================================================================
@@ -355,3 +369,146 @@ class TestPeerReviewPromptBuilding:
 
         # Should use the generic peer_review.md
         assert "DECISION" in prompt
+
+
+# =============================================================================
+# Auto-accept peer review
+# =============================================================================
+
+
+class TestPeerReviewAutoAccept:
+    """Tests for auto-accept behavior in _handle_peer_review."""
+
+    def _make_config(self, auto_accept=True, max_auto_loops=5):
+        return GalangalConfig(
+            peer_review=PeerReviewConfig(
+                enabled=True,
+                auto_accept=auto_accept,
+                max_auto_loops=max_auto_loops,
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_auto_accept_rolls_back(self):
+        """REQUEST_CHANGES with auto_accept=True triggers automatic rollback."""
+        from galangal.core.workflow.tui_runner import _handle_peer_review
+
+        config = self._make_config(auto_accept=True)
+        state = make_state(stage=Stage.PM)
+        engine = MagicMock()
+        engine.state = state
+        app = MagicMock()
+        peer_review_loops: dict[str, int] = {}
+
+        mock_to_thread = AsyncMock(
+            return_value=("REQUEST_CHANGES", "Missing acceptance criteria")
+        )
+
+        with (
+            patch("galangal.core.workflow.tui_runner.asyncio.to_thread", mock_to_thread),
+            patch("galangal.core.workflow.tui_runner.save_state"),
+            patch("galangal.core.artifacts.delete_artifact") as mock_delete,
+        ):
+            result = await _handle_peer_review(app, engine, config, peer_review_loops)
+
+        assert result == "rollback"
+        assert peer_review_loops["PM"] == 1
+        assert state.last_failure is not None
+        assert "Peer review feedback" in state.last_failure
+        mock_delete.assert_called_once_with("PM_PEER_REVIEW.md", state.task_name)
+
+    @pytest.mark.asyncio
+    async def test_auto_accept_increments_loop_counter(self):
+        """Each auto-accept rollback increments the loop counter."""
+        from galangal.core.workflow.tui_runner import _handle_peer_review
+
+        config = self._make_config(auto_accept=True, max_auto_loops=5)
+        state = make_state(stage=Stage.PM)
+        engine = MagicMock()
+        engine.state = state
+        app = MagicMock()
+        peer_review_loops: dict[str, int] = {"PM": 2}
+
+        mock_to_thread = AsyncMock(return_value=("REQUEST_CHANGES", "Fix issues"))
+
+        with (
+            patch("galangal.core.workflow.tui_runner.asyncio.to_thread", mock_to_thread),
+            patch("galangal.core.workflow.tui_runner.save_state"),
+            patch("galangal.core.artifacts.delete_artifact"),
+        ):
+            result = await _handle_peer_review(app, engine, config, peer_review_loops)
+
+        assert result == "rollback"
+        assert peer_review_loops["PM"] == 3
+
+    @pytest.mark.asyncio
+    async def test_auto_accept_prompts_at_limit(self):
+        """At max_auto_loops, falls through to manual prompt."""
+        from galangal.core.workflow.tui_runner import _handle_peer_review
+
+        config = self._make_config(auto_accept=True, max_auto_loops=3)
+        state = make_state(stage=Stage.PM)
+        engine = MagicMock()
+        engine.state = state
+        app = MagicMock()
+        # Simulate user choosing to accept primary output
+        app.prompt_async = AsyncMock(return_value="accept_primary")
+        peer_review_loops: dict[str, int] = {"PM": 3}
+
+        mock_to_thread = AsyncMock(return_value=("REQUEST_CHANGES", "Still has issues"))
+
+        with (
+            patch("galangal.core.workflow.tui_runner.asyncio.to_thread", mock_to_thread),
+            patch("galangal.core.artifacts.read_artifact", return_value="spec content"),
+            patch("galangal.core.workflow.tui_runner.save_state"),
+        ):
+            result = await _handle_peer_review(app, engine, config, peer_review_loops)
+
+        assert result == "continue"
+        # User was prompted (manual flow)
+        app.prompt_async.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_manual_mode_always_prompts(self):
+        """auto_accept=False always shows the comparison modal."""
+        from galangal.core.workflow.tui_runner import _handle_peer_review
+
+        config = self._make_config(auto_accept=False)
+        state = make_state(stage=Stage.PM)
+        engine = MagicMock()
+        engine.state = state
+        app = MagicMock()
+        app.prompt_async = AsyncMock(return_value="accept_primary")
+        peer_review_loops: dict[str, int] = {}
+
+        mock_to_thread = AsyncMock(return_value=("REQUEST_CHANGES", "Needs work"))
+
+        with (
+            patch("galangal.core.workflow.tui_runner.asyncio.to_thread", mock_to_thread),
+            patch("galangal.core.artifacts.read_artifact", return_value="spec"),
+            patch("galangal.core.workflow.tui_runner.save_state"),
+        ):
+            result = await _handle_peer_review(app, engine, config, peer_review_loops)
+
+        assert result == "continue"
+        app.prompt_async.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_approve_resets_loop_counter(self):
+        """APPROVE decision resets the loop counter for that stage."""
+        from galangal.core.workflow.tui_runner import _handle_peer_review
+
+        config = self._make_config()
+        state = make_state(stage=Stage.PM)
+        engine = MagicMock()
+        engine.state = state
+        app = MagicMock()
+        peer_review_loops: dict[str, int] = {"PM": 3}
+
+        mock_to_thread = AsyncMock(return_value=("APPROVE", "Looks good!"))
+
+        with patch("galangal.core.workflow.tui_runner.asyncio.to_thread", mock_to_thread):
+            result = await _handle_peer_review(app, engine, config, peer_review_loops)
+
+        assert result == "continue"
+        assert "PM" not in peer_review_loops
