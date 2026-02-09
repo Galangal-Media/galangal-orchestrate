@@ -238,8 +238,8 @@ The system handles failures gracefully:
 
 ## Related Documentation
 
-- [Workflow Pipeline](workflow-pipeline.md) - Stage execution details
+- [Workflow Pipeline](../guide/workflow-pipeline.md) - Stage execution details
 - [State Management](state-management.md) - State persistence
-- [Prompt System](prompt-system.md) - Prompt building
+- [Prompt System](../guide/prompt-system.md) - Prompt building
 - [Validation System](validation-system.md) - Validation rules
-- [Configuration](configuration.md) - Config options
+- [Configuration](../guide/configuration.md) - Config options

@@ -351,7 +351,7 @@ Logs include:
 
 ## Related Documentation
 
-- [Architecture](architecture.md) - System overview
-- [State Management](state-management.md) - State persistence
-- [Validation System](validation-system.md) - Validation details
+- [Architecture](../local-development/architecture.md) - System overview
+- [State Management](../local-development/state-management.md) - State persistence
+- [Validation System](../local-development/validation-system.md) - Validation details
 - [Prompt System](prompt-system.md) - Prompt building

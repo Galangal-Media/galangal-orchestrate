@@ -403,5 +403,5 @@ qa:
 ## Related Documentation
 
 - [Architecture](architecture.md) - System overview
-- [Workflow Pipeline](workflow-pipeline.md) - Stage execution
-- [Configuration](configuration.md) - Full config reference
+- [Workflow Pipeline](../guide/workflow-pipeline.md) - Stage execution
+- [Configuration](../guide/configuration.md) - Full config reference

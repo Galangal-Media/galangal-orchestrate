@@ -494,7 +494,7 @@ Add one extension at a time and test thoroughly before adding more.
 
 ## Related Documentation
 
-- [Architecture](architecture.md) - System overview
+- [Architecture](../local-development/architecture.md) - System overview
 - [Configuration](configuration.md) - Config options
 - [Prompt System](prompt-system.md) - Prompt customization
-- [Validation System](validation-system.md) - Validation rules
+- [Validation System](../local-development/validation-system.md) - Validation rules

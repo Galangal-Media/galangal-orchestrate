@@ -113,7 +113,7 @@ class TestWorkflowPipelineDoc:
         Verify the task type skip stages table in workflow-pipeline.md
         matches TASK_TYPE_SKIP_STAGES.
         """
-        doc_path = get_project_root() / "docs" / "local-development" / "workflow-pipeline.md"
+        doc_path = get_project_root() / "docs" / "guide" / "workflow-pipeline.md"
         if not doc_path.exists():
             pytest.skip("workflow-pipeline.md not found")
 

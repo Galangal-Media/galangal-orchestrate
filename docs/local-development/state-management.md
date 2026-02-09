@@ -287,5 +287,5 @@ If state becomes corrupted, you can:
 ## Related Documentation
 
 - [Architecture](architecture.md) - System overview
-- [Workflow Pipeline](workflow-pipeline.md) - Stage execution
-- [CLI Commands](cli-commands.md) - Command reference
+- [Workflow Pipeline](../guide/workflow-pipeline.md) - Stage execution
+- [CLI Commands](../guide/cli-commands.md) - Command reference

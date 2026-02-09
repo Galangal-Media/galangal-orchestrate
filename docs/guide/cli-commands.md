@@ -405,7 +405,7 @@ galangal resume --help
 
 ## Related Documentation
 
-- [README](README.md) - Setup and development
+- [Local Development](../local-development/README.md) - Setup and development
 - [Workflow Pipeline](workflow-pipeline.md) - Stage details
-- [State Management](state-management.md) - Task state
+- [State Management](../local-development/state-management.md) - Task state
 - [Configuration](configuration.md) - Config options

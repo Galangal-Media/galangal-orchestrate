@@ -16,20 +16,23 @@ Configuration is stored in:
 # Project information
 project:
   name: "My Project"
-  stacks:
-    - language: "python"
-      framework: "fastapi"
-      root: "backend/"
-    - language: "typescript"
-      framework: "vite"
-      root: "frontend/"
   approver_name: "Optional Approver Name"
+
+# Git branch naming pattern ({task_name} is replaced)
+branch_pattern: "task/{task_name}"
 
 # Stage configuration
 stages:
   skip: []              # Stages to always skip
   timeout: 14400        # Stage timeout in seconds (default: 4 hours)
   max_retries: 5        # Max retry attempts per stage
+  commit_per_stage: true # WIP commits after code-modifying stages
+
+# Test gate (mechanical test verification)
+test_gate:
+  enabled: false
+  tests: []
+  fail_fast: true
 
 # Validation rules
 validation:
@@ -49,12 +52,19 @@ ai:
       command: "claude"
       args: []
       max_turns: 200
+      read_only: false
+  stage_backends: {}    # Per-stage backend overrides
 
 # Peer review hook
 peer_review:
   enabled: false
   backend: "codex"
   stages: ["PM", "DESIGN"]
+
+# Pull request configuration
+pr:
+  codex_review: false
+  base_branch: "main"
 
 # Documentation paths
 docs:
@@ -64,6 +74,23 @@ docs:
   update_changelog: true
   update_security_audit: true
   update_general_docs: true
+
+# Structured logging
+logging:
+  enabled: false
+  level: "info"
+  file: null
+  json_format: true
+  console: false
+
+# GitHub integration
+github:
+  pickup_label: "galangal"
+  in_progress_label: "in-progress"
+  label_mapping:
+    bug: ["bug", "bugfix"]
+    feature: ["enhancement", "feature"]
+    # ... other mappings
 
 # Task storage
 tasks_dir: "galangal-tasks"
@@ -78,34 +105,42 @@ stage_context:
     Dev-specific instructions...
   TEST: |
     Test-specific instructions...
+
+# Per-task-type settings
+task_type_settings:
+  bug_fix:
+    skip_discovery: true
+
+# Artifact context filtering (optional)
+artifact_context: null  # Set per-stage artifact include/exclude rules
+
+# Artifact lineage tracking (optional)
+lineage:
+  enabled: false
+  block_on_staleness: true
+
+# Hub connection (see Hub docs for details)
+hub:
+  enabled: false
+  url: "ws://localhost:8080/ws/agent"
+  api_key: null
 ```
 
 ## Configuration Sections
 
 ### project
 
-Project metadata and stack information:
+Project metadata:
 
 ```yaml
 project:
   name: "My Project"
-  stacks:
-    - language: "python"
-      framework: "fastapi"
-      root: "backend/"
-    - language: "typescript"
-      framework: "react"
-      root: "frontend/"
   approver_name: "Lead Developer"
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Project display name |
-| `stacks` | list | Technology stacks in the project |
-| `stacks[].language` | string | Programming language |
-| `stacks[].framework` | string | Framework used |
-| `stacks[].root` | string | Root directory for this stack |
 | `approver_name` | string | Name shown in approval prompts |
 
 ### stages
@@ -126,6 +161,7 @@ stages:
 | `skip` | list | `[]` | Stages to always skip |
 | `timeout` | int | `14400` | Stage timeout (seconds) |
 | `max_retries` | int | `5` | Max retries per stage |
+| `commit_per_stage` | bool | `true` | Create WIP commits after code-modifying stages, squash at finalization |
 
 Valid stages to skip:
 - `DESIGN`, `PREFLIGHT`, `MIGRATION`, `TEST`
@@ -136,7 +172,7 @@ Note: `PM`, `DEV`, and `COMPLETE` cannot be skipped.
 
 ### validation
 
-Per-stage validation rules. See [Validation System](validation-system.md) for details.
+Per-stage validation rules. See [Validation System](../local-development/validation-system.md) for details.
 
 ```yaml
 validation:
@@ -194,6 +230,8 @@ ai:
 | `backends.<name>.command` | string | - | CLI command |
 | `backends.<name>.args` | list | `[]` | Additional arguments |
 | `backends.<name>.max_turns` | int | `200` | Max AI turns |
+| `backends.<name>.read_only` | bool | `false` | Backend runs in read-only mode; artifacts written via post-processing |
+| `stage_backends` | dict | `{}` | Per-stage backend overrides (e.g., `{"REVIEW": "codex"}`) |
 
 ### peer_review
 
@@ -289,6 +327,187 @@ stage_context:
     Verify authentication and authorization.
 ```
 
+### branch_pattern
+
+Git branch naming pattern for new tasks:
+
+```yaml
+branch_pattern: "task/{task_name}"
+```
+
+Default: `"task/{task_name}"`
+
+The `{task_name}` placeholder is replaced with the task slug.
+
+### test_gate
+
+Mechanical test verification stage that runs configured test suites without AI:
+
+```yaml
+test_gate:
+  enabled: true
+  tests:
+    - name: "Unit tests"
+      command: "pytest tests/unit"
+      timeout: 300
+    - name: "Integration tests"
+      command: "pytest tests/integration"
+      timeout: 600
+  fail_fast: true
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable the test gate stage |
+| `tests` | list | `[]` | Test suites to run |
+| `tests[].name` | string | - | Display name for the test suite |
+| `tests[].command` | string | - | Command to run |
+| `tests[].timeout` | int | `300` | Timeout per test suite (seconds) |
+| `fail_fast` | bool | `true` | Stop on first failure instead of running all |
+
+### pr
+
+Pull request configuration:
+
+```yaml
+pr:
+  codex_review: false
+  base_branch: "main"
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `codex_review` | bool | `false` | Add @codex review to PR body |
+| `base_branch` | string | `"main"` | Base branch for PRs |
+
+### logging
+
+Structured logging configuration:
+
+```yaml
+logging:
+  enabled: true
+  level: "info"
+  file: "logs/galangal.jsonl"
+  activity_file: "galangal-tasks/{task_name}/activity.jsonl"
+  json_format: true
+  console: false
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable structured logging to file |
+| `level` | string | `"info"` | Log level: debug, info, warning, error |
+| `file` | string | `null` | Log file path. If not set, logs only to console |
+| `activity_file` | string | `null` | Activity log path. Supports `{task_name}` placeholder |
+| `json_format` | bool | `true` | Output JSON format (false for pretty console) |
+| `console` | bool | `false` | Also output to console (stderr) |
+
+### github
+
+GitHub integration configuration:
+
+```yaml
+github:
+  pickup_label: "galangal"
+  in_progress_label: "in-progress"
+  label_colors:
+    galangal: "7C3AED"
+    in-progress: "FCD34D"
+  label_mapping:
+    bug: ["bug", "bugfix"]
+    feature: ["enhancement", "feature"]
+    docs: ["documentation", "docs"]
+    refactor: ["refactor"]
+    chore: ["chore", "maintenance"]
+    hotfix: ["hotfix", "critical"]
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `pickup_label` | string | `"galangal"` | Label that marks issues for galangal to pick up |
+| `in_progress_label` | string | `"in-progress"` | Label added when galangal starts an issue |
+| `label_colors` | dict | - | Hex colors for labels (without `#`) |
+| `label_mapping` | object | - | Maps GitHub labels to task types |
+
+### task_type_settings
+
+Per-task-type settings:
+
+```yaml
+task_type_settings:
+  bug_fix:
+    skip_discovery: true
+  hotfix:
+    skip_discovery: true
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `<type>.skip_discovery` | bool | `false` | Skip the PM discovery Q&A phase for this task type |
+
+### artifact_context
+
+Per-stage artifact context filtering to control which artifacts are included in prompts. Reduces token usage by only including relevant context:
+
+```yaml
+artifact_context:
+  dev:
+    required: ["SPEC.md"]
+    include: ["DESIGN.md", "PLAN.md"]
+    exclude: ["DISCOVERY_LOG.md"]
+  test:
+    required: ["SPEC.md", "DEVELOPMENT.md"]
+    include: ["TEST_PLAN.md"]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `<stage>.required` | list | Artifacts that must be included (error if missing) |
+| `<stage>.include` | list | Artifacts to include if they exist |
+| `<stage>.exclude` | list | Artifacts to never include (overrides include) |
+
+If a stage is not configured here, it falls back to default behavior.
+
+### lineage
+
+Artifact lineage tracking for staleness detection:
+
+```yaml
+lineage:
+  enabled: true
+  block_on_staleness: true
+  artifact_dependencies:
+    DESIGN.md:
+      - artifact: "SPEC.md"
+        sections: ["Requirements"]
+  stage_dependencies:
+    DEV:
+      depends_on_stages: ["DESIGN"]
+      depends_on_artifacts:
+        - artifact: "SPEC.md"
+        - artifact: "DESIGN.md"
+          sections: ["Architecture"]
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable lineage tracking |
+| `block_on_staleness` | bool | `true` | Force re-run of stale stages (vs just warning) |
+| `artifact_dependencies` | dict | `{}` | Per-artifact dependency specs |
+| `stage_dependencies` | dict | `{}` | Per-stage dependency configuration |
+
+### hub
+
+Hub connection for remote monitoring and control. See [Hub Documentation](../hub/README.md) for full setup.
+
+```yaml
+hub:
+  enabled: true
+  url: "ws://your-server:8080/ws/agent"
+  api_key: "your-api-key"
+```
+
 ## Example Configurations
 
 ### Minimal Configuration
@@ -296,10 +515,6 @@ stage_context:
 ```yaml
 project:
   name: "My App"
-  stacks:
-    - language: "python"
-      framework: "fastapi"
-      root: "."
 
 stages:
   skip:
@@ -312,13 +527,6 @@ stages:
 ```yaml
 project:
   name: "Enterprise App"
-  stacks:
-    - language: "python"
-      framework: "fastapi"
-      root: "backend/"
-    - language: "typescript"
-      framework: "nextjs"
-      root: "frontend/"
   approver_name: "Tech Lead"
 
 stages:
@@ -464,7 +672,7 @@ This creates:
 
 ## Related Documentation
 
-- [Architecture](architecture.md) - System overview
-- [Validation System](validation-system.md) - Validation details
+- [Architecture](../local-development/architecture.md) - System overview
+- [Validation System](../local-development/validation-system.md) - Validation details
 - [Prompt System](prompt-system.md) - Prompt configuration
 - [Extending](extending.md) - Customization guide

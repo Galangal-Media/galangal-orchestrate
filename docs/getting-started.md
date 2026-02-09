@@ -249,8 +249,8 @@ galangal resume
 
 ## Next Steps
 
-- **[Configuration](local-development/configuration.md)** — customize stage settings, validation rules, AI backends, and more
-- **[Workflow Pipeline](local-development/workflow-pipeline.md)** — detailed reference for all 13 stages, rollback logic, and validation
-- **[CLI Commands](local-development/cli-commands.md)** — full command reference with all options and flags
-- **[Extending Galangal](local-development/extending.md)** — custom prompts, validation rules, and project-specific overrides
+- **[Configuration](guide/configuration.md)** — customize stage settings, validation rules, AI backends, and more
+- **[Workflow Pipeline](guide/workflow-pipeline.md)** — detailed reference for all 13 stages, rollback logic, and validation
+- **[CLI Commands](guide/cli-commands.md)** — full command reference with all options and flags
+- **[Extending Galangal](guide/extending.md)** — custom prompts, validation rules, and project-specific overrides
 - **[Troubleshooting](troubleshooting.md)** — common issues and solutions

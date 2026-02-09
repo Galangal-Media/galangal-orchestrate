@@ -87,8 +87,8 @@ See [Hub Documentation](docs/hub/README.md) for full setup instructions.
 | Topic | Link |
 |-------|------|
 | **Getting Started** | [docs/getting-started.md](docs/getting-started.md) |
-| **Configuration** | [docs/local-development/configuration.md](docs/local-development/configuration.md) |
-| **Workflow Stages** | [docs/local-development/workflow-pipeline.md](docs/local-development/workflow-pipeline.md) |
+| **Configuration** | [docs/guide/configuration.md](docs/guide/configuration.md) |
+| **Workflow Stages** | [docs/guide/workflow-pipeline.md](docs/guide/workflow-pipeline.md) |
 | **Hub (Remote Control)** | [docs/hub/README.md](docs/hub/README.md) |
 | **Troubleshooting** | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | **Architecture** | [docs/local-development/architecture.md](docs/local-development/architecture.md) |

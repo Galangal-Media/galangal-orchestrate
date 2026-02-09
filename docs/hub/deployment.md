@@ -307,7 +307,7 @@ This performs step-by-step testing and provides specific error messages:
 - WebSocket authentication
 - Agent registration
 
-See [Configuration - CLI Commands](configuration.md#galangal-hub-test) for detailed output examples.
+See [Configuration - CLI Commands](../guide/configuration.md#galangal-hub-test) for detailed output examples.
 
 ### Container Won't Start
 

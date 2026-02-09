@@ -4,23 +4,26 @@ This guide covers setting up and testing galangal-orchestrate locally without af
 
 ## Documentation Index
 
+### Developer-Internal Docs
+
 | Document | Description |
 |----------|-------------|
-| **Getting Started** | |
 | [README](README.md) (this file) | Setup and development workflow |
 | [Versioning](versioning.md) | Version management and releases |
-| **System Overview** | |
 | [Architecture](architecture.md) | Overall system architecture and components |
-| [Workflow Pipeline](workflow-pipeline.md) | 13-stage pipeline, execution flow, rollback |
-| **Core Systems** | |
 | [State Management](state-management.md) | WorkflowState, persistence, task types |
-| [Prompt System](prompt-system.md) | Prompt building, overrides, context injection |
 | [Validation System](validation-system.md) | ValidationRunner, checks, artifact markers |
 | [Mistake Tracking](mistake-tracking.md) | Learning from failures, vector search, CLI |
-| [Configuration](configuration.md) | Config schema and all options |
-| **Reference** | |
-| [CLI Commands](cli-commands.md) | Complete command reference |
-| [Extending](extending.md) | Customization and extension guide |
+
+### End-User Docs (moved to `docs/guide/`)
+
+| Document | Description |
+|----------|-------------|
+| [Configuration](../guide/configuration.md) | Config schema and all options |
+| [CLI Commands](../guide/cli-commands.md) | Complete command reference |
+| [Workflow Pipeline](../guide/workflow-pipeline.md) | 13-stage pipeline, execution flow, rollback |
+| [Prompt System](../guide/prompt-system.md) | Prompt building, overrides, context injection |
+| [Extending](../guide/extending.md) | Customization and extension guide |
 
 ## Prerequisites
 

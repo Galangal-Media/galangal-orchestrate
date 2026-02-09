@@ -370,6 +370,6 @@ galangal prompts export ./exported-prompts/
 
 ## Related Documentation
 
-- [Architecture](architecture.md) - System overview
+- [Architecture](../local-development/architecture.md) - System overview
 - [Workflow Pipeline](workflow-pipeline.md) - Stage execution
 - [Configuration](configuration.md) - Config options
