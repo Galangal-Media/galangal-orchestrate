@@ -65,6 +65,9 @@ class EventType(Enum):
     PREFLIGHT_FAILED = auto()
     ROLLBACK_BLOCKED = auto()
 
+    # Peer review
+    PEER_REVIEW_REQUIRED = auto()
+
     # State changes
     ROLLBACK_TRIGGERED = auto()
     STAGE_SKIPPED = auto()
@@ -266,6 +269,10 @@ class WorkflowEngine:
             return event(EventType.WORKFLOW_PAUSED, stage=stage, reason="user_paused")
 
         if result.success:
+            # Check if peer review should run before approval/advance
+            if self._should_run_peer_review(stage):
+                return event(EventType.PEER_REVIEW_REQUIRED, stage=stage)
+
             # Check if approval is needed
             metadata = stage.metadata
             if metadata.requires_approval and metadata.approval_artifact:
@@ -455,6 +462,131 @@ class WorkflowEngine:
 
         # Unknown action
         return event(EventType.WORKFLOW_PAUSED, reason="unknown_action")
+
+    def _should_run_peer_review(self, stage: Stage) -> bool:
+        """Check if peer review should run for this stage.
+
+        Returns True if peer review is enabled, the stage is configured
+        for review, and the review artifact doesn't already exist
+        (prevents re-running on retry).
+        """
+        pr_config = self.config.peer_review
+        if not pr_config.enabled:
+            return False
+        if stage.value not in pr_config.stages:
+            return False
+        # Artifact-based idempotency: skip if already reviewed
+        artifact_name = f"{stage.value}_PEER_REVIEW.md"
+        if artifact_exists(artifact_name, self.state.task_name):
+            return False
+        return True
+
+    def execute_peer_review(
+        self, tui_app: WorkflowTUIApp
+    ) -> tuple[str, str]:
+        """Execute peer review for the current stage.
+
+        Invokes the configured reviewer backend to get an independent
+        assessment of the stage's output.
+
+        Args:
+            tui_app: TUI app for progress display.
+
+        Returns:
+            Tuple of (decision, review_notes) where decision is
+            "APPROVE" or "REQUEST_CHANGES". On failure, returns
+            ("APPROVE", "") for graceful degradation.
+        """
+        import json
+
+        from galangal.ai import get_backend_with_fallback, is_backend_available
+        from galangal.prompts.builder import PromptBuilder
+        from galangal.ui.tui import TUIAdapter
+
+        stage = self.state.stage
+        pr_config = self.config.peer_review
+        backend_name = pr_config.backend
+        artifact_name = f"{stage.value}_PEER_REVIEW.md"
+
+        # Check if backend is available
+        if not is_backend_available(backend_name, self.config):
+            tui_app.add_activity(
+                f"Peer review backend '{backend_name}' not available, skipping", "⚠"
+            )
+            return ("APPROVE", "")
+
+        try:
+            backend = get_backend_with_fallback(backend_name, config=self.config)
+        except Exception:
+            tui_app.add_activity("Failed to initialize peer review backend, skipping", "⚠")
+            return ("APPROVE", "")
+
+        # Build the peer review prompt
+        builder = PromptBuilder()
+        prompt = builder.build_peer_review_prompt(self.state, stage, backend_name)
+
+        # Set up log file
+        from galangal.core.state import get_task_dir
+
+        logs_dir = get_task_dir(self.state.task_name) / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_file = logs_dir / f"{stage.value.lower()}_peer_review.log"
+
+        with open(log_file, "w") as f:
+            f.write(f"=== Peer Review Prompt ===\n{prompt}\n\n")
+            f.write(f"=== Backend: {backend.name} ===\n")
+
+        ui = TUIAdapter(tui_app)
+
+        try:
+            result = backend.invoke(
+                prompt=prompt,
+                timeout=600,  # 10 minutes max for review
+                max_turns=20,
+                ui=ui,
+                stage=f"{stage.value}_PEER_REVIEW",
+                log_file=str(log_file),
+            )
+        except Exception as e:
+            tui_app.add_activity(f"Peer review backend failed: {e}", "⚠")
+            return ("APPROVE", "")
+
+        if not result.success:
+            tui_app.add_activity("Peer review invocation failed, skipping", "⚠")
+            return ("APPROVE", "")
+
+        output = result.output or ""
+
+        # Parse the review output
+        decision = "APPROVE"
+        review_notes = output
+
+        if backend.read_only:
+            # Read-only backends (Codex) return structured JSON
+            try:
+                data = json.loads(output)
+                decision = data.get("decision", "APPROVE").upper()
+                review_notes = data.get("review_notes", output)
+            except (json.JSONDecodeError, TypeError):
+                # Fall through to markdown parsing
+                pass
+        else:
+            # Normal backends output markdown - look for decision marker
+            for line in output.split("\n"):
+                stripped = line.strip()
+                if stripped.upper().startswith("# DECISION:"):
+                    decision = stripped.split(":", 1)[1].strip().upper()
+                    break
+
+        # Normalize decision
+        if decision not in ("APPROVE", "REQUEST_CHANGES"):
+            decision = "APPROVE"
+
+        # Write the peer review artifact
+        write_artifact(artifact_name, review_notes, self.state.task_name)
+        tui_app.add_activity(f"Wrote {artifact_name}", "📝")
+
+        return (decision, review_notes)
 
     def _advance_to_next_stage(self, tui_app: WorkflowTUIApp | None = None) -> WorkflowEvent:
         """Advance to the next stage after success."""

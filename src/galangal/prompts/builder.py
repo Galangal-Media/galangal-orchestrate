@@ -2,12 +2,17 @@
 Prompt building with project override support.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from galangal.config.loader import get_config, get_project_root, get_prompts_dir
 from galangal.core.artifacts import artifact_exists, read_artifact
 from galangal.core.state import Stage, WorkflowState
+
+if TYPE_CHECKING:
+    from galangal.config.schema import StageArtifactConfig
 
 
 class PromptBuilder:
@@ -353,7 +358,7 @@ Only update documentation types marked as YES above.""")
         return self._get_default_artifact_context(stage, task_name)
 
     def _get_configured_artifact_context(
-        self, config: "StageArtifactConfig", task_name: str
+        self, config: StageArtifactConfig, task_name: str
     ) -> list[str]:
         """
         Get artifact context based on explicit configuration.
@@ -367,8 +372,6 @@ Only update documentation types marked as YES above.""")
         Returns:
             List of formatted artifact sections.
         """
-        from galangal.config.schema import StageArtifactConfig
-
         parts = []
         included = set()
 
@@ -566,6 +569,78 @@ Only update documentation types marked as YES above.""")
         except Exception:
             # Don't fail prompt building if mistake tracking fails
             return ""
+
+    def build_peer_review_prompt(
+        self, state: WorkflowState, stage: Stage, backend_name: str
+    ) -> str:
+        """Build prompt for peer review of a stage's output.
+
+        Provides the reviewer with task description and stage artifacts
+        for independent assessment. Keeps context minimal to avoid
+        biasing the reviewer.
+
+        Args:
+            state: Current workflow state with task info.
+            stage: The stage whose output is being reviewed.
+            backend_name: Backend name for backend-specific prompts.
+
+        Returns:
+            Complete prompt for peer review invocation.
+        """
+        stage_lower = stage.value.lower()
+
+        # Try stage-specific peer review prompt, then generic
+        # Lookup order: {stage}_peer_review_{backend}.md, {stage}_peer_review.md, peer_review.md
+        prompt_names = [
+            f"{stage_lower}_peer_review_{backend_name}",
+            f"{stage_lower}_peer_review",
+            "peer_review",
+        ]
+
+        review_prompt = ""
+        for name in prompt_names:
+            default_path = self.defaults_dir / f"{name}.md"
+            if default_path.exists():
+                review_prompt = default_path.read_text()
+                break
+            # Also check project overrides
+            project_path = self.override_dir / f"{name}.md"
+            if project_path.exists():
+                project_prompt = project_path.read_text()
+                merged = self._merge_with_base(project_prompt, review_prompt)
+                review_prompt = merged if merged != project_prompt else project_prompt
+                break
+
+        if not review_prompt:
+            review_prompt = "Review the stage output for completeness, clarity, and correctness."
+
+        # Build context with task description and stage artifacts
+        context_parts = [
+            f"# Task: {state.task_name}",
+            f"# Task Type: {state.task_type.display_name()}",
+            f"# Description\n{state.task_description}",
+            f"\n# Stage Under Review: {stage.value}",
+        ]
+
+        # Include the stage's output artifacts
+        stage_artifacts = {
+            "PM": ["SPEC.md", "PLAN.md", "STAGE_PLAN.md"],
+            "DESIGN": ["SPEC.md", "DESIGN.md"],
+        }
+        artifacts_to_include = stage_artifacts.get(stage.value, [])
+
+        for artifact_name in artifacts_to_include:
+            if artifact_exists(artifact_name, state.task_name):
+                content = read_artifact(artifact_name, state.task_name)
+                if content:
+                    context_parts.append(f"\n# {artifact_name}\n{content}")
+
+        # Add global prompt context
+        if self.config.prompt_context:
+            context_parts.append(f"\n# Project Context\n{self.config.prompt_context}")
+
+        context = "\n".join(context_parts)
+        return f"{context}\n\n---\n\n{review_prompt}"
 
     def build_minimal_review_prompt(self, state: WorkflowState, backend_name: str) -> str:
         """

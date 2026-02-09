@@ -12,13 +12,15 @@ from galangal.exceptions import ConfigError
 
 # Global config cache
 _config: GalangalConfig | None = None
+_config_mtime: float = 0.0  # Track config file modification time
 _project_root: Path | None = None
 
 
 def reset_caches() -> None:
     """Reset all global caches. Used between tests to ensure clean state."""
-    global _config, _project_root
+    global _config, _config_mtime, _project_root
     _config = None
+    _config_mtime = 0.0
     _project_root = None
 
 
@@ -67,7 +69,7 @@ def load_config(project_root: Path | None = None) -> GalangalConfig:
     Returns default config if file doesn't exist.
     Raises ConfigError if file exists but is invalid.
     """
-    global _config, _project_root
+    global _config, _config_mtime, _project_root
 
     if project_root is not None:
         _project_root = project_root.resolve()
@@ -78,7 +80,13 @@ def load_config(project_root: Path | None = None) -> GalangalConfig:
 
     if not config_path.exists():
         _config = GalangalConfig()
+        _config_mtime = 0.0
         return _config
+
+    try:
+        _config_mtime = config_path.stat().st_mtime
+    except OSError:
+        _config_mtime = 0.0
 
     try:
         data = yaml.safe_load(config_path.read_text()) or {}
@@ -93,8 +101,17 @@ def load_config(project_root: Path | None = None) -> GalangalConfig:
 
 
 def get_config() -> GalangalConfig:
-    """Get the cached configuration, loading if necessary."""
-    global _config
+    """Get the cached configuration, reloading if file has changed on disk."""
+    global _config, _config_mtime
+    if _config is not None:
+        # Check if config file has been modified since last load
+        config_path = get_project_root() / ".galangal" / "config.yaml"
+        try:
+            current_mtime = config_path.stat().st_mtime
+            if current_mtime != _config_mtime:
+                _config = None  # Force reload
+        except OSError:
+            pass
     if _config is None:
         _config = load_config()
     return _config

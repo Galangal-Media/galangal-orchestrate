@@ -722,69 +722,71 @@ class RollbackEvent:
         )
 
 
+# =============================================================================
+# Sub-model dataclasses for WorkflowState decomposition
+# =============================================================================
+
+
 @dataclass
-class WorkflowState:
-    """Persistent workflow state for a task."""
+class TaskMetadata:
+    """Core task identification and metadata.
 
-    stage: Stage
-    attempt: int
-    awaiting_approval: bool
-    clarification_required: bool
-    last_failure: str | None
-    started_at: str
-    task_description: str
+    Contains the essential identity fields for a task that are set
+    at creation time and rarely change during workflow execution.
+    """
+
     task_name: str
+    task_description: str
     task_type: TaskType = TaskType.FEATURE
-    rollback_history: list[RollbackEvent] = field(default_factory=list)
+    started_at: str = ""
 
-    # PM Discovery Q&A tracking
-    qa_rounds: list[dict[str, Any]] | None = None  # [{"questions": [...], "answers": [...]}]
-    qa_complete: bool = False
+    def __post_init__(self) -> None:
+        if not self.started_at:
+            self.started_at = datetime.now(timezone.utc).isoformat()
 
-    # PM-driven stage planning
-    # Maps stage name to {"action": "skip"|"run", "reason": "..."}
-    stage_plan: dict[str, dict[str, Any]] | None = None
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "task_name": self.task_name,
+            "task_description": self.task_description,
+            "task_type": self.task_type.value,
+            "started_at": self.started_at,
+        }
 
-    # Stage timing tracking
-    stage_start_time: str | None = None  # ISO timestamp when current stage started
-    stage_durations: dict[str, int] | None = None  # Completed stage durations in seconds
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "TaskMetadata":
+        """Create from dictionary."""
+        return cls(
+            task_name=d.get("task_name", ""),
+            task_description=d.get("task_description", ""),
+            task_type=TaskType.from_str(d.get("task_type", "feature")),
+            started_at=d.get("started_at", ""),
+        )
 
-    # GitHub integration
-    github_issue: int | None = None  # Issue number if created from GitHub
-    github_repo: str | None = None  # owner/repo for PR creation
-    screenshots: list[str] | None = None  # Local paths to screenshots from issue
 
-    # Fast-track rollback support
-    # Stages that passed since last DEV run (cleared when entering DEV)
-    passed_stages: set[str] = field(default_factory=set)
-    # Stages to skip on this iteration (set from passed_stages on minor rollback)
-    fast_track_skip: set[str] = field(default_factory=set)
+@dataclass
+class ExecutionState:
+    """Current execution state of the workflow.
 
-    # Per-stage commit tracking
-    base_commit_sha: str | None = None  # Commit SHA at task start (squash target)
-    stage_commits: list[dict[str, str]] | None = None  # [{"stage": "DEV", "sha": "abc123"}]
+    Tracks the current stage, retry attempts, approval/clarification
+    status, and failure context for the active stage.
+    """
 
-    # Artifact lineage tracking for staleness detection
-    # Maps artifact name to ArtifactLineage with section hashes
-    artifact_lineage: dict[str, Any] = field(default_factory=dict)
-    # Maps stage name to StageLineage with input hashes
-    stage_lineage: dict[str, Any] = field(default_factory=dict)
-
-    # -------------------------------------------------------------------------
-    # Retry management methods
-    # -------------------------------------------------------------------------
+    stage: Stage = Stage.PM
+    attempt: int = 1
+    awaiting_approval: bool = False
+    clarification_required: bool = False
+    last_failure: str | None = None
 
     def record_failure(self, error: str, max_length: int = 4000) -> None:
-        """
-        Record a failed attempt.
+        """Record a failed attempt.
 
         Increments the attempt counter and stores a truncated error message
-        for context in the next retry. Full output is preserved in logs/.
+        for context in the next retry.
 
         Args:
             error: Error message from the failed attempt.
-            max_length: Maximum characters to store (default 4000). Prevents
-                prompt size from exceeding shell argument limits (~128KB).
+            max_length: Maximum characters to store (default 4000).
         """
         self.attempt += 1
         if len(error) > max_length:
@@ -795,53 +797,139 @@ class WorkflowState:
             self.last_failure = error
 
     def can_retry(self, max_retries: int) -> bool:
-        """
-        Check if another retry attempt is allowed.
-
-        Args:
-            max_retries: Maximum number of attempts allowed.
-
-        Returns:
-            True if attempt <= max_retries, False if exhausted.
-        """
+        """Check if another retry attempt is allowed."""
         return self.attempt <= max_retries
 
     def reset_attempts(self, clear_failure: bool = True) -> None:
-        """
-        Reset attempt counter for a new stage or after user intervention.
-
-        Called when:
-        - Advancing to a new stage (clear_failure=True)
-        - User chooses to retry after max attempts (clear_failure=True)
-        - Rolling back to an earlier stage (clear_failure=False to preserve context)
-
-        Args:
-            clear_failure: If True, also clears last_failure. Set to False
-                when rolling back to preserve feedback context for the next attempt.
-        """
+        """Reset attempt counter for a new stage or after user intervention."""
         self.attempt = 1
         if clear_failure:
             self.last_failure = None
 
-    # -------------------------------------------------------------------------
-    # Stage timing methods
-    # -------------------------------------------------------------------------
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "stage": self.stage.value,
+            "attempt": self.attempt,
+            "awaiting_approval": self.awaiting_approval,
+            "clarification_required": self.clarification_required,
+            "last_failure": self.last_failure,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "ExecutionState":
+        """Create from dictionary."""
+        return cls(
+            stage=Stage.from_str(d.get("stage", "PM")),
+            attempt=d.get("attempt", 1),
+            awaiting_approval=d.get("awaiting_approval", False),
+            clarification_required=d.get("clarification_required", False),
+            last_failure=d.get("last_failure"),
+        )
+
+
+@dataclass
+class GitHubContext:
+    """GitHub integration context.
+
+    Stores GitHub issue/repo information when a task is created
+    from a GitHub issue, including any screenshot attachments.
+    """
+
+    github_issue: int | None = None
+    github_repo: str | None = None
+    screenshots: list[str] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "github_issue": self.github_issue,
+            "github_repo": self.github_repo,
+            "screenshots": self.screenshots,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "GitHubContext":
+        """Create from dictionary."""
+        return cls(
+            github_issue=d.get("github_issue"),
+            github_repo=d.get("github_repo"),
+            screenshots=d.get("screenshots"),
+        )
+
+
+@dataclass
+class DiscoveryState:
+    """PM Discovery Q&A state.
+
+    Tracks the interactive Q&A loop during the PM stage where
+    clarifying questions are asked and answers recorded.
+    """
+
+    qa_rounds: list[dict[str, Any]] | None = None
+    qa_complete: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "qa_rounds": self.qa_rounds,
+            "qa_complete": self.qa_complete,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "DiscoveryState":
+        """Create from dictionary."""
+        return cls(
+            qa_rounds=d.get("qa_rounds"),
+            qa_complete=d.get("qa_complete", False),
+        )
+
+
+@dataclass
+class StagePlanState:
+    """PM-driven stage planning state.
+
+    Stores the stage plan output from PM analysis that recommends
+    which stages to run/skip for this specific task.
+    """
+
+    # Maps stage name to {"action": "skip"|"run", "reason": "..."}
+    stage_plan: dict[str, dict[str, Any]] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "stage_plan": self.stage_plan,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "StagePlanState":
+        """Create from dictionary."""
+        return cls(
+            stage_plan=d.get("stage_plan"),
+        )
+
+
+@dataclass
+class TimingState:
+    """Stage timing tracking state.
+
+    Records start times and durations for stages to support
+    metrics collection and performance analysis.
+    """
+
+    stage_start_time: str | None = None
+    stage_durations: dict[str, int] | None = None
 
     def start_stage_timer(self) -> None:
-        """
-        Start timing for the current stage.
-
-        Records the current timestamp in ISO format. Called when a stage
-        begins execution.
-        """
+        """Start timing for the current stage."""
         self.stage_start_time = datetime.now(timezone.utc).isoformat()
 
-    def record_stage_duration(self) -> int | None:
-        """
-        Record the duration of the current stage.
+    def record_stage_duration(self, stage: "Stage") -> int | None:
+        """Record the duration of the current stage.
 
-        Calculates elapsed time from stage_start_time and stores it in
-        stage_durations dict. Returns the duration in seconds.
+        Args:
+            stage: The stage to record duration for.
 
         Returns:
             Duration in seconds, or None if no start time was recorded.
@@ -856,15 +944,14 @@ class WorkflowState:
             if self.stage_durations is None:
                 self.stage_durations = {}
 
-            self.stage_durations[self.stage.value] = elapsed
-            self.stage_start_time = None  # Clear for next stage
+            self.stage_durations[stage.value] = elapsed
+            self.stage_start_time = None
             return elapsed
         except (ValueError, TypeError):
             return None
 
     def get_stage_duration(self, stage: "Stage") -> int | None:
-        """
-        Get the recorded duration for a stage.
+        """Get the recorded duration for a stage.
 
         Args:
             stage: The stage to get duration for.
@@ -876,16 +963,62 @@ class WorkflowState:
             return None
         return self.stage_durations.get(stage.value)
 
-    # -------------------------------------------------------------------------
-    # Rollback management methods
-    # -------------------------------------------------------------------------
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "stage_start_time": self.stage_start_time,
+            "stage_durations": self.stage_durations,
+        }
 
-    def record_rollback(self, from_stage: Stage, to_stage: Stage, reason: str) -> None:
-        """
-        Record a rollback event in the history.
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "TimingState":
+        """Create from dictionary."""
+        return cls(
+            stage_start_time=d.get("stage_start_time"),
+            stage_durations=d.get("stage_durations"),
+        )
 
-        Called when validation fails and triggers a rollback to an earlier stage.
-        The history is used to detect rollback loops and prevent infinite retries.
+
+@dataclass
+class GitTrackingState:
+    """Git commit tracking state.
+
+    Tracks the base commit at task start and per-stage commits
+    for squash operations and rollback support.
+    """
+
+    base_commit_sha: str | None = None
+    stage_commits: list[dict[str, str]] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "base_commit_sha": self.base_commit_sha,
+            "stage_commits": self.stage_commits,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "GitTrackingState":
+        """Create from dictionary."""
+        return cls(
+            base_commit_sha=d.get("base_commit_sha"),
+            stage_commits=d.get("stage_commits"),
+        )
+
+
+@dataclass
+class RollbackState:
+    """Rollback tracking state.
+
+    Maintains history of rollback events to detect loops
+    and prevent infinite retry cycles.
+    """
+
+    rollback_history: list[RollbackEvent] = field(default_factory=list)
+
+    def record_rollback(self, from_stage: "Stage", to_stage: "Stage", reason: str) -> None:
+        """Record a rollback event in the history.
+
         Keeps only the last 50 events to prevent state growth.
 
         Args:
@@ -895,13 +1028,11 @@ class WorkflowState:
         """
         event = RollbackEvent.create(from_stage, to_stage, reason)
         self.rollback_history.append(event)
-        # Keep only the last 50 events - plenty for the 1-hour window check
         if len(self.rollback_history) > 50:
             self.rollback_history = self.rollback_history[-50:]
 
-    def should_allow_rollback(self, target_stage: Stage) -> bool:
-        """
-        Check if a rollback to the target stage is allowed.
+    def should_allow_rollback(self, target_stage: "Stage") -> bool:
+        """Check if a rollback to the target stage is allowed.
 
         Prevents infinite rollback loops by limiting the number of rollbacks
         to the same stage within a time window.
@@ -923,9 +1054,8 @@ class WorkflowState:
 
         return len(recent_rollbacks) < MAX_ROLLBACKS_PER_STAGE
 
-    def get_rollback_count(self, target_stage: Stage) -> int:
-        """
-        Get the number of recent rollbacks to a stage.
+    def get_rollback_count(self, target_stage: "Stage") -> int:
+        """Get the number of recent rollbacks to a stage.
 
         Args:
             target_stage: Stage to count rollbacks for.
@@ -944,35 +1074,42 @@ class WorkflowState:
             ]
         )
 
-    # -------------------------------------------------------------------------
-    # Fast-track rollback methods
-    # -------------------------------------------------------------------------
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "rollback_history": [r.to_dict() for r in self.rollback_history],
+        }
 
-    def record_passed_stage(self, stage: Stage) -> None:
-        """
-        Record that a stage has passed in the current iteration.
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "RollbackState":
+        """Create from dictionary."""
+        return cls(
+            rollback_history=[RollbackEvent.from_dict(r) for r in d.get("rollback_history", [])],
+        )
 
-        Called when a stage completes successfully. Used to track which
-        stages can be skipped on a minor rollback.
 
-        Args:
-            stage: The stage that passed.
-        """
+@dataclass
+class FastTrackState:
+    """Fast-track rollback state.
+
+    Tracks which stages have passed to enable skipping them
+    on minor rollbacks (REQUEST_MINOR_CHANGES).
+    """
+
+    passed_stages: set[str] = field(default_factory=set)
+    fast_track_skip: set[str] = field(default_factory=set)
+
+    def record_passed_stage(self, stage: "Stage") -> None:
+        """Record that a stage has passed in the current iteration."""
         self.passed_stages.add(stage.value)
 
     def clear_passed_stages(self, preserve_marked: bool = False) -> None:
-        """
-        Clear the passed stages tracking.
-
-        Called when entering DEV stage to start fresh tracking,
-        or on a full rollback (REQUEST_CHANGES).
+        """Clear the passed stages tracking.
 
         Args:
-            preserve_marked: If True, keep stages that have preserve_on_rollback=True
-                in their metadata (e.g., TEST stage - tests don't need rewriting).
+            preserve_marked: If True, keep stages that have preserve_on_rollback=True.
         """
         if preserve_marked:
-            # Keep stages marked with preserve_on_rollback=True
             preserved = {
                 stage.value
                 for stage in Stage
@@ -983,61 +1120,61 @@ class WorkflowState:
             self.passed_stages = set()
 
     def setup_fast_track(self) -> None:
-        """
-        Setup fast-track skipping from passed stages.
-
-        Called on a minor rollback (REQUEST_MINOR_CHANGES). Copies
-        passed_stages to fast_track_skip so those stages will be
-        skipped on the re-run.
-        """
+        """Setup fast-track skipping from passed stages."""
         self.fast_track_skip = self.passed_stages.copy()
-        # Don't clear passed_stages - we'll clear it when entering DEV
 
     def clear_fast_track(self) -> None:
-        """
-        Clear fast-track skipping.
-
-        Called when workflow completes or on a full rollback.
-        """
+        """Clear fast-track skipping."""
         self.fast_track_skip = set()
 
-    def should_fast_track_skip(self, stage: Stage) -> bool:
-        """
-        Check if a stage should be skipped due to fast-track.
-
-        Args:
-            stage: The stage to check.
-
-        Returns:
-            True if the stage is in fast_track_skip set.
-        """
+    def should_fast_track_skip(self, stage: "Stage") -> bool:
+        """Check if a stage should be skipped due to fast-track."""
         return stage.value in self.fast_track_skip
 
     def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
-        d["stage"] = self.stage.value
-        d["task_type"] = self.task_type.value
-        # rollback_history is already converted to list of dicts by asdict
-        # Convert sets to lists for JSON serialization
-        d["passed_stages"] = list(self.passed_stages)
-        d["fast_track_skip"] = list(self.fast_track_skip)
-        # Convert lineage objects to dicts
-        d["artifact_lineage"] = {
-            name: lineage.to_dict() if hasattr(lineage, "to_dict") else lineage
-            for name, lineage in self.artifact_lineage.items()
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "passed_stages": list(self.passed_stages),
+            "fast_track_skip": list(self.fast_track_skip),
         }
-        d["stage_lineage"] = {
-            name: lineage.to_dict() if hasattr(lineage, "to_dict") else lineage
-            for name, lineage in self.stage_lineage.items()
-        }
-        return d
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "WorkflowState":
-        # Parse rollback history if present
-        rollback_history = [RollbackEvent.from_dict(r) for r in d.get("rollback_history", [])]
+    def from_dict(cls, d: dict[str, Any]) -> "FastTrackState":
+        """Create from dictionary."""
+        return cls(
+            passed_stages=set(d.get("passed_stages", [])),
+            fast_track_skip=set(d.get("fast_track_skip", [])),
+        )
 
-        # Parse artifact lineage if present
+
+@dataclass
+class LineageState:
+    """Artifact and stage lineage tracking state.
+
+    Stores lineage information for staleness detection,
+    tracking how artifacts were generated and what inputs
+    each stage consumed.
+    """
+
+    artifact_lineage: dict[str, Any] = field(default_factory=dict)
+    stage_lineage: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "artifact_lineage": {
+                name: lineage.to_dict() if hasattr(lineage, "to_dict") else lineage
+                for name, lineage in self.artifact_lineage.items()
+            },
+            "stage_lineage": {
+                name: lineage.to_dict() if hasattr(lineage, "to_dict") else lineage
+                for name, lineage in self.stage_lineage.items()
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "LineageState":
+        """Create from dictionary."""
         artifact_lineage: dict[str, Any] = {}
         for name, data in d.get("artifact_lineage", {}).items():
             if isinstance(data, dict):
@@ -1047,7 +1184,6 @@ class WorkflowState:
             else:
                 artifact_lineage[name] = data
 
-        # Parse stage lineage if present
         stage_lineage: dict[str, Any] = {}
         for name, data in d.get("stage_lineage", {}).items():
             if isinstance(data, dict):
@@ -1058,28 +1194,522 @@ class WorkflowState:
                 stage_lineage[name] = data
 
         return cls(
+            artifact_lineage=artifact_lineage,
+            stage_lineage=stage_lineage,
+        )
+
+
+# =============================================================================
+# Main WorkflowState class
+# =============================================================================
+
+
+class WorkflowState:
+    """Persistent workflow state for a task.
+
+    Internally composed of smaller sub-model dataclasses for better organization,
+    but exposes a flat API via property delegates for backward compatibility.
+    Serializes to/from the same flat JSON structure as before.
+    """
+
+    def __init__(
+        self,
+        # Core required fields (execution state)
+        stage: Stage,
+        attempt: int,
+        awaiting_approval: bool,
+        clarification_required: bool,
+        last_failure: str | None,
+        # Core required fields (task metadata)
+        started_at: str,
+        task_description: str,
+        task_name: str,
+        # Optional fields with defaults
+        task_type: TaskType = TaskType.FEATURE,
+        rollback_history: list[RollbackEvent] | None = None,
+        qa_rounds: list[dict[str, Any]] | None = None,
+        qa_complete: bool = False,
+        stage_plan: dict[str, dict[str, Any]] | None = None,
+        stage_start_time: str | None = None,
+        stage_durations: dict[str, int] | None = None,
+        github_issue: int | None = None,
+        github_repo: str | None = None,
+        screenshots: list[str] | None = None,
+        passed_stages: set[str] | None = None,
+        fast_track_skip: set[str] | None = None,
+        base_commit_sha: str | None = None,
+        stage_commits: list[dict[str, str]] | None = None,
+        artifact_lineage: dict[str, Any] | None = None,
+        stage_lineage: dict[str, Any] | None = None,
+    ) -> None:
+        """Initialize WorkflowState with composed sub-models."""
+        # Task metadata sub-model
+        self._task = TaskMetadata(
+            task_name=task_name,
+            task_description=task_description,
+            task_type=task_type,
+            started_at=started_at,
+        )
+
+        # Execution state sub-model
+        self._execution = ExecutionState(
+            stage=stage,
+            attempt=attempt,
+            awaiting_approval=awaiting_approval,
+            clarification_required=clarification_required,
+            last_failure=last_failure,
+        )
+
+        # GitHub context sub-model
+        self._github = GitHubContext(
+            github_issue=github_issue,
+            github_repo=github_repo,
+            screenshots=screenshots,
+        )
+
+        # Discovery state sub-model
+        self._discovery = DiscoveryState(
+            qa_rounds=qa_rounds,
+            qa_complete=qa_complete,
+        )
+
+        # Stage plan sub-model
+        self._planning = StagePlanState(
+            stage_plan=stage_plan,
+        )
+
+        # Timing state sub-model
+        self._timing = TimingState(
+            stage_start_time=stage_start_time,
+            stage_durations=stage_durations,
+        )
+
+        # Git tracking sub-model
+        self._git_tracking = GitTrackingState(
+            base_commit_sha=base_commit_sha,
+            stage_commits=stage_commits,
+        )
+
+        # Rollback state sub-model
+        self._rollback = RollbackState(
+            rollback_history=rollback_history or [],
+        )
+
+        # Fast-track state sub-model
+        self._fast_track = FastTrackState(
+            passed_stages=passed_stages or set(),
+            fast_track_skip=fast_track_skip or set(),
+        )
+
+        # Lineage state sub-model
+        self._lineage = LineageState(
+            artifact_lineage=artifact_lineage or {},
+            stage_lineage=stage_lineage or {},
+        )
+
+    # =========================================================================
+    # Property delegates for backward-compatible flat API
+    # =========================================================================
+
+    # --- TaskMetadata properties ---
+    @property
+    def task_name(self) -> str:
+        return self._task.task_name
+
+    @task_name.setter
+    def task_name(self, value: str) -> None:
+        self._task.task_name = value
+
+    @property
+    def task_description(self) -> str:
+        return self._task.task_description
+
+    @task_description.setter
+    def task_description(self, value: str) -> None:
+        self._task.task_description = value
+
+    @property
+    def task_type(self) -> TaskType:
+        return self._task.task_type
+
+    @task_type.setter
+    def task_type(self, value: TaskType) -> None:
+        self._task.task_type = value
+
+    @property
+    def started_at(self) -> str:
+        return self._task.started_at
+
+    @started_at.setter
+    def started_at(self, value: str) -> None:
+        self._task.started_at = value
+
+    # --- ExecutionState properties ---
+    @property
+    def stage(self) -> Stage:
+        return self._execution.stage
+
+    @stage.setter
+    def stage(self, value: Stage) -> None:
+        self._execution.stage = value
+
+    @property
+    def attempt(self) -> int:
+        return self._execution.attempt
+
+    @attempt.setter
+    def attempt(self, value: int) -> None:
+        self._execution.attempt = value
+
+    @property
+    def awaiting_approval(self) -> bool:
+        return self._execution.awaiting_approval
+
+    @awaiting_approval.setter
+    def awaiting_approval(self, value: bool) -> None:
+        self._execution.awaiting_approval = value
+
+    @property
+    def clarification_required(self) -> bool:
+        return self._execution.clarification_required
+
+    @clarification_required.setter
+    def clarification_required(self, value: bool) -> None:
+        self._execution.clarification_required = value
+
+    @property
+    def last_failure(self) -> str | None:
+        return self._execution.last_failure
+
+    @last_failure.setter
+    def last_failure(self, value: str | None) -> None:
+        self._execution.last_failure = value
+
+    # --- GitHubContext properties ---
+    @property
+    def github_issue(self) -> int | None:
+        return self._github.github_issue
+
+    @github_issue.setter
+    def github_issue(self, value: int | None) -> None:
+        self._github.github_issue = value
+
+    @property
+    def github_repo(self) -> str | None:
+        return self._github.github_repo
+
+    @github_repo.setter
+    def github_repo(self, value: str | None) -> None:
+        self._github.github_repo = value
+
+    @property
+    def screenshots(self) -> list[str] | None:
+        return self._github.screenshots
+
+    @screenshots.setter
+    def screenshots(self, value: list[str] | None) -> None:
+        self._github.screenshots = value
+
+    # --- DiscoveryState properties ---
+    @property
+    def qa_rounds(self) -> list[dict[str, Any]] | None:
+        return self._discovery.qa_rounds
+
+    @qa_rounds.setter
+    def qa_rounds(self, value: list[dict[str, Any]] | None) -> None:
+        self._discovery.qa_rounds = value
+
+    @property
+    def qa_complete(self) -> bool:
+        return self._discovery.qa_complete
+
+    @qa_complete.setter
+    def qa_complete(self, value: bool) -> None:
+        self._discovery.qa_complete = value
+
+    # --- StagePlanState properties ---
+    @property
+    def stage_plan(self) -> dict[str, dict[str, Any]] | None:
+        return self._planning.stage_plan
+
+    @stage_plan.setter
+    def stage_plan(self, value: dict[str, dict[str, Any]] | None) -> None:
+        self._planning.stage_plan = value
+
+    # --- TimingState properties ---
+    @property
+    def stage_start_time(self) -> str | None:
+        return self._timing.stage_start_time
+
+    @stage_start_time.setter
+    def stage_start_time(self, value: str | None) -> None:
+        self._timing.stage_start_time = value
+
+    @property
+    def stage_durations(self) -> dict[str, int] | None:
+        return self._timing.stage_durations
+
+    @stage_durations.setter
+    def stage_durations(self, value: dict[str, int] | None) -> None:
+        self._timing.stage_durations = value
+
+    # --- GitTrackingState properties ---
+    @property
+    def base_commit_sha(self) -> str | None:
+        return self._git_tracking.base_commit_sha
+
+    @base_commit_sha.setter
+    def base_commit_sha(self, value: str | None) -> None:
+        self._git_tracking.base_commit_sha = value
+
+    @property
+    def stage_commits(self) -> list[dict[str, str]] | None:
+        return self._git_tracking.stage_commits
+
+    @stage_commits.setter
+    def stage_commits(self, value: list[dict[str, str]] | None) -> None:
+        self._git_tracking.stage_commits = value
+
+    # --- RollbackState properties ---
+    @property
+    def rollback_history(self) -> list[RollbackEvent]:
+        return self._rollback.rollback_history
+
+    @rollback_history.setter
+    def rollback_history(self, value: list[RollbackEvent]) -> None:
+        self._rollback.rollback_history = value
+
+    # --- FastTrackState properties ---
+    @property
+    def passed_stages(self) -> set[str]:
+        return self._fast_track.passed_stages
+
+    @passed_stages.setter
+    def passed_stages(self, value: set[str]) -> None:
+        self._fast_track.passed_stages = value
+
+    @property
+    def fast_track_skip(self) -> set[str]:
+        return self._fast_track.fast_track_skip
+
+    @fast_track_skip.setter
+    def fast_track_skip(self, value: set[str]) -> None:
+        self._fast_track.fast_track_skip = value
+
+    # --- LineageState properties ---
+    @property
+    def artifact_lineage(self) -> dict[str, Any]:
+        return self._lineage.artifact_lineage
+
+    @artifact_lineage.setter
+    def artifact_lineage(self, value: dict[str, Any]) -> None:
+        self._lineage.artifact_lineage = value
+
+    @property
+    def stage_lineage(self) -> dict[str, Any]:
+        return self._lineage.stage_lineage
+
+    @stage_lineage.setter
+    def stage_lineage(self, value: dict[str, Any]) -> None:
+        self._lineage.stage_lineage = value
+
+    # =========================================================================
+    # Retry management methods (delegating to ExecutionState)
+    # =========================================================================
+
+    def record_failure(self, error: str, max_length: int = 4000) -> None:
+        """Record a failed attempt."""
+        self._execution.record_failure(error, max_length)
+
+    def can_retry(self, max_retries: int) -> bool:
+        """Check if another retry attempt is allowed."""
+        return self._execution.can_retry(max_retries)
+
+    def reset_attempts(self, clear_failure: bool = True) -> None:
+        """Reset attempt counter for a new stage or after user intervention."""
+        self._execution.reset_attempts(clear_failure)
+
+    # =========================================================================
+    # Stage timing methods (delegating to TimingState)
+    # =========================================================================
+
+    def start_stage_timer(self) -> None:
+        """Start timing for the current stage."""
+        self._timing.start_stage_timer()
+
+    def record_stage_duration(self) -> int | None:
+        """Record the duration of the current stage."""
+        return self._timing.record_stage_duration(self.stage)
+
+    def get_stage_duration(self, stage: Stage) -> int | None:
+        """Get the recorded duration for a stage."""
+        return self._timing.get_stage_duration(stage)
+
+    # =========================================================================
+    # Rollback management methods (delegating to RollbackState)
+    # =========================================================================
+
+    def record_rollback(self, from_stage: Stage, to_stage: Stage, reason: str) -> None:
+        """Record a rollback event in the history."""
+        self._rollback.record_rollback(from_stage, to_stage, reason)
+
+    def should_allow_rollback(self, target_stage: Stage) -> bool:
+        """Check if a rollback to the target stage is allowed."""
+        return self._rollback.should_allow_rollback(target_stage)
+
+    def get_rollback_count(self, target_stage: Stage) -> int:
+        """Get the number of recent rollbacks to a stage."""
+        return self._rollback.get_rollback_count(target_stage)
+
+    # =========================================================================
+    # Fast-track rollback methods (delegating to FastTrackState)
+    # =========================================================================
+
+    def record_passed_stage(self, stage: Stage) -> None:
+        """Record that a stage has passed in the current iteration."""
+        self._fast_track.record_passed_stage(stage)
+
+    def clear_passed_stages(self, preserve_marked: bool = False) -> None:
+        """Clear the passed stages tracking."""
+        self._fast_track.clear_passed_stages(preserve_marked)
+
+    def setup_fast_track(self) -> None:
+        """Setup fast-track skipping from passed stages."""
+        self._fast_track.setup_fast_track()
+
+    def clear_fast_track(self) -> None:
+        """Clear fast-track skipping."""
+        self._fast_track.clear_fast_track()
+
+    def should_fast_track_skip(self, stage: Stage) -> bool:
+        """Check if a stage should be skipped due to fast-track."""
+        return self._fast_track.should_fast_track_skip(stage)
+
+    # =========================================================================
+    # Serialization (flat JSON format for backward compatibility)
+    # =========================================================================
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization.
+
+        Produces a flat dictionary matching the original state.json format.
+        """
+        d: dict[str, Any] = {}
+
+        # Task metadata (flat)
+        d["task_name"] = self.task_name
+        d["task_description"] = self.task_description
+        d["task_type"] = self.task_type.value
+        d["started_at"] = self.started_at
+
+        # Execution state (flat)
+        d["stage"] = self.stage.value
+        d["attempt"] = self.attempt
+        d["awaiting_approval"] = self.awaiting_approval
+        d["clarification_required"] = self.clarification_required
+        d["last_failure"] = self.last_failure
+
+        # GitHub context (flat)
+        d["github_issue"] = self.github_issue
+        d["github_repo"] = self.github_repo
+        d["screenshots"] = self.screenshots
+
+        # Discovery state (flat)
+        d["qa_rounds"] = self.qa_rounds
+        d["qa_complete"] = self.qa_complete
+
+        # Stage plan (flat)
+        d["stage_plan"] = self.stage_plan
+
+        # Timing state (flat)
+        d["stage_start_time"] = self.stage_start_time
+        d["stage_durations"] = self.stage_durations
+
+        # Git tracking (flat)
+        d["base_commit_sha"] = self.base_commit_sha
+        d["stage_commits"] = self.stage_commits
+
+        # Rollback history
+        d["rollback_history"] = [r.to_dict() for r in self.rollback_history]
+
+        # Fast-track (convert sets to lists)
+        d["passed_stages"] = list(self.passed_stages)
+        d["fast_track_skip"] = list(self.fast_track_skip)
+
+        # Lineage (serialize objects to dicts)
+        d["artifact_lineage"] = {
+            name: lineage.to_dict() if hasattr(lineage, "to_dict") else lineage
+            for name, lineage in self.artifact_lineage.items()
+        }
+        d["stage_lineage"] = {
+            name: lineage.to_dict() if hasattr(lineage, "to_dict") else lineage
+            for name, lineage in self.stage_lineage.items()
+        }
+
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "WorkflowState":
+        """Create from dictionary.
+
+        Accepts a flat dictionary in the original state.json format.
+        """
+        # Parse rollback history
+        rollback_history = [RollbackEvent.from_dict(r) for r in d.get("rollback_history", [])]
+
+        # Parse artifact lineage
+        artifact_lineage: dict[str, Any] = {}
+        for name, data in d.get("artifact_lineage", {}).items():
+            if isinstance(data, dict):
+                from galangal.core.lineage import ArtifactLineage
+
+                artifact_lineage[name] = ArtifactLineage.from_dict(data)
+            else:
+                artifact_lineage[name] = data
+
+        # Parse stage lineage
+        stage_lineage: dict[str, Any] = {}
+        for name, data in d.get("stage_lineage", {}).items():
+            if isinstance(data, dict):
+                from galangal.core.lineage import StageLineage
+
+                stage_lineage[name] = StageLineage.from_dict(data)
+            else:
+                stage_lineage[name] = data
+
+        return cls(
+            # Execution state
             stage=Stage.from_str(d["stage"]),
             attempt=d.get("attempt", 1),
             awaiting_approval=d.get("awaiting_approval", False),
             clarification_required=d.get("clarification_required", False),
             last_failure=d.get("last_failure"),
+            # Task metadata
             started_at=d.get("started_at", datetime.now(timezone.utc).isoformat()),
             task_description=d.get("task_description", ""),
             task_name=d.get("task_name", ""),
             task_type=TaskType.from_str(d.get("task_type", "feature")),
+            # Rollback history
             rollback_history=rollback_history,
+            # Discovery state
             qa_rounds=d.get("qa_rounds"),
             qa_complete=d.get("qa_complete", False),
+            # Stage plan
             stage_plan=d.get("stage_plan"),
+            # Timing state
             stage_start_time=d.get("stage_start_time"),
             stage_durations=d.get("stage_durations"),
+            # GitHub context
             github_issue=d.get("github_issue"),
             github_repo=d.get("github_repo"),
             screenshots=d.get("screenshots"),
+            # Fast-track (convert lists to sets)
             passed_stages=set(d.get("passed_stages", [])),
             fast_track_skip=set(d.get("fast_track_skip", [])),
+            # Git tracking
             base_commit_sha=d.get("base_commit_sha"),
             stage_commits=d.get("stage_commits"),
+            # Lineage
             artifact_lineage=artifact_lineage,
             stage_lineage=stage_lineage,
         )
@@ -1094,6 +1724,7 @@ class WorkflowState:
         github_repo: str | None = None,
         screenshots: list[str] | None = None,
     ) -> "WorkflowState":
+        """Create a new WorkflowState for a fresh task."""
         return cls(
             stage=Stage.PM,
             attempt=1,

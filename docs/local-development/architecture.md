@@ -224,7 +224,11 @@ Validation logic is entirely config-driven, not hardcoded. This allows:
 - Easy customization without code changes
 - Declarative validation definitions
 
-### 4. Graceful Degradation
+### 4. Peer Review Hook
+
+Optional second-opinion mechanism: after configured stages complete, a separate AI backend reviews the output independently. The engine emits a `PEER_REVIEW_REQUIRED` event (staying UI-agnostic), and the TUI runner handles backend invocation and user interaction. Results are stored as `{STAGE}_PEER_REVIEW.md` artifacts.
+
+### 5. Graceful Degradation
 
 The system handles failures gracefully:
 - Retry with failure context in prompt

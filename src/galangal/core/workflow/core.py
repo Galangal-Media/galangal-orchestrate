@@ -304,7 +304,9 @@ def _execute_test_gate(
                 if log_handle:
                     try:
                         log_handle.write(line)
-                    except OSError:
+                    except (OSError, ValueError):
+                        # OSError: disk full, etc.
+                        # ValueError: I/O operation on closed file (during shutdown)
                         log_handle = None
 
                 output_tail.append(line)

@@ -130,7 +130,7 @@ def _run_workflow_with_tui(
     config = get_config()
 
     # Store ignore_staleness flag for use in workflow loop
-    state._ignore_staleness = ignore_staleness
+    state._ignore_staleness = ignore_staleness  # type: ignore[attr-defined]
 
     # Compute hidden stages based on task type and config
     hidden_stages = frozenset(get_hidden_stages_for_task_type(state.task_type, config.stages.skip))
@@ -300,6 +300,17 @@ async def _handle_workflow_event(
         # Advance to next stage via engine
         advance_event = engine.handle_action(action(ActionType.CONTINUE), tui_app=app)
         return await _handle_advance_event(app, engine, advance_event, config)
+
+    if event.type == EventType.PEER_REVIEW_REQUIRED:
+        result = await _handle_peer_review(app, engine, config)
+        if result == "break":
+            return "break"
+        if result == "rollback":
+            app.update_stage(state.stage.value, state.attempt)
+            return "continue"
+        # result == "continue" means peer review passed, fall through to
+        # check approval/advance
+        return await _continue_after_peer_review(app, engine, config)
 
     if event.type == EventType.APPROVAL_REQUIRED:
         should_continue = await _handle_stage_approval(
@@ -624,6 +635,141 @@ async def _handle_user_interrupts(app: WorkflowTUIApp, engine: WorkflowEngine) -
         return "continue"
 
     return "none"
+
+
+# =============================================================================
+# Peer review handling
+# =============================================================================
+
+
+async def _handle_peer_review(
+    app: WorkflowTUIApp,
+    engine: WorkflowEngine,
+    config: GalangalConfig,
+) -> str:
+    """Handle peer review for the current stage.
+
+    Invokes the reviewer backend, parses the decision, and if the reviewer
+    disagrees, shows a comparison modal for the user to decide.
+
+    Returns:
+        "continue" - peer review passed (APPROVE), proceed to approval/advance
+        "rollback" - user accepted reviewer's changes, stage will re-run
+        "break" - user quit
+    """
+    from galangal.core.artifacts import read_artifact
+
+    state = engine.state
+    stage = state.stage
+
+    app.add_activity("Starting peer review...", "🔍")
+    app.set_status("peer_review", f"reviewing {stage.value}")
+
+    # Run peer review in thread executor
+    try:
+        decision, review_notes = await asyncio.to_thread(
+            engine.execute_peer_review, app
+        )
+    except Exception as e:
+        app.add_activity(f"Peer review failed: {e}, continuing normally", "⚠")
+        return "continue"
+
+    if decision == "APPROVE":
+        app.add_activity("Peer review: APPROVED", "✅")
+        app.show_message("Peer review passed", "success")
+        return "continue"
+
+    # Reviewer disagrees - show comparison
+    app.add_activity("Peer review: REQUEST_CHANGES", "⚠")
+
+    # Get the primary artifact for comparison
+    stage_artifacts = {"PM": "SPEC.md", "DESIGN": "DESIGN.md"}
+    primary_artifact_name = stage_artifacts.get(stage.value, f"{stage.value}_OUTPUT.md")
+    primary_content = read_artifact(primary_artifact_name, state.task_name) or "(no artifact)"
+
+    # Build comparison message
+    primary_preview = primary_content[:500]
+    if len(primary_content) > 500:
+        primary_preview += "..."
+
+    review_preview = review_notes[:500]
+    if len(review_notes) > 500:
+        review_preview += "..."
+
+    comparison_msg = (
+        f"Peer reviewer DISAGREES with {stage.value} output.\n\n"
+        f"--- Primary Output ({primary_artifact_name}) ---\n"
+        f"{primary_preview}\n\n"
+        f"--- Reviewer Notes ---\n"
+        f"{review_preview}\n\n"
+        "How would you like to proceed?"
+    )
+
+    while True:
+        choice = await app.prompt_async(PromptType.PEER_REVIEW_DECISION, comparison_msg)
+
+        if choice == "view":
+            # Show full review in activity log
+            app.add_activity("--- Full Peer Review ---", "📄")
+            for line in review_notes.split("\n")[:50]:
+                app.add_activity(line, "")
+            app.add_activity("--- End Review ---", "📄")
+            continue
+
+        if choice == "accept_primary":
+            app.add_activity("User accepted primary output, continuing", "✅")
+            app.show_message("Primary output accepted", "success")
+            return "continue"
+
+        if choice == "accept_reviewer":
+            app.add_activity("User accepted reviewer feedback, rolling back", "🔄")
+            app.show_message(f"Rolling back {stage.value} with reviewer feedback", "warning")
+            # Set up rollback
+            state.last_failure = f"Peer review feedback: {review_notes[:1500]}"
+            state.reset_attempts(clear_failure=False)
+            save_state(state)
+            return "rollback"
+
+        # quit
+        app._workflow_result = "paused"
+        return "break"
+
+
+async def _continue_after_peer_review(
+    app: WorkflowTUIApp,
+    engine: WorkflowEngine,
+    config: GalangalConfig,
+) -> str:
+    """Continue the workflow after peer review passed.
+
+    Checks if approval is still needed, then advances.
+    Reuses existing approval and advance logic.
+    """
+    from galangal.core.artifacts import artifact_exists
+
+    state = engine.state
+    stage = state.stage
+    metadata = stage.metadata
+
+    # Check if approval is needed
+    if metadata.requires_approval and metadata.approval_artifact:
+        if not artifact_exists(metadata.approval_artifact, state.task_name):
+            should_continue = await _handle_stage_approval(
+                app, state, config, metadata.approval_artifact
+            )
+            if not should_continue:
+                if app._workflow_result == "paused":
+                    return "break"
+                return "continue"  # Rejected - loop back
+
+    # Record duration and advance
+    duration = state.record_stage_duration()
+    app.show_stage_complete(state.stage.value, True, duration)
+    if state.stage_durations:
+        app.update_stage_durations(state.stage_durations)
+
+    advance_event = engine.handle_action(action(ActionType.CONTINUE), tui_app=app)
+    return await _handle_advance_event(app, engine, advance_event, config)
 
 
 # =============================================================================
@@ -1238,7 +1384,7 @@ async def _handle_stage_approval(
 
         if is_remote:
             # Remote approval - use "Hub" as approver
-            name = "Hub"
+            name: str | None = "Hub"
         else:
             # Local approval - prompt for name
             name = await app.text_input_async("Enter approver name:", default_approver)
@@ -1282,9 +1428,9 @@ async def _handle_stage_approval(
         # Check for remote text input
         remote_data = app._pending_remote_action
         app._pending_remote_action = None
-        is_remote = remote_data and remote_data.get("remote")
+        is_remote = remote_data is not None and remote_data.get("remote")
 
-        if is_remote and remote_data.get("text_input"):
+        if is_remote and remote_data is not None and remote_data.get("text_input"):
             # Use remote rejection reason
             reason = remote_data["text_input"]
         elif is_remote:

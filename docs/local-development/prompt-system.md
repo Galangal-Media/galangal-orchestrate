@@ -33,6 +33,16 @@ src/galangal/prompts/defaults/
 └── docs.md            # Documentation stage prompt
 ```
 
+Peer review prompts (used when `peer_review` is enabled):
+
+```
+├── peer_review.md                 # Generic peer review fallback
+├── pm_peer_review.md              # PM stage peer review
+├── pm_peer_review_codex.md        # PM peer review (Codex JSON format)
+├── design_peer_review.md          # Design stage peer review
+└── design_peer_review_codex.md    # Design peer review (Codex JSON format)
+```
+
 These prompts are generic and designed to work across different projects.
 
 ## Project Overrides

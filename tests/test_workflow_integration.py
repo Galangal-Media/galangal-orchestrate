@@ -606,3 +606,83 @@ class TestStatePersistence:
         assert state.awaiting_approval is False  # default
         assert state.task_type == TaskType.FEATURE  # default
         assert state.rollback_history == []  # default
+
+    def test_state_with_all_sub_model_fields(self, sample_task: Path):
+        """Test serialization round-trip with all sub-model fields populated."""
+        state = WorkflowState(
+            # ExecutionState fields
+            stage=Stage.QA,
+            attempt=2,
+            awaiting_approval=True,
+            clarification_required=True,
+            last_failure="Test failure",
+            # TaskMetadata fields
+            started_at="2024-01-01T12:00:00Z",
+            task_description="Full test",
+            task_name="test-task",
+            task_type=TaskType.REFACTOR,
+            # GitHubContext fields
+            github_issue=42,
+            github_repo="owner/repo",
+            screenshots=["/path/to/img1.png", "/path/to/img2.png"],
+            # DiscoveryState fields
+            qa_rounds=[{"questions": ["Q1"], "answers": ["A1"]}],
+            qa_complete=True,
+            # StagePlanState fields
+            stage_plan={"DESIGN": {"action": "skip", "reason": "Not needed"}},
+            # TimingState fields
+            stage_start_time="2024-01-01T12:30:00Z",
+            stage_durations={"PM": 300, "DESIGN": 600},
+            # GitTrackingState fields
+            base_commit_sha="abc123",
+            stage_commits=[{"stage": "DEV", "sha": "def456"}],
+            # FastTrackState fields
+            passed_stages={"TEST", "QA"},
+            fast_track_skip={"TEST"},
+        )
+
+        # Add rollback history
+        state.record_rollback(Stage.QA, Stage.DEV, "QA failed")
+
+        # Serialize to dict
+        d = state.to_dict()
+
+        # Verify flat structure (not nested under sub-model keys)
+        assert "stage" in d
+        assert "github_issue" in d
+        assert "qa_rounds" in d
+        assert "stage_plan" in d
+        assert "stage_start_time" in d
+        assert "base_commit_sha" in d
+        assert "passed_stages" in d
+
+        # Verify values
+        assert d["stage"] == "QA"
+        assert d["github_issue"] == 42
+        assert d["qa_complete"] is True
+        assert d["passed_stages"] == ["QA", "TEST"] or d["passed_stages"] == ["TEST", "QA"]
+        assert d["stage_durations"]["PM"] == 300
+
+        # Round-trip
+        loaded = WorkflowState.from_dict(d)
+
+        # Verify all fields via property delegates
+        assert loaded.stage == Stage.QA
+        assert loaded.attempt == 2
+        assert loaded.task_type == TaskType.REFACTOR
+        assert loaded.github_issue == 42
+        assert loaded.github_repo == "owner/repo"
+        assert loaded.screenshots == ["/path/to/img1.png", "/path/to/img2.png"]
+        assert loaded.qa_complete is True
+        assert loaded.stage_plan == {"DESIGN": {"action": "skip", "reason": "Not needed"}}
+        assert loaded.stage_durations == {"PM": 300, "DESIGN": 600}
+        assert loaded.base_commit_sha == "abc123"
+        assert loaded.passed_stages == {"TEST", "QA"}
+        assert loaded.fast_track_skip == {"TEST"}
+        assert len(loaded.rollback_history) == 1
+
+        # Verify methods still work after round-trip
+        assert loaded.can_retry(3) is True
+        assert loaded.should_allow_rollback(Stage.DEV) is True
+        assert loaded.should_fast_track_skip(Stage.TEST) is True
+        assert loaded.get_stage_duration(Stage.PM) == 300

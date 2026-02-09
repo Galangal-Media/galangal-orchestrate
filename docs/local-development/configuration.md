@@ -50,6 +50,12 @@ ai:
       args: []
       max_turns: 200
 
+# Peer review hook
+peer_review:
+  enabled: false
+  backend: "codex"
+  stages: ["PM", "DESIGN"]
+
 # Documentation paths
 docs:
   changelog_dir: "docs/changelog"
@@ -188,6 +194,25 @@ ai:
 | `backends.<name>.command` | string | - | CLI command |
 | `backends.<name>.args` | list | `[]` | Additional arguments |
 | `backends.<name>.max_turns` | int | `200` | Max AI turns |
+
+### peer_review
+
+Optional peer review hook that runs a second AI backend after configured stages:
+
+```yaml
+peer_review:
+  enabled: true
+  backend: "codex"
+  stages: ["PM", "DESIGN"]
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable peer review after configured stages |
+| `backend` | string | `"codex"` | Which AI backend performs the review |
+| `stages` | list | `["PM", "DESIGN"]` | Which stages get peer reviewed |
+
+When enabled, after a configured stage completes successfully, a second AI backend independently reviews the output. If the reviewer disagrees, both opinions are shown to the user who makes the final call. If the reviewer backend is unavailable or fails, the workflow continues normally (graceful degradation).
 
 ### docs
 

@@ -287,6 +287,39 @@ Timeout behavior:
 - Stage marked as failed
 - Retry initiated (if within max_retries)
 
+## Peer Review Hook
+
+When enabled via `peer_review` config, a second AI backend independently reviews stage output after configured stages (e.g., PM, DESIGN).
+
+### Flow
+
+```
+Stage completes successfully → peer review enabled for this stage? →
+  Invoke reviewer backend → write {STAGE}_PEER_REVIEW.md →
+  APPROVE: continue to normal approval/advance flow
+  REQUEST_CHANGES: show comparison modal to user →
+    User picks: Accept Primary | Accept Reviewer (rollback) | Quit
+```
+
+### Configuration
+
+```yaml
+peer_review:
+  enabled: true
+  backend: "codex"          # Which backend performs the review
+  stages: ["PM", "DESIGN"]  # Which stages get reviewed
+```
+
+### Graceful Degradation
+
+- If the reviewer backend is unavailable, the workflow continues normally
+- If the reviewer invocation fails, the workflow continues normally
+- Peer review is advisory, never blocking
+
+### Idempotency
+
+The artifact `{STAGE}_PEER_REVIEW.md` is checked before running. If it already exists (e.g., from a previous attempt), peer review is skipped.
+
 ## Approval Gates
 
 Certain stages require explicit approval:

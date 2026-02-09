@@ -338,6 +338,33 @@ subparsers.add_parser(
 )
 ```
 
+## Customizing Peer Review
+
+When peer review is enabled, you can customize the review prompts per stage and per backend.
+
+### Custom Peer Review Prompts
+
+Create override files in `.galangal/prompts/`:
+
+```
+.galangal/prompts/
+├── pm_peer_review.md              # Custom PM review criteria
+├── pm_peer_review_codex.md        # Custom PM review for Codex backend
+├── design_peer_review.md          # Custom DESIGN review criteria
+└── design_peer_review_codex.md    # Custom DESIGN review for Codex
+```
+
+The lookup order is: `{stage}_peer_review_{backend}.md` → `{stage}_peer_review.md` → `peer_review.md`.
+
+### Peer Review Configuration
+
+```yaml
+peer_review:
+  enabled: true
+  backend: "codex"          # Any configured AI backend
+  stages: ["PM", "DESIGN"]  # Which stages get reviewed
+```
+
 ## Project-Specific Scripts
 
 ### Validation Scripts

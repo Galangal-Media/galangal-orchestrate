@@ -90,7 +90,6 @@ See [Hub Documentation](docs/hub/README.md) for full setup instructions.
 | **Configuration** | [docs/local-development/configuration.md](docs/local-development/configuration.md) |
 | **Workflow Stages** | [docs/local-development/workflow-pipeline.md](docs/local-development/workflow-pipeline.md) |
 | **Hub (Remote Control)** | [docs/hub/README.md](docs/hub/README.md) |
-| **GitHub Integration** | [docs/github-integration.md](docs/github-integration.md) |
 | **Troubleshooting** | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | **Architecture** | [docs/local-development/architecture.md](docs/local-development/architecture.md) |
 
@@ -98,12 +97,12 @@ See [Hub Documentation](docs/hub/README.md) for full setup instructions.
 
 | Type | Stages | Use Case |
 |------|--------|----------|
-| **Feature** | Full workflow | New functionality |
-| **Bug Fix** | PM → DEV → TEST → QA → REVIEW | Fixing bugs |
-| **Refactor** | PM → DESIGN → DEV → TEST → REVIEW | Code restructuring |
-| **Chore** | PM → DEV → TEST → REVIEW | Config, dependencies |
-| **Docs** | PM → DOCS | Documentation only |
-| **Hotfix** | PM → DEV → TEST | Critical fixes |
+| **Feature** | All stages | New functionality |
+| **Bug Fix** | PM → PREFLIGHT → DEV → TEST → TEST_GATE → QA → REVIEW → SUMMARY | Fixing bugs |
+| **Refactor** | PM → DESIGN → PREFLIGHT → DEV → TEST → TEST_GATE → REVIEW → SUMMARY | Code restructuring |
+| **Chore** | PM → PREFLIGHT → DEV → TEST → TEST_GATE → REVIEW → SUMMARY | Config, dependencies |
+| **Docs** | PM → DOCS → SUMMARY | Documentation only |
+| **Hotfix** | PM → DEV → TEST → TEST_GATE → SUMMARY | Critical fixes |
 
 ## License
 

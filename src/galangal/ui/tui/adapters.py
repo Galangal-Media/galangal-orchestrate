@@ -39,6 +39,7 @@ class PromptType(Enum):
     TEXT_INPUT_PROMPT = "text_input_prompt"  # Single line text input
     MULTILINE_INPUT = "multiline_input"  # Multi-line text input
     DISCOVERY_QA = "discovery_qa"  # Discovery Q&A session
+    PEER_REVIEW_DECISION = "peer_review_decision"  # Peer review comparison
 
 
 # Default options for prompts without specific configuration
@@ -104,6 +105,12 @@ PROMPT_OPTIONS: dict[PromptType, list[PromptOption]] = {
     PromptType.TASK_SOURCE: [
         PromptOption("1", "Create manually", "manual", "#b8bb26"),
         PromptOption("2", "From GitHub issue", "github", "#83a598"),
+    ],
+    PromptType.PEER_REVIEW_DECISION: [
+        PromptOption("1", "Accept Primary Output", "accept_primary", "#b8bb26"),
+        PromptOption("2", "Accept Reviewer (rollback)", "accept_reviewer", "#fb4934"),
+        PromptOption("3", "View Full Review", "view", "#83a598"),
+        PromptOption("4", "Quit", "quit", "#fabd2f"),
     ],
 }
 

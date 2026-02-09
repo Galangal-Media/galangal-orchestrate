@@ -351,6 +351,24 @@ class StageDependencyConfig(BaseModel):
     )
 
 
+class PeerReviewConfig(BaseModel):
+    """Configuration for peer review hook.
+
+    When enabled, runs a second AI backend after configured stages to get
+    an independent assessment. If the reviewer disagrees, both opinions
+    are shown to the user who makes the final call.
+
+    Off by default. Does not add new stages to the pipeline.
+    """
+
+    enabled: bool = Field(default=False, description="Enable peer review after configured stages")
+    backend: str = Field(default="codex", description="Which backend performs the review")
+    stages: list[str] = Field(
+        default_factory=lambda: ["PM", "DESIGN"],
+        description="Which stages get peer reviewed (e.g., ['PM', 'DESIGN'])",
+    )
+
+
 class LineageConfig(BaseModel):
     """Configuration for artifact lineage tracking.
 
@@ -457,6 +475,10 @@ class GalangalConfig(BaseModel):
     artifact_context: ArtifactContextConfig | None = Field(
         default=None,
         description="Per-stage artifact context filtering. If not set, uses default stage logic.",
+    )
+    peer_review: PeerReviewConfig = Field(
+        default_factory=PeerReviewConfig,
+        description="Peer review hook - second AI reviews configured stages",
     )
     lineage: LineageConfig = Field(
         default_factory=LineageConfig,
