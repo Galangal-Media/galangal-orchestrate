@@ -670,7 +670,7 @@ async def _handle_peer_review(
         "rollback" - reviewer's changes accepted, stage will re-run
         "break" - user quit
     """
-    from galangal.core.artifacts import delete_artifact, read_artifact
+    from galangal.core.artifacts import archive_artifact, read_artifact
 
     state = engine.state
     stage = state.stage
@@ -714,9 +714,10 @@ async def _handle_peer_review(
         app.show_message(
             f"Rolling back {stage.value} with reviewer feedback", "warning"
         )
-        # Delete peer review artifact so review re-triggers after re-run
+        # Archive peer review artifact so review re-triggers after re-run
+        # but full feedback is preserved for the retry prompt
         artifact_name = f"{stage.value}_PEER_REVIEW.md"
-        delete_artifact(artifact_name, state.task_name)
+        archive_artifact(artifact_name, f"{stage.value}_PEER_REVIEW_PREV.md", state.task_name)
         # Set up rollback
         state.last_failure = f"Peer review feedback: {review_notes[:1500]}"
         state.reset_attempts(clear_failure=False)
@@ -780,9 +781,10 @@ async def _handle_peer_review(
         if choice == "accept_reviewer":
             app.add_activity("User accepted reviewer feedback, rolling back", "🔄")
             app.show_message(f"Rolling back {stage.value} with reviewer feedback", "warning")
-            # Delete peer review artifact so review re-triggers after re-run
+            # Archive peer review artifact so review re-triggers after re-run
+            # but full feedback is preserved for the retry prompt
             artifact_name = f"{stage.value}_PEER_REVIEW.md"
-            delete_artifact(artifact_name, state.task_name)
+            archive_artifact(artifact_name, f"{stage.value}_PEER_REVIEW_PREV.md", state.task_name)
             # Set up rollback
             state.last_failure = f"Peer review feedback: {review_notes[:1500]}"
             state.reset_attempts(clear_failure=False)

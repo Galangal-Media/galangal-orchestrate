@@ -56,6 +56,42 @@ def delete_artifact(name: str, task_name: str | None = None) -> bool:
     return False
 
 
+def archive_artifact(name: str, archive_name: str, task_name: str | None = None) -> bool:
+    """Archive an artifact by appending its content to an archive file, then deleting it.
+
+    Used during peer review rollback to preserve full reviewer feedback while
+    allowing the peer review to re-trigger. Supports multi-loop history by
+    appending with a separator when the archive already exists.
+
+    Args:
+        name: Current artifact filename to archive (e.g., "PM_PEER_REVIEW.md").
+        archive_name: Archive filename to append to (e.g., "PM_PEER_REVIEW_PREV.md").
+        task_name: Task name, or None to use active task.
+
+    Returns:
+        True if the artifact was archived, False if it didn't exist.
+    """
+    try:
+        path = artifact_path(name, task_name)
+        if not path.exists():
+            return False
+
+        content = path.read_text()
+        archive_path = artifact_path(archive_name, task_name)
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if archive_path.exists():
+            existing = archive_path.read_text()
+            archive_path.write_text(f"{existing}\n\n---\n\n{content}")
+        else:
+            archive_path.write_text(content)
+
+        path.unlink()
+        return True
+    except TaskError:
+        return False
+
+
 def write_artifact(
     name: str,
     content: str,

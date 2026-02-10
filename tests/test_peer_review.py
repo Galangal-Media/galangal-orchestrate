@@ -407,7 +407,7 @@ class TestPeerReviewAutoAccept:
         with (
             patch("galangal.core.workflow.tui_runner.asyncio.to_thread", mock_to_thread),
             patch("galangal.core.workflow.tui_runner.save_state"),
-            patch("galangal.core.artifacts.delete_artifact") as mock_delete,
+            patch("galangal.core.artifacts.archive_artifact") as mock_archive,
         ):
             result = await _handle_peer_review(app, engine, config, peer_review_loops)
 
@@ -415,7 +415,9 @@ class TestPeerReviewAutoAccept:
         assert peer_review_loops["PM"] == 1
         assert state.last_failure is not None
         assert "Peer review feedback" in state.last_failure
-        mock_delete.assert_called_once_with("PM_PEER_REVIEW.md", state.task_name)
+        mock_archive.assert_called_once_with(
+            "PM_PEER_REVIEW.md", "PM_PEER_REVIEW_PREV.md", state.task_name
+        )
 
     @pytest.mark.asyncio
     async def test_auto_accept_increments_loop_counter(self):
@@ -434,7 +436,7 @@ class TestPeerReviewAutoAccept:
         with (
             patch("galangal.core.workflow.tui_runner.asyncio.to_thread", mock_to_thread),
             patch("galangal.core.workflow.tui_runner.save_state"),
-            patch("galangal.core.artifacts.delete_artifact"),
+            patch("galangal.core.artifacts.archive_artifact"),
         ):
             result = await _handle_peer_review(app, engine, config, peer_review_loops)
 
@@ -512,3 +514,52 @@ class TestPeerReviewAutoAccept:
 
         assert result == "continue"
         assert "PM" not in peer_review_loops
+
+
+# =============================================================================
+# Archive artifact
+# =============================================================================
+
+
+class TestArchiveArtifact:
+    """Tests for archive_artifact used during peer review rollback."""
+
+    def test_archive_creates_new_file(self, tmp_path):
+        """First archive creates the archive file with original content."""
+        from galangal.core.artifacts import archive_artifact
+
+        # Create the source artifact
+        (tmp_path / "PM_PEER_REVIEW.md").write_text("# Review\nNeeds work")
+
+        with patch("galangal.core.artifacts.artifact_path", side_effect=lambda name, tn=None: tmp_path / name):
+            result = archive_artifact("PM_PEER_REVIEW.md", "PM_PEER_REVIEW_PREV.md")
+
+        assert result is True
+        assert not (tmp_path / "PM_PEER_REVIEW.md").exists()
+        assert (tmp_path / "PM_PEER_REVIEW_PREV.md").read_text() == "# Review\nNeeds work"
+
+    def test_archive_appends_with_separator(self, tmp_path):
+        """Subsequent archives append with --- separator for multi-loop history."""
+        from galangal.core.artifacts import archive_artifact
+
+        # Create existing archive and new artifact
+        (tmp_path / "PM_PEER_REVIEW_PREV.md").write_text("# Round 1\nFirst feedback")
+        (tmp_path / "PM_PEER_REVIEW.md").write_text("# Round 2\nSecond feedback")
+
+        with patch("galangal.core.artifacts.artifact_path", side_effect=lambda name, tn=None: tmp_path / name):
+            result = archive_artifact("PM_PEER_REVIEW.md", "PM_PEER_REVIEW_PREV.md")
+
+        assert result is True
+        content = (tmp_path / "PM_PEER_REVIEW_PREV.md").read_text()
+        assert "# Round 1\nFirst feedback" in content
+        assert "\n\n---\n\n" in content
+        assert "# Round 2\nSecond feedback" in content
+
+    def test_archive_nonexistent_returns_false(self, tmp_path):
+        """Returns False when source artifact doesn't exist."""
+        from galangal.core.artifacts import archive_artifact
+
+        with patch("galangal.core.artifacts.artifact_path", side_effect=lambda name, tn=None: tmp_path / name):
+            result = archive_artifact("PM_PEER_REVIEW.md", "PM_PEER_REVIEW_PREV.md")
+
+        assert result is False

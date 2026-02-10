@@ -424,6 +424,13 @@ Only update documentation types marked as YES above.""")
         """
         parts = []
 
+        # Include previous peer review feedback if it exists (applies to any stage)
+        prev_review_name = f"{stage.value}_PEER_REVIEW_PREV.md"
+        if artifact_exists(prev_review_name, task_name):
+            content = read_artifact(prev_review_name, task_name)
+            if content:
+                parts.append(f"\n# Previous Peer Review Feedback (address ALL issues)\n{content}")
+
         # PM stage: only needs discovery Q&A to incorporate into SPEC
         if stage == Stage.PM:
             if artifact_exists("DISCOVERY_LOG.md", task_name):
