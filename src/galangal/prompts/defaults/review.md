@@ -19,6 +19,7 @@ Your focus is on **code quality**, not functional correctness.
 - **Scope** - What this task is meant to accomplish
 - **Non-Goals** - What is explicitly OUT OF SCOPE
 - **Acceptance Criteria** - What success looks like
+- **Check for documented spec deviations** in DESIGN.md and DEVELOPMENT.md. If a deviation from SPEC.md is well-reasoned and documented, don't flag it as an issue. If a deviation is undocumented or poorly justified, flag it.
 
 ### 2. Read DEVELOPMENT.md to understand:
 - **Implementation decisions** - Why certain approaches were chosen

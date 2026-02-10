@@ -31,6 +31,9 @@ Create DESIGN.md in the task's artifacts directory with these sections:
 ## Migration Plan
 [How to deploy this without breaking existing functionality]
 [Rollback strategy if needed]
+
+## Spec Deviations
+[If any SPEC.md requirements were adjusted based on deep technical analysis, document each deviation and its rationale here. If none, write "None — spec followed as written."]
 ```
 
 ## Process
@@ -44,7 +47,8 @@ Create DESIGN.md in the task's artifacts directory with these sections:
    - Scalability
    - Maintainability
    - Backward compatibility
-4. Write DESIGN.md
+4. If deep analysis reveals that a SPEC.md requirement is technically impractical, incorrect, or suboptimal, document the deviation and your reasoning in the "Spec Deviations" section of DESIGN.md rather than silently following a bad spec
+5. Write DESIGN.md
 
 ## Important Rules
 

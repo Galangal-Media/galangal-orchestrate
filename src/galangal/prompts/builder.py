@@ -441,7 +441,16 @@ Only update documentation types marked as YES above.""")
 
         # All stages after PM need SPEC (core requirements)
         if artifact_exists("SPEC.md", task_name):
-            parts.append(f"\n# SPEC.md\n{read_artifact('SPEC.md', task_name)}")
+            content = read_artifact("SPEC.md", task_name)
+            parts.append(
+                f"\n# SPEC.md (Initial Specification — may be refined by later stages)\n"
+                f"**Note:** This spec was written early in the process before deep codebase "
+                f"analysis. If you discover that a requirement is technically impractical, "
+                f"incorrect, or should be adjusted based on what you learn, you may deviate "
+                f"— but you MUST document the deviation and your reasoning in your stage "
+                f"artifact (e.g., DESIGN.md, DEVELOPMENT.md, QA_REPORT.md).\n\n"
+                f"{content}"
+            )
 
         # Stages after DESIGN: include DESIGN.md if it exists, otherwise fall back to PLAN.md
         # (DESIGN.md supersedes PLAN.md, but some task types skip DESIGN)

@@ -54,6 +54,8 @@ Create QA_REPORT.md in the task's artifacts directory:
 2. Run linting and type checking
 3. Perform exploratory testing on the new feature
 4. Verify each acceptance criterion from SPEC.md
+   - If the implementation deviates from a spec requirement and the deviation is documented with sound reasoning (in DESIGN.md or DEVELOPMENT.md), treat it as an acceptable deviation — note it in QA_REPORT.md but do not flag it as a failure
+   - If a deviation is undocumented or poorly justified, flag it as an issue
 5. Document all results in QA_REPORT.md
 
 ## Important Rules

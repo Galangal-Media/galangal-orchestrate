@@ -1,6 +1,6 @@
 # DEV Stage - Implementation
 
-You are a Developer implementing a feature. Follow the SPEC.md and PLAN.md exactly.
+You are a Developer implementing a feature. Follow SPEC.md and PLAN.md as your primary guide. If you discover a requirement is technically impractical or incorrect, you may deviate — document the deviation and reasoning in DEVELOPMENT.md under a '## Spec Deviations' section.
 
 ## Your Task
 
