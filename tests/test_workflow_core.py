@@ -96,6 +96,32 @@ class TestHandleRollback:
         handled = handle_rollback(state, result)
         assert handled is False
 
+    def test_full_rollback_skips_preserved_stages(self):
+        """Test that full rollback skips stages with preserve_on_rollback=True."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            task_dir = Path(tmpdir) / "galangal-tasks" / "test-task"
+            task_dir.mkdir(parents=True)
+
+            state = make_state(task_name="test-task", stage=Stage.QA, attempt=1)
+            # TEST was already passed before QA triggered rollback
+            state.record_passed_stage(Stage.TEST)
+
+            result = StageResult.rollback_required(
+                message="QA found issues in implementation",
+                rollback_to=Stage.DEV,
+                output="Needs code fix, not new tests",
+            )
+
+            with patch("galangal.core.state.get_task_dir", return_value=task_dir):
+                with patch("galangal.core.artifacts.get_task_dir", return_value=task_dir):
+                    with patch("galangal.core.workflow.core.save_state"):
+                        handled = handle_rollback(state, result)
+
+            assert handled is True
+            assert state.stage == Stage.DEV
+            # TEST should be in fast_track_skip since it has preserve_on_rollback=True
+            assert "TEST" in state.fast_track_skip
+
     def test_appends_to_existing_rollback_log(self):
         """Test that rollback appends to existing ROLLBACK.md."""
         with tempfile.TemporaryDirectory() as tmpdir:

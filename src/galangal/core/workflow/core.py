@@ -886,7 +886,10 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
         # Full rollback: re-run all stages (but preserve stages marked preserve_on_rollback)
         state.clear_fast_track()
         state.clear_passed_stages(preserve_marked=True)
-        fast_track_skip_list = []
+        # Skip preserved stages (e.g., TEST doesn't need re-running if tests already written)
+        if state.passed_stages:
+            state.fast_track_skip = state.passed_stages.copy()
+        fast_track_skip_list = sorted(state.fast_track_skip)
 
     # Log rollback event with fast-track info
     from galangal.logging import workflow_logger
