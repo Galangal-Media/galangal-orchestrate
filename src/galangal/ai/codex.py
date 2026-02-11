@@ -1,14 +1,19 @@
 """
-Codex CLI backend implementation for read-only code review.
+Codex CLI backend implementation.
 
-Uses OpenAI's Codex in non-interactive mode with structured JSON output.
-See: https://developers.openai.com/codex/noninteractive
+Supports two modes:
+- Editable mode (default): Codex can modify files directly, similar to Claude.
+- Read-only mode (opt-in): Codex returns structured JSON for post-processing.
+
+Read-only mode is primarily useful for independent review stages where
+artifact writing is handled outside the backend.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import time
 from typing import TYPE_CHECKING, Any
@@ -101,17 +106,20 @@ def _build_output_schema(stage: str | None) -> dict[str, Any]:
 
 class CodexBackend(AIBackend):
     """
-    Codex CLI backend for read-only code review.
+    Codex CLI backend.
 
-    Key characteristics:
-    - Runs in read-only sandbox by default (cannot write files)
-    - Uses --output-schema for structured JSON output
-    - Artifacts must be written by post-processing the output
+    Default behavior is editable execution, so Codex can modify files and
+    produce stage artifacts directly. If configured with ``read_only: true``,
+    this backend switches to structured JSON output for post-processing.
     """
 
     # Default command and args when no config provided
     DEFAULT_COMMAND = "codex"
     DEFAULT_ARGS = [
+        "exec",
+        "--full-auto",
+    ]
+    DEFAULT_READ_ONLY_ARGS = [
         "exec",
         "--full-auto",
         "--output-schema",
@@ -124,112 +132,108 @@ class CodexBackend(AIBackend):
     def name(self) -> str:
         return "codex"
 
-    def _build_command(
-        self,
-        prompt_file: str,
-        schema_file: str,
-        output_file: str,
-    ) -> str:
-        """
-        Build the shell command to invoke Codex.
+    def _build_command(self, prompt_file: str, args: list[str]) -> str:
+        """Build the shell command to invoke Codex."""
+        command = self._config.command if self._config else self.DEFAULT_COMMAND
+        args_str = " ".join(shlex.quote(a) for a in args)
+        return f"cat {shlex.quote(prompt_file)} | {shlex.quote(command)} {args_str}"
 
-        Uses config.command and config.args if available, otherwise falls back
-        to hard-coded defaults for backwards compatibility.
-
-        Args:
-            prompt_file: Path to temp file containing the prompt
-            schema_file: Path to JSON schema file
-            output_file: Path for structured output
-
-        Returns:
-            Shell command string ready for subprocess
-        """
-        if self._config:
-            command = self._config.command
-            args = self._substitute_placeholders(
-                self._config.args,
-                schema_file=schema_file,
-                output_file=output_file,
-            )
+    def _read_only_args(self, schema_file: str, output_file: str, max_turns: int) -> list[str]:
+        """Get read-only args with required placeholders applied."""
+        if self._config and self._config.args:
+            args = list(self._config.args)
         else:
-            # Backwards compatibility: use defaults
-            command = self.DEFAULT_COMMAND
-            args = self._substitute_placeholders(
-                self.DEFAULT_ARGS,
-                schema_file=schema_file,
-                output_file=output_file,
-            )
+            args = list(self.DEFAULT_READ_ONLY_ARGS)
 
-        args_str = " ".join(f"'{a}'" if " " in a else a for a in args)
-        return f"cat '{prompt_file}' | {command} {args_str}"
+        if not any("{schema_file}" in arg for arg in args):
+            args.extend(["--output-schema", "{schema_file}"])
+        if not any("{output_file}" in arg for arg in args):
+            args.extend(["-o", "{output_file}"])
 
-    def invoke(
+        return self._substitute_placeholders(
+            args,
+            schema_file=schema_file,
+            output_file=output_file,
+            max_turns=max_turns,
+        )
+
+    def _editable_args(self, max_turns: int) -> list[str]:
+        """Get editable args for normal stage execution."""
+        if self._config and self._config.args:
+            args = list(self._config.args)
+        else:
+            args = list(self.DEFAULT_ARGS)
+
+        return self._substitute_placeholders(args, max_turns=max_turns)
+
+    def _run_subprocess(
+        self,
+        shell_cmd: str,
+        timeout: int,
+        pause_check: PauseCheck | None,
+        ui: StageUI | None,
+        on_output,
+        on_idle,
+        log_file: str | None,
+    ):
+        """Run the codex command via shared subprocess runner."""
+        runner = SubprocessRunner(
+            command=shell_cmd,
+            timeout=timeout,
+            pause_check=pause_check,
+            ui=ui,
+            on_output=on_output,
+            on_idle=on_idle,
+            idle_interval=5.0,
+            poll_interval_active=0.05,
+            poll_interval_idle=0.5,
+            output_file=log_file,
+        )
+        return runner.run()
+
+    def _invoke_read_only(
         self,
         prompt: str,
-        timeout: int = 14400,
-        max_turns: int = 200,
-        ui: StageUI | None = None,
-        pause_check: PauseCheck | None = None,
-        stage: str | None = None,
-        log_file: str | None = None,
+        timeout: int,
+        max_turns: int,
+        ui: StageUI | None,
+        pause_check: PauseCheck | None,
+        stage: str | None,
+        log_file: str | None,
     ) -> StageResult:
-        """
-        Invoke Codex in non-interactive read-only mode.
-
-        Uses --output-schema to enforce structured JSON output with:
-        - Stage-specific notes field (qa_report, security_checklist, review_notes)
-        - decision: Stage-appropriate values (PASS/FAIL, APPROVED/REJECTED, etc.)
-        - issues: Array of specific problems found
-
-        Args:
-            prompt: The full prompt to send
-            timeout: Maximum time in seconds
-            max_turns: Maximum conversation turns (unused for Codex)
-            ui: Optional TUI for progress display
-            pause_check: Optional callback for pause detection
-            stage: Stage name for schema customization (e.g., "QA", "SECURITY")
-            log_file: Optional path to log file for streaming raw output
-
-        Returns:
-            StageResult with structured JSON in the output field
-        """
-        # Track timing for activity updates
+        """Invoke Codex in read-only structured-output mode."""
         start_time = time.time()
         last_activity_time = start_time
 
         def on_output(line: str) -> None:
-            """Process each output line."""
             nonlocal last_activity_time
+            if ui:
+                ui.add_raw_line(line)
             line = line.strip()
-            # Show meaningful output lines, skip raw JSON
             if line and not line.startswith("{"):
                 if ui:
                     ui.add_activity(f"codex: {line[:80]}", "💬")
                 last_activity_time = time.time()
 
         def on_idle(elapsed: float) -> None:
-            """Update status periodically."""
             nonlocal last_activity_time
             if not ui:
                 return
 
-            # Update status with elapsed time
             minutes = int(elapsed // 60)
             seconds = int(elapsed % 60)
             time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
-            ui.set_status("running", f"Codex reviewing code ({time_str})")
+            ui.set_status("running", f"Codex running (read-only, {time_str})")
 
-            # Add activity update if no output for 30 seconds
             current_time = time.time()
             if current_time - last_activity_time >= 30.0:
                 if minutes > 0:
-                    ui.add_activity(f"Still reviewing... ({minutes}m elapsed)", "⏳")
+                    ui.add_activity(f"Still running... ({minutes}m elapsed)", "⏳")
                 else:
-                    ui.add_activity("Still reviewing...", "⏳")
+                    ui.add_activity("Still running...", "⏳")
                 last_activity_time = current_time
 
         try:
-            # Create temp files for prompt, schema, and output
             output_schema = _build_output_schema(stage)
             schema_content = json.dumps(output_schema)
             with (
@@ -239,27 +243,20 @@ class CodexBackend(AIBackend):
             ):
                 if ui:
                     ui.set_status("starting", "initializing Codex")
+                    ui.add_activity("Codex read-only run started", "🔍")
 
-                shell_cmd = self._build_command(prompt_file, schema_file, output_file)
+                args = self._read_only_args(schema_file, output_file, max_turns)
+                shell_cmd = self._build_command(prompt_file, args)
 
-                if ui:
-                    ui.set_status("running", "Codex reviewing code")
-                    ui.add_activity("Codex code review started", "🔍")
-
-                runner = SubprocessRunner(
-                    command=shell_cmd,
+                result = self._run_subprocess(
+                    shell_cmd=shell_cmd,
                     timeout=timeout,
                     pause_check=pause_check,
                     ui=ui,
                     on_output=on_output,
                     on_idle=on_idle,
-                    idle_interval=5.0,
-                    poll_interval_active=0.05,
-                    poll_interval_idle=0.5,
-                    output_file=log_file,
+                    log_file=log_file,
                 )
-
-                result = runner.run()
 
                 if result.paused:
                     if ui:
@@ -269,7 +266,6 @@ class CodexBackend(AIBackend):
                 if result.timed_out:
                     return StageResult.timeout(result.timeout_seconds or timeout)
 
-                # Process completed
                 if result.exit_code != 0:
                     if ui:
                         ui.add_activity(f"Codex failed (exit {result.exit_code})", "❌")
@@ -279,7 +275,6 @@ class CodexBackend(AIBackend):
                         output=result.output,
                     )
 
-                # Read the structured output
                 if not os.path.exists(output_file):
                     if ui:
                         ui.add_activity("No output file generated", "❌")
@@ -293,7 +288,6 @@ class CodexBackend(AIBackend):
                 with open(output_file, encoding="utf-8") as f:
                     output_content = f.read()
 
-                # Validate JSON structure
                 try:
                     output_data = json.loads(output_content)
                     decision = output_data.get("decision", "")
@@ -305,20 +299,20 @@ class CodexBackend(AIBackend):
                         seconds = int(elapsed % 60)
                         time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
 
-                        if decision == "APPROVE":
+                        if decision in {"APPROVE", "APPROVED", "PASS"}:
                             ui.add_activity(
-                                f"Review complete: APPROVED ({issues_count} suggestions) in {time_str}",
+                                f"Codex complete: {decision} ({issues_count} issues) in {time_str}",
                                 "✅",
                             )
                         else:
                             ui.add_activity(
-                                f"Review complete: {issues_count} issues found in {time_str}",
+                                f"Codex complete: {decision or 'done'} ({issues_count} issues) in {time_str}",
                                 "⚠️",
                             )
                         ui.finish(success=True)
 
                     return StageResult.create_success(
-                        message=f"Codex review complete: {decision}",
+                        message=f"Codex structured run complete: {decision or 'DONE'}",
                         output=output_content,
                     )
 
@@ -335,6 +329,127 @@ class CodexBackend(AIBackend):
             if ui:
                 ui.finish(success=False)
             return StageResult.error(f"Codex invocation error: {e}")
+
+    def _invoke_editable(
+        self,
+        prompt: str,
+        timeout: int,
+        max_turns: int,
+        ui: StageUI | None,
+        pause_check: PauseCheck | None,
+        log_file: str | None,
+    ) -> StageResult:
+        """Invoke Codex in editable mode (default)."""
+        start_time = time.time()
+
+        def on_output(line: str) -> None:
+            if ui:
+                ui.add_raw_line(line)
+            stripped = line.strip()
+            if ui and stripped and not stripped.startswith("{"):
+                ui.add_activity(f"codex: {stripped[:100]}", "💬", verbose_only=True)
+
+        def on_idle(elapsed: float) -> None:
+            if not ui:
+                return
+            minutes = int(elapsed // 60)
+            seconds = int(elapsed % 60)
+            time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+            ui.set_status("running", f"Codex executing ({time_str})")
+
+        try:
+            with self._temp_file(prompt, suffix=".txt") as prompt_file:
+                if ui:
+                    ui.set_status("starting", "initializing Codex")
+                    ui.add_activity("Codex stage execution started", "🤖")
+
+                args = self._editable_args(max_turns)
+                shell_cmd = self._build_command(prompt_file, args)
+
+                result = self._run_subprocess(
+                    shell_cmd=shell_cmd,
+                    timeout=timeout,
+                    pause_check=pause_check,
+                    ui=ui,
+                    on_output=on_output,
+                    on_idle=on_idle,
+                    log_file=log_file,
+                )
+
+                if result.paused:
+                    if ui:
+                        ui.finish(success=False)
+                    return StageResult.paused()
+
+                if result.timed_out:
+                    return StageResult.timeout(result.timeout_seconds or timeout)
+
+                output = result.output
+
+                if "max turns" in output.lower() or "reached max" in output.lower():
+                    if ui:
+                        ui.add_activity("Max turns reached", "❌")
+                        ui.finish(success=False)
+                    return StageResult.max_turns(output)
+
+                if result.exit_code == 0:
+                    if ui:
+                        elapsed = int(time.time() - start_time)
+                        ui.add_activity(f"Codex completed in {elapsed}s", "✅")
+                        ui.finish(success=True)
+                    return StageResult.create_success(
+                        message="Stage completed",
+                        output=output,
+                    )
+
+                if ui:
+                    ui.add_activity(f"Codex failed (exit {result.exit_code})", "❌")
+                    ui.finish(success=False)
+                return StageResult.error(
+                    message=f"Codex failed (exit {result.exit_code})",
+                    output=output,
+                )
+
+        except Exception as e:
+            if ui:
+                ui.finish(success=False)
+            return StageResult.error(f"Codex invocation error: {e}")
+
+    def invoke(
+        self,
+        prompt: str,
+        timeout: int = 14400,
+        max_turns: int = 200,
+        ui: StageUI | None = None,
+        pause_check: PauseCheck | None = None,
+        stage: str | None = None,
+        log_file: str | None = None,
+    ) -> StageResult:
+        """
+        Invoke Codex for a stage execution.
+
+        - If ``read_only`` is enabled in backend config, uses structured JSON mode.
+        - Otherwise uses editable mode (default), allowing Codex to modify files.
+        """
+        if self.read_only:
+            return self._invoke_read_only(
+                prompt=prompt,
+                timeout=timeout,
+                max_turns=max_turns,
+                ui=ui,
+                pause_check=pause_check,
+                stage=stage,
+                log_file=log_file,
+            )
+
+        return self._invoke_editable(
+            prompt=prompt,
+            timeout=timeout,
+            max_turns=max_turns,
+            ui=ui,
+            pause_check=pause_check,
+            log_file=log_file,
+        )
 
     def generate_text(self, prompt: str, timeout: int = 30) -> str:
         """

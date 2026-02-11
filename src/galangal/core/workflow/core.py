@@ -59,9 +59,9 @@ def _write_artifacts_from_readonly_output(
     """
     Write stage artifacts from read-only backend's structured JSON output.
 
-    Read-only backends (like Codex) cannot write files directly. Instead,
-    they return structured JSON which we post-process to create the expected
-    artifacts based on STAGE_ARTIFACT_SCHEMA.
+    Read-only backends cannot write files directly. Instead, they return
+    structured JSON which we post-process to create the expected artifacts
+    based on STAGE_ARTIFACT_SCHEMA.
 
     Supports two modes:
     1. Schema-based: Uses STAGE_METADATA artifact_schema mapping
@@ -600,6 +600,11 @@ def execute_stage(
 
     # Build prompt
     builder = PromptBuilder()
+    # Backend-specific prompts like review_codex.md are intended for read-only
+    # structured-output mode. Editable Codex should use the standard prompts.
+    prompt_backend_name = backend.name
+    if backend.name == "codex" and not backend.read_only:
+        prompt_backend_name = None
 
     # For read-only backends on review-type stages, use minimal context
     # This gives an unbiased review without Claude's interpretations
@@ -608,7 +613,7 @@ def execute_stage(
         prompt = builder.build_minimal_review_prompt(state, backend_name=backend.name)
         tui_app.add_activity("Using minimal context for independent review", "📋")
     else:
-        prompt = builder.build_full_prompt(stage, state, backend_name=backend.name)
+        prompt = builder.build_full_prompt(stage, state, backend_name=prompt_backend_name)
 
     # Add retry context
     if state.attempt > 1 and state.last_failure:
@@ -660,7 +665,7 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     if not invoke_result.success:
         return invoke_result
 
-    # Post-process for read-only backends (e.g., Codex)
+    # Post-process for read-only backends (e.g., Codex with read_only=true)
     # These backends return structured JSON instead of writing files directly
     if backend.read_only and invoke_result.output:
         _write_artifacts_from_readonly_output(stage, invoke_result.output, task_name, tui_app)

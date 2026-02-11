@@ -240,7 +240,7 @@ class ValidationRunner:
             )
 
         # Decision file checks - these take precedence over artifact markers
-        # because backends (like Codex) write explicit decision files
+        # because some backends/stages write explicit decision files
 
         # TEST stage: just check TEST_PLAN.md exists
         # (TEST stage only writes tests, TEST_GATE or QA runs them)

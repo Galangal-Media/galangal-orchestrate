@@ -14,6 +14,7 @@ from galangal.ai import (
 )
 from galangal.ai.claude import ClaudeBackend
 from galangal.ai.codex import CodexBackend
+from galangal.config.schema import AIBackendConfig
 from galangal.exceptions import AIError
 from galangal.results import StageResult, StageResultType
 
@@ -23,12 +24,23 @@ SUBPROCESS_SELECT = "galangal.ai.subprocess.select.select"
 SUBPROCESS_TIME = "galangal.ai.subprocess.time.time"
 
 
+def make_read_only_backend() -> CodexBackend:
+    """Create a Codex backend configured for structured read-only output."""
+    return CodexBackend(
+        AIBackendConfig(
+            command="codex",
+            args=["exec", "--full-auto"],
+            read_only=True,
+        )
+    )
+
+
 class TestCodexBackendInvoke:
     """Tests for CodexBackend.invoke() StageResult returns."""
 
-    def test_successful_invocation_returns_success_result(self):
-        """Test that successful invocation returns StageResult.success with JSON output."""
-        backend = CodexBackend()
+    def test_successful_read_only_invocation_returns_success_result(self):
+        """Read-only mode returns StageResult.success with structured JSON output."""
+        backend = make_read_only_backend()
 
         output_data = {
             "review_notes": "# Code Review\n\nLooks good!",
@@ -64,8 +76,26 @@ class TestCodexBackendInvoke:
         assert result.type == StageResultType.SUCCESS
         assert "APPROVE" in result.message
 
+    def test_successful_default_invocation_returns_success_result(self):
+        """Default mode is editable and returns success on exit code 0."""
+        backend = CodexBackend()
+
+        mock_process = MagicMock()
+        mock_process.poll.side_effect = [None, 0]
+        mock_process.communicate.return_value = ("completed output", "")
+        mock_process.returncode = 0
+
+        with patch(SUBPROCESS_POPEN, return_value=mock_process):
+            with patch(SUBPROCESS_SELECT, return_value=([], [], [])):
+                result = backend.invoke("test prompt")
+
+        assert isinstance(result, StageResult)
+        assert result.success is True
+        assert result.type == StageResultType.SUCCESS
+        assert "Stage completed" in result.message
+
     def test_failed_invocation_returns_error_result(self):
-        """Test that failed invocation returns StageResult.error."""
+        """Editable mode failed invocation returns StageResult.error."""
         backend = CodexBackend()
 
         mock_process = MagicMock()
@@ -123,8 +153,8 @@ class TestCodexBackendInvoke:
         assert result.type == StageResultType.PAUSED
 
     def test_missing_output_file_returns_error(self):
-        """Test that missing output file returns error."""
-        backend = CodexBackend()
+        """Read-only mode returns error when structured output file is missing."""
+        backend = make_read_only_backend()
 
         mock_process = MagicMock()
         mock_process.poll.side_effect = [None, 0]
@@ -141,8 +171,8 @@ class TestCodexBackendInvoke:
         assert "output file" in result.message.lower()
 
     def test_invalid_json_output_returns_error(self):
-        """Test that invalid JSON output returns error."""
-        backend = CodexBackend()
+        """Read-only mode returns error when structured output is not valid JSON."""
+        backend = make_read_only_backend()
 
         mock_process = MagicMock()
         mock_process.poll.side_effect = [None, 0]

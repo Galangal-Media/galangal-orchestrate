@@ -200,13 +200,22 @@ class AIConfig(BaseModel):
                 args=[
                     "exec",
                     "--full-auto",
-                    "--output-schema",
-                    "{schema_file}",
-                    "-o",
-                    "{output_file}",
                 ],
-                max_turns=50,
-                read_only=True,
+                max_turns=200,
+                read_only=False,
+            ),
+            "gemini": AIBackendConfig(
+                command="gemini",
+                args=[
+                    "--approval-mode",
+                    "yolo",
+                    "--prompt",
+                    "",
+                    "--output-format",
+                    "stream-json",
+                ],
+                max_turns=200,
+                read_only=False,
             ),
         }
     )

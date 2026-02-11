@@ -10,6 +10,7 @@ See: https://cloud.google.com/sdk/gcloud/reference/ai/gemini
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -39,11 +40,13 @@ class GeminiBackend(AIBackend):
             gemini:
               command: gemini
               args:
+                - "--approval-mode"
+                - "yolo"
+                - "--prompt"
+                - ""
                 - "--output-format"
                 - "stream-json"
-                - "--max-tokens"
-                - "{max_turns}"
-              max_turns: 8192
+              max_turns: 200
 
           stage_backends:
             DOCS: gemini
@@ -53,10 +56,12 @@ class GeminiBackend(AIBackend):
     # Default command and args when no config provided
     DEFAULT_COMMAND = "gemini"
     DEFAULT_ARGS = [
+        "--approval-mode",
+        "yolo",
+        "--prompt",
+        "",
         "--output-format",
         "stream-json",
-        "--max-tokens",
-        "{max_turns}",
     ]
 
     @property
@@ -72,7 +77,7 @@ class GeminiBackend(AIBackend):
 
         Args:
             prompt_file: Path to temp file containing the prompt
-            max_turns: Maximum output tokens (repurposed from max_turns)
+            max_turns: Maximum turn budget (placeholder for custom args)
 
         Returns:
             Shell command string ready for subprocess
@@ -91,8 +96,8 @@ class GeminiBackend(AIBackend):
                 max_turns=max_turns,
             )
 
-        args_str = " ".join(args)
-        return f"cat '{prompt_file}' | {command} {args_str}"
+        args_str = " ".join(shlex.quote(a) for a in args)
+        return f"cat {shlex.quote(prompt_file)} | {shlex.quote(command)} {args_str}"
 
     def invoke(
         self,
@@ -110,7 +115,7 @@ class GeminiBackend(AIBackend):
         Args:
             prompt: The full prompt to send
             timeout: Maximum time in seconds
-            max_turns: Maximum output tokens (Gemini uses this for token limit)
+            max_turns: Maximum turn budget (used for arg substitution if configured)
             ui: Optional TUI for progress display
             pause_check: Optional callback for pause detection
             stage: Optional stage name for logging
@@ -119,12 +124,8 @@ class GeminiBackend(AIBackend):
         Returns:
             StageResult with success/failure and output
         """
-        # Track output for result processing
-        full_output_lines: list[str] = []
-
         def on_output(line: str) -> None:
             """Process each output line."""
-            full_output_lines.append(line)
             if ui:
                 ui.add_raw_line(line)
             self._process_stream_line(line, ui)
@@ -328,8 +329,11 @@ class GeminiBackend(AIBackend):
                 # Use config command or default
                 command = self._config.command if self._config else self.DEFAULT_COMMAND
 
-                # Simple text output mode
-                shell_cmd = f"cat '{prompt_file}' | {command} --output-format text"
+                # Force non-interactive mode; prompt is read from stdin.
+                shell_cmd = (
+                    f"cat {shlex.quote(prompt_file)} | "
+                    f"{shlex.quote(command)} --prompt '' --output-format text"
+                )
                 result = subprocess.run(
                     shell_cmd,
                     shell=True,

@@ -279,6 +279,33 @@ The spec looks good overall.
         assert decision == "APPROVE"
         assert "All criteria met" in notes
 
+    def test_json_parsing_when_backend_not_read_only(self, tmp_path):
+        """JSON peer review output is parsed even when backend is writable."""
+        engine = self._make_engine()
+        tui_app = MagicMock()
+
+        output = json.dumps({
+            "decision": "REQUEST_CHANGES",
+            "review_notes": "Need better acceptance criteria coverage.",
+            "issues": [],
+        })
+        mock_result = StageResult.create_success("Done", output=output)
+        mock_backend = MagicMock()
+        mock_backend.invoke.return_value = mock_result
+        mock_backend.read_only = False
+        mock_backend.name = "codex"
+
+        with (
+            patch("galangal.ai.is_backend_available", return_value=True),
+            patch("galangal.ai.get_backend_with_fallback", return_value=mock_backend),
+            patch("galangal.core.artifacts.write_artifact"),
+            patch("galangal.core.state.get_task_dir", return_value=tmp_path),
+        ):
+            decision, notes = engine.execute_peer_review(tui_app)
+
+        assert decision == "REQUEST_CHANGES"
+        assert "acceptance criteria" in notes
+
 
 # =============================================================================
 # Engine: _process_stage_result emits PEER_REVIEW_REQUIRED

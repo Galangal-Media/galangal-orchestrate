@@ -561,20 +561,37 @@ class WorkflowEngine:
         decision = "APPROVE"
         review_notes = output
 
-        if backend.read_only:
-            # Read-only backends (Codex) return structured JSON
+        # First try structured JSON parsing (works for read-only and editable backends
+        # when prompts request JSON output).
+        json_candidates: list[str] = [output.strip()]
+        json_candidates.extend(
+            line.strip()
+            for line in output.splitlines()
+            if line.strip().startswith("{") and line.strip().endswith("}")
+        )
+        start = output.find("{")
+        end = output.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            json_candidates.append(output[start : end + 1].strip())
+
+        for candidate in json_candidates:
+            if not candidate:
+                continue
             try:
-                data = json.loads(output)
-                decision = data.get("decision", "APPROVE").upper()
-                review_notes = data.get("review_notes", output)
+                data = json.loads(candidate)
             except (json.JSONDecodeError, TypeError):
-                # Fall through to markdown parsing
-                pass
+                continue
+            if isinstance(data, dict):
+                decision = str(data.get("decision", "APPROVE")).upper()
+                review_notes = str(data.get("review_notes", output))
+                break
         else:
-            # Normal backends output markdown - look for decision marker
+            # Fallback to markdown parsing for normal backend output
             for line in output.split("\n"):
                 stripped = line.strip()
-                if stripped.upper().startswith("# DECISION:"):
+                if stripped.upper().startswith("# DECISION:") or stripped.upper().startswith(
+                    "DECISION:"
+                ):
                     decision = stripped.split(":", 1)[1].strip().upper()
                     break
 

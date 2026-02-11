@@ -173,12 +173,125 @@ def check_mistake_tracking() -> tuple[bool | None, str]:
         return None, "Not installed (pip install galangal-orchestrate[full])"
 
 
+def _is_legacy_codex_args(args: list[str]) -> bool:
+    """Return True if args look like legacy read-only structured output mode."""
+    legacy_markers = ("--output-schema", "{schema_file}", "{output_file}")
+    for arg in args:
+        if arg in legacy_markers:
+            return True
+        if "schema_file" in arg or "output_file" in arg:
+            return True
+    return False
+
+
+def check_codex_backend_mode() -> tuple[bool | None, str]:
+    """
+    Check whether Codex backend is configured for editable mode.
+
+    Returns:
+        - True: Codex is editable (or not configured)
+        - None: Legacy read-only config detected (warning)
+        - False: Unexpected check failure
+    """
+    if not is_initialized():
+        return None, "Not initialized"
+
+    try:
+        from galangal.config.loader import load_config, reset_caches
+
+        reset_caches()  # Ensure fresh load
+        config = load_config()
+    except Exception as e:
+        return False, f"Could not read config: {e}"
+
+    codex = config.ai.backends.get("codex")
+    if codex is None:
+        return True, "Not configured"
+
+    legacy_reasons: list[str] = []
+    if codex.read_only:
+        legacy_reasons.append("read_only=true")
+    if _is_legacy_codex_args(codex.args):
+        legacy_reasons.append("output-schema args")
+
+    if legacy_reasons:
+        reasons = ", ".join(legacy_reasons)
+        return None, f"Legacy read-only config detected ({reasons})"
+
+    return True, "Editable mode (can modify files)"
+
+
+def _extract_flag_value(args: list[str], flag: str) -> str | None:
+    """Extract CLI flag value from `--flag value` or `--flag=value` forms."""
+    for i, arg in enumerate(args):
+        if arg == flag and i + 1 < len(args):
+            return args[i + 1]
+        if arg.startswith(f"{flag}="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def check_gemini_backend_mode() -> tuple[bool | None, str]:
+    """
+    Check whether Gemini backend is configured for headless editable mode.
+
+    Returns:
+        - True: Gemini config is edit-capable for headless runs
+        - None: Legacy/non-headless config detected (warning)
+        - False: Unexpected check failure
+    """
+    if not is_initialized():
+        return None, "Not initialized"
+
+    try:
+        from galangal.config.loader import load_config, reset_caches
+
+        reset_caches()  # Ensure fresh load
+        config = load_config()
+    except Exception as e:
+        return False, f"Could not read config: {e}"
+
+    gemini = config.ai.backends.get("gemini")
+    if gemini is None:
+        return True, "Using backend defaults (headless editable mode)"
+
+    args = gemini.args
+    warnings: list[str] = []
+
+    if gemini.read_only:
+        warnings.append("read_only=true")
+
+    # Gemini CLI defaults to interactive mode unless --prompt/-p is provided.
+    has_prompt_flag = any(a in ("--prompt", "-p") for a in args) or any(
+        a.startswith("--prompt=") or a.startswith("-p=") for a in args
+    )
+    if not has_prompt_flag:
+        warnings.append("missing --prompt/-p (interactive mode)")
+
+    # For editing in headless mode, approvals must be auto-accepted.
+    approval_mode = _extract_flag_value(args, "--approval-mode")
+    has_yolo = any(a in ("-y", "--yolo") for a in args)
+    if not has_yolo and approval_mode not in {"yolo", "auto_edit"}:
+        warnings.append("missing auto approval (use --approval-mode yolo or auto_edit)")
+
+    # Legacy/invalid args from older implementation.
+    if "--max-tokens" in args:
+        warnings.append("legacy --max-tokens arg")
+
+    if warnings:
+        return None, f"Legacy/non-editable config detected ({', '.join(warnings)})"
+
+    return True, "Headless editable mode"
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Run environment checks and report status."""
     console.print(f"\n[bold #fe8019]Galangal Doctor[/] [#7c6f64]v{__version__}[/]\n")
 
     all_passed = True
     warnings = 0
+    codex_legacy_warning = False
+    gemini_legacy_warning = False
 
     checks = [
         ("Python 3.10+", check_python_version),
@@ -187,6 +300,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         ("Claude CLI", check_claude_cli),
         ("GitHub CLI", check_github_cli),
         ("Config file", check_config_valid),
+        ("Codex backend mode", check_codex_backend_mode),
+        ("Gemini backend mode", check_gemini_backend_mode),
         ("Tasks directory", check_tasks_dir),
         ("Mistake tracking", check_mistake_tracking),
     ]
@@ -205,8 +320,40 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         else:  # None = optional/warning
             mark = _warn_mark()
             warnings += 1
+            if name == "Codex backend mode" and "legacy read-only config" in detail.lower():
+                codex_legacy_warning = True
+            if name == "Gemini backend mode" and "legacy/non-editable config" in detail.lower():
+                gemini_legacy_warning = True
 
         console.print(f"  {mark} {name}: [#a89984]{detail}[/]")
+
+    if codex_legacy_warning:
+        console.print("\n[#fabd2f]Codex is in legacy read-only mode.[/]")
+        console.print(
+            "[#a89984]Update .galangal/config.yaml so Codex can edit code in headless runs:[/]"
+        )
+        console.print(
+            """\n[dim]ai:
+  backends:
+    codex:
+      command: codex
+      args: ["exec", "--full-auto"]
+      read_only: false[/]\n"""
+        )
+
+    if gemini_legacy_warning:
+        console.print("\n[#fabd2f]Gemini is in legacy/non-editable mode.[/]")
+        console.print(
+            "[#a89984]Update .galangal/config.yaml so Gemini runs headless and can edit code:[/]"
+        )
+        console.print(
+            """\n[dim]ai:
+  backends:
+    gemini:
+      command: gemini
+      args: ["--approval-mode", "yolo", "--prompt", "", "--output-format", "stream-json"]
+      read_only: false[/]\n"""
+        )
 
     console.print()
 
