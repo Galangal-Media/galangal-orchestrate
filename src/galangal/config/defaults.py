@@ -104,6 +104,23 @@ validation:
 ai:
   default: claude
 
+  # Active profile (uncomment to use)
+  # profile: default
+
+  # Named routing profiles - switch backends with one line
+  # profiles:
+  #   default:
+  #     default: claude
+  #     stage_backends:
+  #       QA: codex
+  #       REVIEW: codex
+  #   no-claude:
+  #     default: gemini
+  #     stage_backends:
+  #       QA: codex
+  #       REVIEW: codex
+  #     peer_review_backend: codex
+
   backends:
     claude:
       command: "claude"

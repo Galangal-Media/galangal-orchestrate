@@ -362,6 +362,17 @@ def main() -> int:
     # Set default subcommand for archive (show help if no subcommand)
     archive_parser.set_defaults(func=lambda args: archive_parser.print_help() or 0)
 
+    # profile
+    profile_parser = subparsers.add_parser("profile", help="AI backend profile management")
+    profile_subparsers = profile_parser.add_subparsers(dest="profile_command")
+    profile_list = profile_subparsers.add_parser("list", help="List all defined profiles")
+    profile_list.set_defaults(func=_cmd_profile_list)
+    profile_switch = profile_subparsers.add_parser("switch", help="Switch active profile")
+    profile_switch.add_argument("name", help="Profile name to switch to")
+    profile_switch.set_defaults(func=_cmd_profile_switch)
+    # Default: show current profile
+    profile_parser.set_defaults(func=_cmd_profile_show)
+
     # hub
     hub_parser = subparsers.add_parser("hub", help="Hub connection management")
     hub_subparsers = hub_parser.add_subparsers(dest="hub_command")
@@ -550,6 +561,24 @@ def _cmd_archive_restore(args: argparse.Namespace) -> int:
     from galangal.commands.archive import cmd_archive_restore
 
     return cmd_archive_restore(args)
+
+
+def _cmd_profile_show(args: argparse.Namespace) -> int:
+    from galangal.commands.profile import cmd_profile_show
+
+    return cmd_profile_show(args)
+
+
+def _cmd_profile_list(args: argparse.Namespace) -> int:
+    from galangal.commands.profile import cmd_profile_list
+
+    return cmd_profile_list(args)
+
+
+def _cmd_profile_switch(args: argparse.Namespace) -> int:
+    from galangal.commands.profile import cmd_profile_switch
+
+    return cmd_profile_switch(args)
 
 
 def _cmd_hub_status(args: argparse.Namespace) -> int:

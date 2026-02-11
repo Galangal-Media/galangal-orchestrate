@@ -54,6 +54,8 @@ ai:
       max_turns: 200
       read_only: false
   stage_backends: {}    # Per-stage backend overrides
+  profile: null         # Active profile name (overrides default + stage_backends)
+  profiles: {}          # Named routing profiles (see AI Profiles section)
 
 # Peer review hook
 peer_review:
@@ -221,6 +223,10 @@ ai:
       args:
         - "--verbose"
       max_turns: 200
+  stage_backends:
+    REVIEW: codex
+  profile: null
+  profiles: {}
 ```
 
 | Field | Type | Default | Description |
@@ -232,6 +238,8 @@ ai:
 | `backends.<name>.max_turns` | int | `200` | Max AI turns |
 | `backends.<name>.read_only` | bool | `false` | Backend runs in read-only mode; artifacts written via post-processing |
 | `stage_backends` | dict | `{}` | Per-stage backend overrides (e.g., `{"REVIEW": "codex"}`) |
+| `profile` | string | `null` | Active profile name (see [AI Profiles](#ai-profiles)) |
+| `profiles` | dict | `{}` | Named routing profiles (see [AI Profiles](#ai-profiles)) |
 
 ### peer_review
 
@@ -251,6 +259,80 @@ peer_review:
 | `stages` | list | `["PM", "DESIGN"]` | Which stages get peer reviewed |
 
 When enabled, after a configured stage completes successfully, a second AI backend independently reviews the output. If the reviewer disagrees, both opinions are shown to the user who makes the final call. If the reviewer backend is unavailable or fails, the workflow continues normally (graceful degradation).
+
+### AI Profiles
+
+Profiles let you define named AI routing strategies and switch between them with a single config change. This is useful when hitting API usage limits and needing to quickly reroute work to a different backend.
+
+A profile bundles `default`, `stage_backends`, and optionally `peer_review_backend` into a named preset. When a profile is active, its values override the top-level `ai.default` and `ai.stage_backends` fields.
+
+```yaml
+ai:
+  profile: default              # Change this one line to switch
+
+  profiles:
+    default:
+      default: claude
+      stage_backends:
+        QA: codex
+        REVIEW: codex
+
+    no-claude:
+      default: gemini
+      stage_backends:
+        QA: codex
+        REVIEW: codex
+      peer_review_backend: codex
+
+    codex-primary:
+      default: codex
+      stage_backends:
+        PM: gemini
+        DESIGN: gemini
+        QA: gemini
+        REVIEW: gemini
+      peer_review_backend: gemini
+
+  backends:
+    claude:
+      command: "claude"
+      args: ["--output-format", "stream-json", "--verbose"]
+    codex:
+      command: "codex"
+      args: ["exec", "--full-auto"]
+    gemini:
+      command: "gemini-cli"
+```
+
+**Profile fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `default` | string | yes | Default backend when this profile is active |
+| `stage_backends` | dict | no | Per-stage backend overrides |
+| `peer_review_backend` | string | no | Override `peer_review.backend` when active |
+
+**How resolution works:**
+
+1. If `ai.profile` is not set, the top-level `ai.default` and `ai.stage_backends` are used as-is (fully backwards compatible).
+2. If `ai.profile` names a profile, that profile's `default` and `stage_backends` replace the top-level values at config load time. All existing code that reads `config.ai.default` works unchanged.
+3. If the profile has `peer_review_backend`, it also overrides `peer_review.backend`.
+4. If `ai.profile` names a profile that doesn't exist, config validation fails with an error.
+
+**CLI commands:**
+
+```bash
+# Show active profile and routing table
+galangal profile
+
+# List all defined profiles (* marks active)
+galangal profile list
+
+# Switch to a different profile
+galangal profile switch no-claude
+```
+
+The `switch` command updates `ai.profile` in `.galangal/config.yaml`. The change takes effect on the next `galangal resume` or `galangal start`.
 
 ### docs
 

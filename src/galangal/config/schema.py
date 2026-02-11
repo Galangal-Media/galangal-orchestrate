@@ -2,7 +2,7 @@
 Configuration schema using Pydantic models.
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from galangal.hub.config import HubConfig
 
@@ -162,6 +162,20 @@ class AIBackendConfig(BaseModel):
     )
 
 
+class AIProfile(BaseModel):
+    """A named AI routing profile that bundles default backend and stage overrides."""
+
+    default: str = Field(description="Default backend for this profile")
+    stage_backends: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-stage backend overrides (e.g., {'REVIEW': 'codex'})",
+    )
+    peer_review_backend: str | None = Field(
+        default=None,
+        description="Override peer review backend when this profile is active",
+    )
+
+
 class AIConfig(BaseModel):
     """AI backend configuration."""
 
@@ -200,6 +214,29 @@ class AIConfig(BaseModel):
         default_factory=dict,
         description="Per-stage backend overrides (e.g., {'REVIEW': 'codex'})",
     )
+    profile: str | None = Field(
+        default=None,
+        description="Active profile name (overrides default and stage_backends)",
+    )
+    profiles: dict[str, AIProfile] = Field(
+        default_factory=dict,
+        description="Named AI routing profiles",
+    )
+
+    @model_validator(mode="after")
+    def _resolve_profile(self) -> "AIConfig":
+        """If a profile is active, overlay its settings onto the top-level fields."""
+        if self.profile is None:
+            return self
+        if self.profile not in self.profiles:
+            raise ValueError(
+                f"AI profile '{self.profile}' not found. "
+                f"Available profiles: {', '.join(sorted(self.profiles)) or '(none)'}"
+            )
+        active = self.profiles[self.profile]
+        self.default = active.default
+        self.stage_backends = active.stage_backends
+        return self
 
 
 class DocsConfig(BaseModel):
@@ -497,3 +534,12 @@ class GalangalConfig(BaseModel):
         default_factory=HubConfig,
         description="Hub connection configuration for remote monitoring and control",
     )
+
+    @model_validator(mode="after")
+    def _apply_profile_peer_review(self) -> "GalangalConfig":
+        """Apply peer_review_backend from active AI profile."""
+        if self.ai.profile and self.ai.profile in self.ai.profiles:
+            profile = self.ai.profiles[self.ai.profile]
+            if profile.peer_review_backend is not None:
+                self.peer_review.backend = profile.peer_review_backend
+        return self
