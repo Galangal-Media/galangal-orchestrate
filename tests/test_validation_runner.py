@@ -1,6 +1,7 @@
 """Tests for validation runner."""
 
 import tempfile
+import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -627,3 +628,259 @@ class TestValidationRunnerMetadataDriven:
                         # But the fallback artifact check also needs
                         # produces_artifacts to pass. REVIEW_NOTES.md exists -> pass
                         assert result.success is True
+
+
+class TestValidationRunnerJUnitXML:
+    """Tests for JUnit XML parsing and integration."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.config = GalangalConfig()
+
+    def _make_runner(self):
+        """Create a ValidationRunner with mocked config."""
+        return ValidationRunner()
+
+    def test_parse_junit_xml_with_failures(self):
+        """Test parsing valid JUnit XML with failures."""
+        xml_content = textwrap.dedent("""\
+            <?xml version="1.0" encoding="utf-8"?>
+            <testsuite name="pytest" tests="5" failures="2" errors="0" skipped="1" time="3.45">
+                <testcase classname="tests.test_foo" name="test_ok" time="0.5"/>
+                <testcase classname="tests.test_foo" name="test_also_ok" time="0.3"/>
+                <testcase classname="tests.test_bar" name="test_fail1" time="1.0">
+                    <failure message="assert 1 == 2">AssertionError: assert 1 == 2</failure>
+                </testcase>
+                <testcase classname="tests.test_bar" name="test_fail2" time="0.8">
+                    <failure message="KeyError: 'missing'">KeyError: 'missing'</failure>
+                </testcase>
+                <testcase classname="tests.test_baz" name="test_skip" time="0.0">
+                    <skipped message="skipped"/>
+                </testcase>
+            </testsuite>
+        """)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+            f.write(xml_content)
+            xml_path = Path(f.name)
+
+        with patch("galangal.validation.runner.get_config", return_value=self.config):
+            with patch("galangal.validation.runner.get_project_root", return_value=Path("/tmp")):
+                runner = self._make_runner()
+                result = runner._parse_junit_xml(xml_path)
+
+        assert "2 passed" in result["counts"]
+        assert "2 failed" in result["counts"]
+        assert "1 skipped" in result["counts"]
+        assert result["duration"] == "3.45s"
+        assert len(result["failed_tests"]) == 2
+        assert "test_fail1" in result["failed_tests"][0]
+        xml_path.unlink()
+
+    def test_parse_junit_xml_multi_suite(self):
+        """Test parsing JUnit XML with multiple testsuite elements."""
+        xml_content = textwrap.dedent("""\
+            <?xml version="1.0" encoding="utf-8"?>
+            <testsuites>
+                <testsuite name="suite1" tests="3" failures="1" errors="0" skipped="0" time="1.0">
+                    <testcase classname="s1" name="test_a" time="0.5"/>
+                    <testcase classname="s1" name="test_b" time="0.3"/>
+                    <testcase classname="s1" name="test_c" time="0.2">
+                        <failure message="fail">fail</failure>
+                    </testcase>
+                </testsuite>
+                <testsuite name="suite2" tests="2" failures="0" errors="1" skipped="0" time="2.0">
+                    <testcase classname="s2" name="test_d" time="1.0"/>
+                    <testcase classname="s2" name="test_e" time="1.0">
+                        <error message="RuntimeError">RuntimeError</error>
+                    </testcase>
+                </testsuite>
+            </testsuites>
+        """)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+            f.write(xml_content)
+            xml_path = Path(f.name)
+
+        with patch("galangal.validation.runner.get_config", return_value=self.config):
+            with patch("galangal.validation.runner.get_project_root", return_value=Path("/tmp")):
+                runner = self._make_runner()
+                result = runner._parse_junit_xml(xml_path)
+
+        # 5 total tests, 1 failure, 1 error, 0 skipped = 3 passed
+        assert "3 passed" in result["counts"]
+        assert "1 failed" in result["counts"]
+        assert "1 errors" in result["counts"]
+        assert result["duration"] == "3.00s"
+        assert len(result["failed_tests"]) == 2
+        xml_path.unlink()
+
+    def test_parse_junit_xml_missing_file(self):
+        """Test parsing returns empty result for missing file."""
+        with patch("galangal.validation.runner.get_config", return_value=self.config):
+            with patch("galangal.validation.runner.get_project_root", return_value=Path("/tmp")):
+                runner = self._make_runner()
+                result = runner._parse_junit_xml(Path("/nonexistent/junit.xml"))
+
+        assert result["counts"] == ""
+        assert result["failed_tests"] == []
+
+    def test_parse_junit_xml_malformed(self):
+        """Test parsing returns empty result for malformed XML."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as f:
+            f.write("<not valid xml<<<")
+            xml_path = Path(f.name)
+
+        with patch("galangal.validation.runner.get_config", return_value=self.config):
+            with patch("galangal.validation.runner.get_project_root", return_value=Path("/tmp")):
+                runner = self._make_runner()
+                result = runner._parse_junit_xml(xml_path)
+
+        assert result["counts"] == ""
+        assert result["failed_tests"] == []
+        xml_path.unlink()
+
+    def test_try_parse_junit_xml_explicit_config(self):
+        """Test _try_parse_junit_xml with explicit config path."""
+        xml_content = textwrap.dedent("""\
+            <?xml version="1.0" encoding="utf-8"?>
+            <testsuite name="pytest" tests="3" failures="0" errors="0" skipped="0" time="1.0">
+                <testcase classname="t" name="test_a" time="0.5"/>
+                <testcase classname="t" name="test_b" time="0.3"/>
+                <testcase classname="t" name="test_c" time="0.2"/>
+            </testsuite>
+        """)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            xml_path = Path(tmpdir) / "results.xml"
+            xml_path.write_text(xml_content)
+
+            cmd_config = ValidationCommand(
+                name="test",
+                command="pytest",
+                junit_xml=str(xml_path),
+            )
+
+            with patch("galangal.validation.runner.get_config", return_value=self.config):
+                with patch(
+                    "galangal.validation.runner.get_project_root", return_value=Path(tmpdir)
+                ):
+                    runner = self._make_runner()
+                    result = runner._try_parse_junit_xml("test-task", cmd_config)
+
+            assert "3 passed" in result["counts"]
+
+    def test_try_parse_junit_xml_convention_path(self):
+        """Test _try_parse_junit_xml finds {task_dir}/junit.xml by convention."""
+        xml_content = textwrap.dedent("""\
+            <?xml version="1.0" encoding="utf-8"?>
+            <testsuite name="pytest" tests="2" failures="0" errors="0" skipped="0" time="0.5">
+                <testcase classname="t" name="test_a" time="0.3"/>
+                <testcase classname="t" name="test_b" time="0.2"/>
+            </testsuite>
+        """)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            task_dir = Path(tmpdir) / "galangal-tasks" / "my-task"
+            task_dir.mkdir(parents=True)
+            (task_dir / "junit.xml").write_text(xml_content)
+
+            with patch("galangal.validation.runner.get_config", return_value=self.config):
+                with patch(
+                    "galangal.validation.runner.get_project_root", return_value=Path(tmpdir)
+                ):
+                    runner = self._make_runner()
+                    with patch(
+                        "galangal.core.state.get_task_dir", return_value=task_dir
+                    ):
+                        result = runner._try_parse_junit_xml("my-task")
+
+            assert "2 passed" in result["counts"]
+
+    def test_write_test_summary_prefers_xml(self):
+        """Test _write_test_summary uses XML when available, merges coverage from stdout."""
+        xml_content = textwrap.dedent("""\
+            <?xml version="1.0" encoding="utf-8"?>
+            <testsuite name="pytest" tests="4" failures="1" errors="0" skipped="0" time="2.0">
+                <testcase classname="t" name="test_a" time="0.5"/>
+                <testcase classname="t" name="test_b" time="0.5"/>
+                <testcase classname="t" name="test_c" time="0.5"/>
+                <testcase classname="t" name="test_fail" time="0.5">
+                    <failure message="assert False">assert False</failure>
+                </testcase>
+            </testsuite>
+        """)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            task_dir = Path(tmpdir) / "galangal-tasks" / "test-task"
+            task_dir.mkdir(parents=True)
+            (task_dir / "junit.xml").write_text(xml_content)
+
+            # Stdout has coverage info that XML doesn't
+            stdout_output = "TOTAL                  100     10    90%\n"
+            command_results = {
+                "has_failure": True,
+                "first_failure_message": "tests: failed",
+                "aggregated_output": stdout_output,
+                "results": [("pytest tests", False, stdout_output)],
+                "command_configs": {
+                    "pytest tests": ValidationCommand(name="pytest tests", command="pytest"),
+                },
+            }
+
+            written_content = {}
+
+            def capture_write(name, content, task):
+                written_content[name] = content
+
+            with patch("galangal.validation.runner.get_config", return_value=self.config):
+                with patch(
+                    "galangal.validation.runner.get_project_root", return_value=Path(tmpdir)
+                ):
+                    runner = self._make_runner()
+                    with patch(
+                        "galangal.core.state.get_task_dir", return_value=task_dir
+                    ):
+                        with patch(
+                            "galangal.validation.runner.write_artifact",
+                            side_effect=capture_write,
+                        ):
+                            runner._write_test_summary("test-task", command_results)
+
+            summary = written_content.get("TEST_SUMMARY.md", "")
+            assert "3 passed" in summary
+            assert "1 failed" in summary
+            assert "90%" in summary  # Coverage merged from stdout
+
+    def test_write_test_summary_falls_back_to_stdout(self):
+        """Test _write_test_summary falls back to stdout when no XML exists."""
+        stdout_output = (
+            "5 passed, 1 failed in 2.50s\n"
+            "FAILED tests/test_foo.py::test_bar - AssertionError\n"
+        )
+        command_results = {
+            "has_failure": True,
+            "first_failure_message": "tests: failed",
+            "aggregated_output": stdout_output,
+            "results": [("pytest tests", False, stdout_output)],
+            "command_configs": {
+                "pytest tests": ValidationCommand(name="pytest tests", command="pytest"),
+            },
+        }
+
+        written_content = {}
+
+        def capture_write(name, content, task):
+            written_content[name] = content
+
+        with patch("galangal.validation.runner.get_config", return_value=self.config):
+            with patch("galangal.validation.runner.get_project_root", return_value=Path("/tmp")):
+                runner = self._make_runner()
+                with patch(
+                    "galangal.core.state.get_task_dir",
+                    return_value=Path("/nonexistent/task"),
+                ):
+                    with patch(
+                        "galangal.validation.runner.write_artifact",
+                        side_effect=capture_write,
+                    ):
+                        runner._write_test_summary("test-task", command_results)
+
+        summary = written_content.get("TEST_SUMMARY.md", "")
+        assert "5 passed" in summary
+        assert "test_foo.py::test_bar" in summary

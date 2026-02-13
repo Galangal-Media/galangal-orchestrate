@@ -101,6 +101,10 @@ class ValidationCommand(BaseModel):
     timeout: int | None = Field(
         default=None, description="Command timeout in seconds (overrides stage default)"
     )
+    junit_xml: str | None = Field(
+        default=None,
+        description="Path to JUnit XML output file. Supports {task_dir} and {project_root} placeholders.",
+    )
 
 
 class SkipCondition(BaseModel):

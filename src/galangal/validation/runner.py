@@ -4,7 +4,9 @@ Config-driven validation runner.
 
 import fnmatch
 import subprocess
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from galangal.config.loader import get_config, get_project_root
@@ -718,11 +720,15 @@ class ValidationRunner:
                 aggregated_parts.append(output.strip())
             aggregated_parts.append("")
 
+        # Build command config lookup by name
+        cmd_configs = {cmd.name: cmd for cmd in stage_config.commands}
+
         return {
             "has_failure": has_failure,
             "first_failure_message": first_failure_message,
             "aggregated_output": "\n".join(aggregated_parts),
             "results": results,
+            "command_configs": cmd_configs,
         }
 
     def _write_validation_report(
@@ -816,8 +822,21 @@ class ValidationRunner:
             test_output = command_results.get("aggregated_output", "")
             test_cmd_name = "tests"
 
-        # Parse test results
-        summary = self._parse_test_output(test_output)
+        # Try JUnit XML first, fall back to stdout parsing
+        cmd_configs = command_results.get("command_configs", {})
+        cmd_config = cmd_configs.get(test_cmd_name)
+        xml_summary = self._try_parse_junit_xml(task_name, cmd_config)
+
+        if xml_summary.get("counts"):
+            summary = xml_summary
+            # Merge coverage and warnings from stdout (JUnit XML doesn't have these)
+            stdout_summary = self._parse_test_output(test_output)
+            if stdout_summary["coverage"] and not summary["coverage"]:
+                summary["coverage"] = stdout_summary["coverage"]
+            if stdout_summary["warnings"] and not summary["warnings"]:
+                summary["warnings"] = stdout_summary["warnings"]
+        else:
+            summary = self._parse_test_output(test_output)
 
         # Determine overall status
         has_failure = command_results.get("has_failure", False)
@@ -953,6 +972,127 @@ class ValidationRunner:
                             break
 
         return result
+
+    def _parse_junit_xml(self, xml_path: Path) -> dict[str, Any]:
+        """
+        Parse a JUnit XML file and return structured test summary data.
+
+        Handles both ``<testsuites>`` root with multiple ``<testsuite>`` children
+        and a single ``<testsuite>`` root element.
+
+        Args:
+            xml_path: Path to the JUnit XML file.
+
+        Returns:
+            Dict with counts, duration, failed_tests, coverage, warnings.
+            Returns empty result on any parse error.
+        """
+        result: dict[str, Any] = {
+            "counts": "",
+            "duration": "",
+            "failed_tests": [],
+            "coverage": "",
+            "warnings": [],
+        }
+
+        try:
+            tree = ET.parse(xml_path)  # noqa: S314
+            root = tree.getroot()
+
+            # Collect all <testsuite> elements
+            if root.tag == "testsuites":
+                suites = list(root.iter("testsuite"))
+            elif root.tag == "testsuite":
+                suites = [root]
+            else:
+                return result
+
+            total_tests = 0
+            total_failures = 0
+            total_errors = 0
+            total_skipped = 0
+            total_time = 0.0
+
+            for suite in suites:
+                total_tests += int(suite.get("tests", 0))
+                total_failures += int(suite.get("failures", 0))
+                total_errors += int(suite.get("errors", 0))
+                total_skipped += int(suite.get("skipped", 0))
+                total_time += float(suite.get("time", 0))
+
+            # Build counts string
+            passed = total_tests - total_failures - total_errors - total_skipped
+            parts = [f"{passed} passed"]
+            if total_failures:
+                parts.append(f"{total_failures} failed")
+            if total_errors:
+                parts.append(f"{total_errors} errors")
+            if total_skipped:
+                parts.append(f"{total_skipped} skipped")
+            result["counts"] = ", ".join(parts)
+            result["duration"] = f"{total_time:.2f}s"
+
+            # Extract failed test details
+            for testcase in root.iter("testcase"):
+                classname = testcase.get("classname", "")
+                name = testcase.get("name", "")
+                test_id = f"{classname}::{name}" if classname else name
+
+                for child in testcase:
+                    if child.tag in ("failure", "error"):
+                        message = child.get("message", "")
+                        brief = message[:100] if message else child.tag
+                        result["failed_tests"].append(f"`{test_id}` - {brief}")
+
+        except Exception:
+            pass  # Return empty result on any error
+
+        return result
+
+    def _try_parse_junit_xml(
+        self,
+        task_name: str,
+        cmd_config: ValidationCommand | None = None,
+    ) -> dict[str, Any]:
+        """
+        Try to find and parse a JUnit XML file for test results.
+
+        Resolution order:
+        1. Explicit config: ``cmd_config.junit_xml`` with placeholder substitution
+        2. Convention: ``{task_dir}/junit.xml``
+
+        Args:
+            task_name: Task name for placeholder substitution and convention path.
+            cmd_config: Optional command config with ``junit_xml`` path.
+
+        Returns:
+            Parsed test summary dict, or empty result if no XML found.
+        """
+        empty: dict[str, Any] = {
+            "counts": "",
+            "duration": "",
+            "failed_tests": [],
+            "coverage": "",
+            "warnings": [],
+        }
+
+        placeholders = self._get_placeholders(task_name)
+
+        # Strategy 1: Explicit config path
+        if cmd_config and cmd_config.junit_xml:
+            resolved = self._substitute_placeholders(cmd_config.junit_xml, placeholders)
+            xml_path = Path(resolved)
+            if xml_path.is_file():
+                return self._parse_junit_xml(xml_path)
+
+        # Strategy 2: Convention path
+        from galangal.core.state import get_task_dir
+
+        convention_path = get_task_dir(task_name) / "junit.xml"
+        if convention_path.is_file():
+            return self._parse_junit_xml(convention_path)
+
+        return empty
 
     def _check_artifact_markers(
         self, stage_config: StageValidation, task_name: str
