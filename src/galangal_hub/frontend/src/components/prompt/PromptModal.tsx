@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react"
+import Markdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -21,30 +22,6 @@ import { useWebSocket } from "@/hooks/useWebSocket"
 import { useToast } from "@/hooks/useToast"
 import { api } from "@/lib/api"
 import type { PromptData, PromptOption } from "@/types/api"
-
-// Convert URLs in text to clickable links
-function linkifyText(text: string): React.ReactNode[] {
-  const urlRegex = /(https?:\/\/[^\s]+)/g
-  const parts = text.split(urlRegex)
-
-  return parts.map((part, index) => {
-    if (urlRegex.test(part)) {
-      urlRegex.lastIndex = 0
-      return (
-        <a
-          key={index}
-          href={part}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-primary underline hover:text-primary/80"
-        >
-          {part}
-        </a>
-      )
-    }
-    return part
-  })
-}
 
 interface ActivePrompt extends PromptData {
   agentId: string
@@ -201,9 +178,9 @@ export function PromptModal() {
             <DialogTitle>Action Required</DialogTitle>
             <Badge variant="secondary">{activePrompt.agentId}</Badge>
           </div>
-          <DialogDescription className="text-left whitespace-pre-wrap">
-            {linkifyText(activePrompt.message)}
-          </DialogDescription>
+          <div className="text-left prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-code:text-primary prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-a:text-primary prose-li:text-foreground">
+            <Markdown remarkPlugins={[remarkGfm]}>{activePrompt.message}</Markdown>
+          </div>
         </DialogHeader>
 
         {isQA && activePrompt.questions && (

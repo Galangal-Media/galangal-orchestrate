@@ -1,4 +1,6 @@
 import { useState } from "react"
+import Markdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -14,31 +16,6 @@ import { useToast } from "@/hooks/useToast"
 import { api } from "@/lib/api"
 import type { PromptData, PromptOption } from "@/types/api"
 import { AlertCircle } from "lucide-react"
-
-// Convert URLs in text to clickable links
-function linkifyText(text: string): React.ReactNode[] {
-  const urlRegex = /(https?:\/\/[^\s]+)/g
-  const parts = text.split(urlRegex)
-
-  return parts.map((part, index) => {
-    if (urlRegex.test(part)) {
-      // Reset regex lastIndex since we're reusing it
-      urlRegex.lastIndex = 0
-      return (
-        <a
-          key={index}
-          href={part}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-primary underline hover:text-primary/80"
-        >
-          {part}
-        </a>
-      )
-    }
-    return part
-  })
-}
 
 interface PromptCardProps {
   prompt: PromptData
@@ -153,7 +130,9 @@ export function PromptCard({ prompt, agentId, taskName, onResponse }: PromptCard
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm whitespace-pre-wrap">{linkifyText(prompt.message)}</p>
+        <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-code:text-primary prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-a:text-primary prose-li:text-foreground">
+          <Markdown remarkPlugins={[remarkGfm]}>{prompt.message}</Markdown>
+        </div>
 
         {isQA && prompt.questions && (
           <div className="space-y-4">
