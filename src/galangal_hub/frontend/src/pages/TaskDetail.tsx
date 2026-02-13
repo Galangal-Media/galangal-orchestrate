@@ -357,7 +357,7 @@ export function TaskDetail() {
           <CardContent className="space-y-4">
             {(task.description || task.task_description) ? (
               showDescription ? (
-                <div className="prose prose-sm prose-invert max-w-none prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground prose-code:text-primary prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-a:text-primary prose-li:text-muted-foreground">
+                <div className="prose prose-sm prose-invert max-w-none prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground prose-code:text-primary prose-a:text-primary prose-li:text-muted-foreground">
                   <Markdown>{task.description || task.task_description}</Markdown>
                 </div>
               ) : (

@@ -130,7 +130,7 @@ export function PromptCard({ prompt, agentId, taskName, onResponse }: PromptCard
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-code:text-primary prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-a:text-primary prose-li:text-foreground">
+        <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-code:text-primary prose-a:text-primary prose-li:text-foreground">
           <Markdown remarkPlugins={[remarkGfm]}>{prompt.message}</Markdown>
         </div>
 

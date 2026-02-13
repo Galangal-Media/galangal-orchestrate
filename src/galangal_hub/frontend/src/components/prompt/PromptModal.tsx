@@ -178,7 +178,7 @@ export function PromptModal() {
             <DialogTitle>Action Required</DialogTitle>
             <Badge variant="secondary">{activePrompt.agentId}</Badge>
           </div>
-          <div className="text-left prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-code:text-primary prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-a:text-primary prose-li:text-foreground">
+          <div className="text-left prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-code:text-primary prose-a:text-primary prose-li:text-foreground">
             <Markdown remarkPlugins={[remarkGfm]}>{activePrompt.message}</Markdown>
           </div>
         </DialogHeader>

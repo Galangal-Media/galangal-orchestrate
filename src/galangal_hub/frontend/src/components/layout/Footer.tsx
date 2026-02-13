@@ -8,7 +8,7 @@ export function Footer() {
         <div className="flex flex-col md:flex-row items-center justify-between gap-4">
           {/* Brand */}
           <div className="flex items-center gap-2.5">
-            <GalangalLogo size={18} />
+            <GalangalLogo size={22} />
             <span className="font-semibold text-sm text-foreground">Galangal Hub</span>
           </div>
 
