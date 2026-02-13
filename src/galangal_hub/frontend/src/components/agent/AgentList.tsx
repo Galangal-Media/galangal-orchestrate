@@ -16,8 +16,8 @@ interface AgentListProps {
 export function AgentList({ agents, emptyMessage = "No agents connected" }: AgentListProps) {
   if (agents.length === 0) {
     return (
-      <div className="text-center py-16 px-4 rounded-xl border border-dashed border-border bg-card/50">
-        <p className="text-muted-foreground">{emptyMessage}</p>
+      <div className="text-center py-12 px-4 rounded-lg border border-dashed border-border">
+        <p className="text-sm text-muted-foreground">{emptyMessage}</p>
       </div>
     )
   }

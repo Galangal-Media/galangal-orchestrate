@@ -8,7 +8,7 @@ export function Layout() {
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">
       <Header />
-      <main className="container flex-1 py-8">
+      <main className="container flex-1 py-6">
         <div className="animate-fade-in">
           <Outlet />
         </div>

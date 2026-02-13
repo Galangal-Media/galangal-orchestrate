@@ -48,21 +48,21 @@ export function ArtifactViewer({ artifacts }: ArtifactViewerProps) {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {artifactEntries.map(([name, content]) => (
         <div key={name} className="border border-border rounded-lg overflow-hidden">
           <button
             onClick={() => toggleExpand(name)}
-            className="w-full flex items-center gap-2 p-3 bg-muted/50 hover:bg-muted transition-colors text-left"
+            className="w-full flex items-center gap-2 px-3 py-2.5 bg-muted/40 hover:bg-muted/70 transition-colors text-left"
           >
             {expanded[name] ? (
-              <ChevronDown className="h-4 w-4" />
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
             ) : (
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
             )}
-            <FileText className="h-4 w-4 text-primary" />
-            <span className="font-medium">{name}</span>
-            <span className="text-xs text-muted-foreground ml-auto">
+            <FileText className="h-3.5 w-3.5 text-primary" />
+            <span className="font-medium text-sm">{name}</span>
+            <span className="text-[11px] text-muted-foreground ml-auto tabular-nums">
               {content.split("\n").length} lines
             </span>
           </button>

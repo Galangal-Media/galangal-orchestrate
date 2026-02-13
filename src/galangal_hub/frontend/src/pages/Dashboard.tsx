@@ -1,11 +1,10 @@
 import { useEffect, useState, useCallback } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { AgentList } from "@/components/agent/AgentList"
 import { TaskList } from "@/components/task/TaskList"
 import { useWebSocket } from "@/hooks/useWebSocket"
 import { api } from "@/lib/api"
 import type { AgentInfo, TaskState, PromptData } from "@/types/api"
-import { Users, ListTodo, AlertCircle, Activity } from "lucide-react"
+import { Activity } from "lucide-react"
 
 interface AgentState {
   agent: AgentInfo
@@ -60,95 +59,72 @@ export function Dashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent" />
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      {/* Page header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Activity className={`h-4 w-4 ${wsConnected ? "text-success" : "text-destructive"}`} />
+        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Activity className={`h-3.5 w-3.5 ${wsConnected ? "text-success" : "text-destructive"}`} />
           <span>{wsConnected ? "Live" : "Disconnected"}</span>
         </div>
       </div>
 
       {error && (
-        <div className="p-4 bg-destructive/10 border border-destructive/50 rounded-lg text-destructive">
+        <div className="px-4 py-3 bg-destructive/10 border border-destructive/40 rounded-lg text-destructive text-sm">
           {error}
         </div>
       )}
 
-      {/* Stats */}
-      <div className="grid gap-6 md:grid-cols-3">
-        <Card className="card-hover">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Connected Agents</CardTitle>
-            <div className="p-2 rounded-lg bg-primary/10">
-              <Users className="h-4 w-4 text-primary" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{connectedAgents.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">Active connections</p>
-          </CardContent>
-        </Card>
-        <Card className="card-hover">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Active Tasks</CardTitle>
-            <div className="p-2 rounded-lg bg-info/10">
-              <ListTodo className="h-4 w-4 text-info" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{activeTasks.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">In progress</p>
-          </CardContent>
-        </Card>
-        <Card className={activePrompts.length > 0 ? "border-warning/50 card-hover" : "card-hover"}>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Pending Actions</CardTitle>
-            <div className={`p-2 rounded-lg ${activePrompts.length > 0 ? "bg-warning/10" : "bg-muted"}`}>
-              <AlertCircle className={`h-4 w-4 ${activePrompts.length > 0 ? "text-warning" : "text-muted-foreground"}`} />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className={`text-3xl font-bold ${activePrompts.length > 0 ? "text-warning" : ""}`}>
-              {activePrompts.length}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Awaiting response</p>
-          </CardContent>
-        </Card>
+      {/* Metrics strip */}
+      <div className="grid grid-cols-3 gap-px bg-border rounded-lg overflow-hidden">
+        <div className="bg-card px-5 py-4">
+          <div className="text-2xl font-bold tabular-nums">{connectedAgents.length}</div>
+          <div className="text-xs text-muted-foreground mt-0.5">Agents connected</div>
+        </div>
+        <div className="bg-card px-5 py-4">
+          <div className="text-2xl font-bold tabular-nums">{activeTasks.length}</div>
+          <div className="text-xs text-muted-foreground mt-0.5">Active tasks</div>
+        </div>
+        <div className="bg-card px-5 py-4">
+          <div className={`text-2xl font-bold tabular-nums ${activePrompts.length > 0 ? "text-warning" : ""}`}>
+            {activePrompts.length}
+          </div>
+          <div className="text-xs text-muted-foreground mt-0.5">Pending actions</div>
+        </div>
       </div>
 
       {/* Agents needing attention */}
       {activePrompts.length > 0 && (
-        <section className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-1 h-6 rounded-full bg-warning" />
-            <h2 className="text-xl font-semibold text-warning">Needs Attention</h2>
+        <section className="space-y-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-warning">Needs Attention</h2>
+            <span className="text-xs text-muted-foreground">({activePrompts.length})</span>
           </div>
           <AgentList agents={activePrompts} />
         </section>
       )}
 
       {/* All connected agents */}
-      <section className="space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-1 h-6 rounded-full bg-primary" />
-          <h2 className="text-xl font-semibold">Connected Agents</h2>
+      <section className="space-y-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Connected Agents</h2>
+          <span className="text-xs text-muted-foreground">({connectedAgents.length})</span>
         </div>
         <AgentList agents={connectedAgents} emptyMessage="No agents connected. Start a Galangal workflow to connect." />
       </section>
 
       {/* Active tasks */}
       {activeTasks.length > 0 && (
-        <section className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-1 h-6 rounded-full bg-info" />
-            <h2 className="text-xl font-semibold">Active Tasks</h2>
+        <section className="space-y-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Active Tasks</h2>
+            <span className="text-xs text-muted-foreground">({activeTasks.length})</span>
           </div>
           <TaskList tasks={activeTasks} />
         </section>

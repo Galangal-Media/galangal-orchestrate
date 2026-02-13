@@ -10,7 +10,7 @@ import { useWebSocket } from "@/hooks/useWebSocket"
 import { api } from "@/lib/api"
 import type { AgentInfo, TaskState, PromptData } from "@/types/api"
 import { formatRelativeTime } from "@/lib/utils"
-import { ArrowLeft, GitBranch, Target, Terminal, Clock, AlertTriangle } from "lucide-react"
+import { ArrowLeft, GitBranch, Terminal, Clock, AlertTriangle } from "lucide-react"
 
 interface AgentDetailData {
   agent: AgentInfo
@@ -113,28 +113,6 @@ function parseOutputLine(line: string, index: number): ParsedOutput | null {
   }
 }
 
-function artifactSection(name: string): string {
-  const upper = name.toUpperCase()
-  if (["SPEC.MD", "PLAN.MD", "DISCOVERY_LOG.MD", "QUESTIONS.MD", "ANSWERS.MD", "APPROVAL.MD"].includes(upper)) {
-    return "PM"
-  }
-  if (upper.startsWith("DESIGN") || upper === "DESIGN.MD") return "DESIGN"
-  if (upper.startsWith("PREFLIGHT")) return "PREFLIGHT"
-  if (upper.startsWith("DEVELOPMENT") || upper === "DEV.MD") return "DEV"
-  if (upper.startsWith("MIGRATION")) return "MIGRATION"
-  if (upper.startsWith("TEST")) return "TEST"
-  if (upper.startsWith("CONTRACT")) return "CONTRACT"
-  if (upper.startsWith("QA")) return "QA"
-  if (upper.startsWith("BENCHMARK")) return "BENCHMARK"
-  if (upper.startsWith("SECURITY")) return "SECURITY"
-  if (upper.startsWith("REVIEW")) return "REVIEW"
-  if (upper.startsWith("DOCS")) return "DOCS"
-  if (upper.startsWith("SUMMARY")) return "SUMMARY"
-  if (upper.endsWith("_DECISION")) return "DECISIONS"
-  if (upper.endsWith("_SKIP.MD")) return "SKIPS"
-  return "OTHER"
-}
-
 export function TaskDetail() {
   const { agentId, taskName } = useParams<{ agentId: string; taskName: string }>()
   const [agent, setAgent] = useState<AgentDetailData | null>(null)
@@ -231,7 +209,7 @@ export function TaskDetail() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent" />
       </div>
     )
   }
@@ -240,12 +218,12 @@ export function TaskDetail() {
     return (
       <div className="space-y-4">
         <Link to={`/agents/${agentId}`}>
-          <Button variant="ghost" size="sm" className="gap-2">
-            <ArrowLeft className="h-4 w-4" />
+          <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground">
+            <ArrowLeft className="h-3.5 w-3.5" />
             Back to Agent
           </Button>
         </Link>
-        <div className="p-4 bg-destructive/10 border border-destructive/50 rounded-xl text-destructive">
+        <div className="px-4 py-3 bg-destructive/10 border border-destructive/40 rounded-lg text-destructive text-sm">
           {error || "Task not found"}
         </div>
       </div>
@@ -254,23 +232,17 @@ export function TaskDetail() {
 
   const task = agent.task
   const artifactNames = Object.keys(agent.artifacts || {}).sort((a, b) => a.localeCompare(b))
-  const artifactsBySection = artifactNames.reduce<Record<string, string[]>>((acc, name) => {
-    const section = artifactSection(name)
-    if (!acc[section]) acc[section] = []
-    acc[section].push(name)
-    return acc
-  }, {})
 
   if (!task || task.task_name !== taskName) {
     return (
       <div className="space-y-4">
         <Link to={`/agents/${agentId}`}>
-          <Button variant="ghost" size="sm" className="gap-2">
-            <ArrowLeft className="h-4 w-4" />
+          <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground">
+            <ArrowLeft className="h-3.5 w-3.5" />
             Back to Agent
           </Button>
         </Link>
-        <div className="p-4 bg-warning/10 border border-warning/50 rounded-xl text-warning">
+        <div className="px-4 py-3 bg-warning/10 border border-warning/40 rounded-lg text-warning text-sm">
           Task "{taskName}" is not currently active on this agent.
         </div>
       </div>
@@ -278,22 +250,22 @@ export function TaskDetail() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="space-y-4">
+      <div className="space-y-3">
         <Link to={`/agents/${agentId}`}>
-          <Button variant="ghost" size="sm" className="gap-2">
-            <ArrowLeft className="h-4 w-4" />
+          <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground">
+            <ArrowLeft className="h-3.5 w-3.5" />
             Back
           </Button>
         </Link>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold break-all min-w-0">{task.task_name}</h1>
-          <Badge variant="default" className="text-sm w-fit flex-shrink-0">{task.stage}</Badge>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight break-all min-w-0">{task.task_name}</h1>
+          <Badge variant="default" className="text-xs w-fit shrink-0">{task.stage}</Badge>
         </div>
-        <p className="text-sm text-muted-foreground">
-          {agent.agent.project_name} &middot; {agent.agent.hostname}
-        </p>
+        <div className="text-sm text-muted-foreground">
+          {agent.agent.project_name} <span className="mx-1 opacity-40">/</span> {agent.agent.hostname}
+        </div>
       </div>
 
       {/* Prompt Card - Show first if there's an active prompt */}
@@ -307,81 +279,80 @@ export function TaskDetail() {
       )}
 
       {/* Task Info */}
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card className="card-hover">
-          <CardHeader className="pb-4">
-            <CardTitle className="flex items-center gap-2">
-              <div className="p-2 rounded-lg bg-info/10">
-                <Target className="h-4 w-4 text-info" />
-              </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
               Task Details
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {task.task_type && (
-              <div className="flex items-start gap-3">
-                <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Type</span>
-                <Badge variant="outline" className="text-xs">{task.task_type}</Badge>
-              </div>
-            )}
-            {task.branch && (
-              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
-                <span className="text-sm font-medium text-muted-foreground sm:min-w-[80px]">Branch</span>
-                <div className="flex items-center gap-2 min-w-0">
-                  <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                  <span className="font-mono text-xs break-all">{task.branch}</span>
+          <CardContent>
+            <dl className="space-y-3 text-sm">
+              {task.task_type && (
+                <div className="flex items-baseline gap-3">
+                  <dt className="text-muted-foreground min-w-[64px] shrink-0">Type</dt>
+                  <dd><Badge variant="outline" className="text-[10px]">{task.task_type}</Badge></dd>
                 </div>
-              </div>
-            )}
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Attempt</span>
-              <span className="text-sm">{task.attempt}</span>
-            </div>
-            {task.started_at && (
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Started</span>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Clock className="h-4 w-4" />
-                  <span>{formatRelativeTime(task.started_at)}</span>
+              )}
+              {task.branch && (
+                <div className="flex items-baseline gap-3">
+                  <dt className="text-muted-foreground min-w-[64px] shrink-0">Branch</dt>
+                  <dd className="flex items-center gap-1.5 min-w-0">
+                    <GitBranch className="h-3 w-3 text-muted-foreground shrink-0" />
+                    <span className="font-mono text-xs break-all">{task.branch}</span>
+                  </dd>
                 </div>
+              )}
+              <div className="flex items-baseline gap-3">
+                <dt className="text-muted-foreground min-w-[64px] shrink-0">Attempt</dt>
+                <dd className="tabular-nums">{task.attempt}</dd>
               </div>
-            )}
-            {task.github_issue && task.github_repo && (
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-medium text-muted-foreground min-w-[80px]">Issue</span>
-                <a
-                  href={`https://github.com/${task.github_repo}/issues/${task.github_issue}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-primary hover:underline"
-                >
-                  #{task.github_issue}
-                </a>
-              </div>
-            )}
+              {task.started_at && (
+                <div className="flex items-baseline gap-3">
+                  <dt className="text-muted-foreground min-w-[64px] shrink-0">Started</dt>
+                  <dd className="flex items-center gap-1.5 text-muted-foreground">
+                    <Clock className="h-3 w-3" />
+                    <span>{formatRelativeTime(task.started_at)}</span>
+                  </dd>
+                </div>
+              )}
+              {task.github_issue && task.github_repo && (
+                <div className="flex items-baseline gap-3">
+                  <dt className="text-muted-foreground min-w-[64px] shrink-0">Issue</dt>
+                  <dd>
+                    <a
+                      href={`https://github.com/${task.github_repo}/issues/${task.github_issue}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      #{task.github_issue}
+                    </a>
+                  </dd>
+                </div>
+              )}
+            </dl>
           </CardContent>
         </Card>
 
         {/* Description & Last Failure */}
-        <Card className="card-hover">
-          <CardHeader className="pb-4">
-            <CardTitle className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-lg bg-primary/10">
-                  <Target className="h-4 w-4 text-primary" />
-                </div>
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
                 Description
-              </div>
+              </CardTitle>
               {(task.description || task.task_description) && (
                 <Button
                   variant="ghost"
                   size="sm"
+                  className="text-xs h-7"
                   onClick={() => setShowDescription(!showDescription)}
                 >
                   {showDescription ? "Hide" : "Show"}
                 </Button>
               )}
-            </CardTitle>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             {(task.description || task.task_description) ? (
@@ -390,21 +361,21 @@ export function TaskDetail() {
                   <Markdown>{task.description || task.task_description}</Markdown>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground italic">
+                <p className="text-xs text-muted-foreground italic">
                   Click "Show" to view description
                 </p>
               )
             ) : (
-              <p className="text-sm text-muted-foreground italic">No description provided</p>
+              <p className="text-xs text-muted-foreground italic">No description provided</p>
             )}
 
             {task.last_failure && (
-              <div className="pt-4 border-t border-border">
-                <div className="flex items-center gap-2 text-warning mb-2">
-                  <AlertTriangle className="h-4 w-4" />
-                  <span className="text-sm font-medium">Last Failure</span>
+              <div className="pt-3 border-t border-border">
+                <div className="flex items-center gap-1.5 text-warning mb-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  <span className="text-xs font-semibold">Last Failure</span>
                 </div>
-                <p className="text-sm text-muted-foreground">{task.last_failure}</p>
+                <p className="text-xs text-muted-foreground leading-relaxed">{task.last_failure}</p>
               </div>
             )}
           </CardContent>
@@ -412,42 +383,47 @@ export function TaskDetail() {
       </div>
 
       {/* Live Output */}
-      <section className="space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-3">
-            <div className="w-1 h-6 rounded-full bg-success" />
-            <h2 className="text-xl font-semibold">Live Output</h2>
-            <span className="text-sm text-muted-foreground">({outputLines.length} lines)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant={verboseMode ? "default" : "outline"}
-              size="sm"
-              onClick={() => setVerboseMode(!verboseMode)}
-            >
-              {verboseMode ? "Verbose" : "AI Only"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setAutoScroll(!autoScroll)}
-              className={autoScroll ? "text-success" : "text-muted-foreground"}
-            >
-              {autoScroll ? "Auto-scroll ON" : "Auto-scroll OFF"}
-            </Button>
-          </div>
-        </div>
+      <section>
         <Card>
-          <CardContent className="p-0">
+          <CardHeader className="pb-0">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
+                <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  Live Output
+                </CardTitle>
+                <span className="text-[11px] text-muted-foreground tabular-nums">({outputLines.length})</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant={verboseMode ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setVerboseMode(!verboseMode)}
+                >
+                  {verboseMode ? "Verbose" : "AI Only"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={`h-7 text-xs ${autoScroll ? "text-success" : "text-muted-foreground"}`}
+                  onClick={() => setAutoScroll(!autoScroll)}
+                >
+                  {autoScroll ? "Auto-scroll" : "Scroll paused"}
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-3">
             <div
               ref={outputRef}
               onScroll={handleScroll}
-              className="h-[400px] overflow-y-auto font-mono text-xs p-4 bg-background/50"
+              className="h-[360px] overflow-y-auto font-mono text-xs rounded-md border border-border bg-background/60 p-3"
             >
               {outputLines.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  <Terminal className="h-8 w-8 mr-3 opacity-50" />
-                  <span>Waiting for output...</span>
+                <div className="flex items-center justify-center h-full text-muted-foreground gap-2">
+                  <Terminal className="h-5 w-5 opacity-40" />
+                  <span className="text-xs">Waiting for output...</span>
                 </div>
               ) : (
                 (() => {
@@ -476,36 +452,34 @@ export function TaskDetail() {
                     }
 
                     // Style based on type
-                    let className = 'py-1 '
-                    let icon = ''
+                    let className = 'py-0.5 '
+                    let prefix = ''
                     switch (parsed.type) {
                       case 'ai_response':
-                        className += 'text-foreground pl-4 border-l-2 border-primary/30'
-                        icon = '💬 '
+                        className += 'text-foreground pl-3 border-l-2 border-primary/30'
                         break
                       case 'tool_use':
                         className += 'text-muted-foreground text-[11px]'
-                        icon = '🔧 '
+                        prefix = '> '
                         break
                       case 'tool_result':
-                        className += parsed.isError ? 'text-destructive text-[11px]' : 'text-muted-foreground/60 text-[11px]'
-                        icon = parsed.isError ? '❌ ' : '✓ '
+                        className += parsed.isError ? 'text-destructive text-[11px]' : 'text-muted-foreground/50 text-[11px]'
+                        prefix = parsed.isError ? 'ERR ' : ''
                         break
                       case 'system':
                         className += 'text-warning text-[11px]'
-                        icon = '⚡ '
+                        prefix = '! '
                         break
                       case 'result':
                         className += 'text-success font-medium'
-                        icon = '✅ '
                         break
                       default:
-                        className += 'text-muted-foreground/50 text-[11px]'
+                        className += 'text-muted-foreground/40 text-[11px]'
                     }
 
                     return (
                       <div key={parsed.id || index} className={className}>
-                        {verboseMode && <span className="opacity-60">{icon}</span>}
+                        {verboseMode && prefix && <span className="opacity-50">{prefix}</span>}
                         {parsed.text}
                       </div>
                     )
@@ -519,44 +493,13 @@ export function TaskDetail() {
 
       {/* Artifacts */}
       {artifactNames.length > 0 && (
-        <>
-          <section className="space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-1 h-6 rounded-full bg-info" />
-              <h2 className="text-xl font-semibold">Database Files</h2>
-              <span className="text-sm text-muted-foreground">({artifactNames.length})</span>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {Object.entries(artifactsBySection)
-                .sort(([a], [b]) => a.localeCompare(b))
-                .map(([section, names]) => (
-                  <Card key={section} className="card-hover">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base flex items-center justify-between">
-                        <span>{section}</span>
-                        <Badge variant="outline" className="text-xs">{names.length}</Badge>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      {names.map((name) => (
-                        <div key={name} className="font-mono text-xs text-muted-foreground break-all">
-                          {name}
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                ))}
-            </div>
-          </section>
-
-          <section className="space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-1 h-6 rounded-full bg-primary" />
-              <h2 className="text-xl font-semibold">Artifacts</h2>
-            </div>
-            <ArtifactViewer artifacts={agent.artifacts} />
-          </section>
-        </>
+        <section className="space-y-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Artifacts</h2>
+            <span className="text-xs text-muted-foreground tabular-nums">({artifactNames.length})</span>
+          </div>
+          <ArtifactViewer artifacts={agent.artifacts} />
+        </section>
       )}
     </div>
   )

@@ -50,32 +50,31 @@ export function TasksList() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent" />
       </div>
     )
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Tasks</h1>
-        <div className="flex items-center gap-3 text-sm">
+        <h1 className="text-2xl font-bold tracking-tight">Tasks</h1>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className={`status-dot ${wsConnected ? "status-connected" : "status-disconnected"}`} />
-          <span className="text-muted-foreground">{wsConnected ? "Live updates" : "Disconnected"}</span>
+          <span>{wsConnected ? "Live" : "Disconnected"}</span>
         </div>
       </div>
 
       {error && (
-        <div className="p-4 bg-destructive/10 border border-destructive/50 rounded-xl text-destructive">
+        <div className="px-4 py-3 bg-destructive/10 border border-destructive/40 rounded-lg text-destructive text-sm">
           {error}
         </div>
       )}
 
-      <section className="space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-1 h-6 rounded-full bg-info" />
-          <h2 className="text-xl font-semibold">Active Tasks</h2>
-          <span className="text-sm text-muted-foreground">({tasks.length})</span>
+      <section className="space-y-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Active</h2>
+          <span className="text-xs text-muted-foreground">({tasks.length})</span>
         </div>
         <TaskList tasks={tasks} emptyMessage="No active tasks" />
       </section>

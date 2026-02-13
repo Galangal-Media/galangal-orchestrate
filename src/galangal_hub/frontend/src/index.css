@@ -1,39 +1,39 @@
-/* Import Inter font - must be first */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* Outfit — geometric, modern, slightly rounded terminals */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
 
 @import "tailwindcss";
 
 @theme {
-  /* Colors - Refined purple/violet accent */
-  --color-primary: #8b5cf6;
-  --color-primary-foreground: #ffffff;
-  --color-primary-hover: #7c3aed;
+  /* Brand — derived from galangal logo chartreuse #d7df23 */
+  --color-primary: #d7df23;
+  --color-primary-foreground: #0a0a0a;
+  --color-primary-hover: #c5cc1f;
 
-  /* Background colors - Softer dark theme */
-  --color-background: #09090b;
-  --color-foreground: #fafafa;
-  --color-card: #18181b;
-  --color-card-foreground: #fafafa;
-  --color-muted: #27272a;
-  --color-muted-foreground: #a1a1aa;
-  --color-border: #3f3f46;
+  /* Warm darks — not zinc, not blue-gray */
+  --color-background: #0c0c0c;
+  --color-foreground: #e4e4e0;
+  --color-card: #151515;
+  --color-card-foreground: #e4e4e0;
+  --color-muted: #1e1e1e;
+  --color-muted-foreground: #8a8a86;
+  --color-border: #282826;
 
-  /* Accent colors */
-  --color-accent: #8b5cf6;
-  --color-accent-foreground: #fafafa;
+  /* Accent mirrors primary */
+  --color-accent: #d7df23;
+  --color-accent-foreground: #0a0a0a;
 
-  /* Status colors - Refined */
-  --color-success: #10b981;
+  /* Semantic — distinct from chartreuse primary */
+  --color-success: #22c55e;
   --color-success-foreground: #ffffff;
-  --color-warning: #f59e0b;
-  --color-warning-foreground: #000000;
+  --color-warning: #f97316;
+  --color-warning-foreground: #ffffff;
   --color-destructive: #ef4444;
   --color-destructive-foreground: #ffffff;
-  --color-info: #3b82f6;
+  --color-info: #38bdf8;
 
-  /* Header/Footer */
-  --color-header: #09090b;
-  --color-header-border: #27272a;
+  /* Chrome */
+  --color-header: #0c0c0c;
+  --color-header-border: #1e1e1e;
 
   /* Radius */
   --radius-sm: 0.375rem;
@@ -42,22 +42,23 @@
   --radius-xl: 1rem;
 }
 
-/* Light theme */
+/* ── Light theme ─────────────────────────────────── */
 .light {
-  --color-primary: #7c3aed;
-  --color-primary-hover: #6d28d9;
-  --color-background: #fafafa;
-  --color-foreground: #18181b;
+  --color-primary: #7d8316;
+  --color-primary-hover: #6d7213;
+  --color-background: #f7f7f4;
+  --color-foreground: #1a1a1a;
   --color-card: #ffffff;
-  --color-card-foreground: #18181b;
-  --color-muted: #f4f4f5;
-  --color-muted-foreground: #71717a;
-  --color-border: #e4e4e7;
+  --color-card-foreground: #1a1a1a;
+  --color-muted: #efefe9;
+  --color-muted-foreground: #5c5c58;
+  --color-border: #ddddd6;
   --color-header: #ffffff;
-  --color-header-border: #e4e4e7;
+  --color-header-border: #ddddd6;
 }
 
-/* Base styles */
+/* ── Base ────────────────────────────────────────── */
+
 * {
   border-color: var(--color-border);
 }
@@ -68,11 +69,11 @@ html {
 
 body {
   @apply bg-background text-foreground antialiased;
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  font-family: 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-/* Container */
+/* ── Container ───────────────────────────────────── */
+
 .container {
   width: 100%;
   margin-left: auto;
@@ -81,44 +82,21 @@ body {
   padding-right: 1.5rem;
 }
 
-@media (min-width: 640px) {
-  .container {
-    max-width: 640px;
-  }
-}
+@media (min-width: 640px)  { .container { max-width: 640px; } }
+@media (min-width: 768px)  { .container { max-width: 768px; } }
+@media (min-width: 1024px) { .container { max-width: 1024px; } }
+@media (min-width: 1280px) { .container { max-width: 1280px; } }
+@media (min-width: 1536px) { .container { max-width: 1400px; } }
 
-@media (min-width: 768px) {
-  .container {
-    max-width: 768px;
-  }
-}
+/* ── Status indicators ───────────────────────────── */
 
-@media (min-width: 1024px) {
-  .container {
-    max-width: 1024px;
-  }
-}
-
-@media (min-width: 1280px) {
-  .container {
-    max-width: 1280px;
-  }
-}
-
-@media (min-width: 1536px) {
-  .container {
-    max-width: 1400px;
-  }
-}
-
-/* Status indicators */
 .status-dot {
-  @apply w-2.5 h-2.5 rounded-full inline-block;
+  @apply w-2 h-2 rounded-full inline-block;
 }
 
 .status-connected {
   @apply bg-success;
-  box-shadow: 0 0 8px var(--color-success);
+  box-shadow: 0 0 6px var(--color-success);
 }
 
 .status-disconnected {
@@ -127,42 +105,41 @@ body {
 
 .status-attention {
   @apply bg-warning;
-  animation: pulse-glow 2s ease-in-out infinite;
+  animation: pulse-attention 2s ease-in-out infinite;
 }
 
-@keyframes pulse-glow {
+@keyframes pulse-attention {
   0%, 100% {
     opacity: 1;
-    box-shadow: 0 0 8px var(--color-warning);
+    box-shadow: 0 0 6px var(--color-warning);
   }
   50% {
-    opacity: 0.6;
-    box-shadow: 0 0 16px var(--color-warning);
+    opacity: 0.7;
+    box-shadow: 0 0 12px var(--color-warning);
   }
 }
 
-/* Card hover effects */
+/* ── Card hover — subtle border shift, no glow ──── */
+
 .card-hover {
   @apply transition-all duration-200;
 }
 
 .card-hover:hover {
-  @apply border-primary/50 shadow-lg;
-  box-shadow: 0 0 20px rgba(139, 92, 246, 0.1);
+  border-color: rgba(215, 223, 35, 0.25);
+  box-shadow: 0 1px 8px rgba(215, 223, 35, 0.04);
 }
 
-/* Gradient text */
-.gradient-text {
-  background: linear-gradient(135deg, var(--color-primary) 0%, #c084fc 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+.light .card-hover:hover {
+  border-color: rgba(125, 131, 22, 0.3);
+  box-shadow: 0 1px 8px rgba(125, 131, 22, 0.06);
 }
 
-/* Scrollbar styling */
+/* ── Scrollbar ───────────────────────────────────── */
+
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -177,43 +154,39 @@ body {
   @apply bg-muted-foreground;
 }
 
-/* Focus styles */
+/* ── Focus / Selection ───────────────────────────── */
+
 :focus-visible {
-  @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-background;
+  @apply outline-none ring-2 ring-primary/60 ring-offset-2 ring-offset-background;
 }
 
-/* Selection */
 ::selection {
   background: var(--color-primary);
   color: var(--color-primary-foreground);
 }
 
-/* Animations */
+/* ── Animations ──────────────────────────────────── */
+
 @keyframes fade-in {
   from { opacity: 0; }
-  to { opacity: 1; }
+  to   { opacity: 1; }
 }
 
 @keyframes slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .animate-fade-in {
-  animation: fade-in 0.3s ease-out;
+  animation: fade-in 0.25s ease-out;
 }
 
 .animate-slide-up {
-  animation: slide-up 0.4s ease-out;
+  animation: slide-up 0.3s ease-out;
 }
 
-/* Markdown prose styles */
+/* ── Markdown prose ──────────────────────────────── */
+
 .prose {
   line-height: 1.7;
 }
