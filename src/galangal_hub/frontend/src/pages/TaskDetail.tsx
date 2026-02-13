@@ -154,6 +154,14 @@ export function TaskDetail() {
 
     try {
       const data = await api.getAgent(agentId)
+      if (taskName) {
+        try {
+          const artifactData = await api.getTaskArtifacts(agentId, taskName)
+          data.artifacts = artifactData.artifacts
+        } catch {
+          // Fall back to agent payload if task artifacts endpoint is unavailable.
+        }
+      }
       setAgent(data)
       setError(null)
     } catch (err) {
@@ -161,7 +169,7 @@ export function TaskDetail() {
     } finally {
       setLoading(false)
     }
-  }, [agentId])
+  }, [agentId, taskName])
 
   const fetchOutput = useCallback(async () => {
     if (!agentId) return

@@ -44,6 +44,13 @@ async function getRecentTasks(limit: number = 20): Promise<TaskRecord[]> {
   return fetchJson<TaskRecord[]>(`${BASE_URL}/tasks/recent?limit=${limit}`)
 }
 
+async function getTaskArtifacts(
+  agentId: string,
+  taskName: string
+): Promise<{ agent_id: string; task_name: string; artifacts: Record<string, string>; count: number }> {
+  return fetchJson(`${BASE_URL}/tasks/${agentId}/${encodeURIComponent(taskName)}/artifacts`)
+}
+
 // Events
 async function getEvents(agentId: string, limit: number = 50): Promise<WorkflowEvent[]> {
   return fetchJson<WorkflowEvent[]>(`${BASE_URL}/agents/${agentId}/events?limit=${limit}`)
@@ -126,6 +133,7 @@ export const api = {
   getAgent,
   getTasks,
   getRecentTasks,
+  getTaskArtifacts,
   getEvents,
   approveTask,
   rejectTask,
@@ -142,6 +150,7 @@ export {
   getAgent,
   getTasks,
   getRecentTasks,
+  getTaskArtifacts,
   getEvents,
   approveTask,
   rejectTask,

@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 
-from galangal.core.task_index import TaskIndex
 from galangal_hub.models import AgentInfo, AgentWithState, TaskState
 
 pytest.importorskip("fastapi")
@@ -35,15 +34,20 @@ def _make_connected_agent(*, project_path: Path, task_name: str) -> AgentWithSta
 
 
 @pytest.mark.asyncio
-async def test_get_agent_loads_artifacts_from_task_db(monkeypatch: pytest.MonkeyPatch, galangal_project: Path):
+async def test_get_agent_loads_artifacts_from_hub_db(monkeypatch: pytest.MonkeyPatch, galangal_project: Path):
     task_name = "task-from-db"
-    db_path = galangal_project / ".galangal" / "tasks.db"
-    index = TaskIndex(db_path=db_path)
-    index.record_artifact_write(task_name=task_name, name="PLAN.md", content="# Plan from DB")
-    index.record_artifact_write(task_name=task_name, name="SUMMARY.md", content="# Summary from DB")
-
     agent = _make_connected_agent(project_path=galangal_project, task_name=task_name)
     monkeypatch.setattr(agents_api.manager, "get_agent", lambda _agent_id: agent)
+
+    async def _mock_get_task_artifacts(*, agent_id: str, task_name: str) -> dict[str, str]:
+        assert agent_id == "agent-1"
+        assert task_name == "task-from-db"
+        return {
+            "PLAN.md": "# Plan from DB",
+            "SUMMARY.md": "# Summary from DB",
+        }
+
+    monkeypatch.setattr(agents_api.storage, "get_task_artifacts", _mock_get_task_artifacts)
 
     result = await agents_api.get_agent("agent-1")
 

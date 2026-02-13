@@ -395,8 +395,21 @@ async def agent_websocket(websocket: WebSocket) -> None:
                 agent_id = registered_agent_id
                 artifacts = payload.get("artifacts", {})
                 replace = bool(payload.get("replace", False))
-                if artifacts and isinstance(artifacts, dict):
+                if isinstance(artifacts, dict):
                     await manager.update_artifacts(agent_id, artifacts, replace=replace)
+                    # Persist artifacts by task for restart-safe retrieval in task views.
+                    task_name = payload.get("task_name")
+                    if not task_name:
+                        agent = manager.get_agent(agent_id)
+                        if agent and agent.task:
+                            task_name = agent.task.task_name
+                    if task_name:
+                        await storage.upsert_task_artifacts(
+                            agent_id=agent_id,
+                            task_name=str(task_name),
+                            artifacts=artifacts,
+                            replace=replace,
+                        )
                     logger.info(f"Agent {agent_id}: artifacts updated - {list(artifacts.keys())}")
 
             elif msg_type == MessageType.GITHUB_ISSUES:

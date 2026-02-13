@@ -309,13 +309,20 @@ class HubClient:
             },
         )
 
-    async def send_artifacts(self, artifacts: dict[str, str], *, replace: bool = False) -> None:
+    async def send_artifacts(
+        self,
+        artifacts: dict[str, str],
+        *,
+        replace: bool = False,
+        task_name: str | None = None,
+    ) -> None:
         """
         Send artifact contents to hub.
 
         Args:
             artifacts: Dict mapping artifact names to content.
             replace: If True, replace all known artifacts on the hub for the task.
+            task_name: Optional explicit task name for persistence.
         """
         if not self._connected:
             return
@@ -325,6 +332,7 @@ class HubClient:
             {
                 "artifacts": artifacts,
                 "replace": replace,
+                "task_name": task_name,
             },
         )
 

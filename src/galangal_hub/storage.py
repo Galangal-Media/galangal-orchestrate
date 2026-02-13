@@ -80,10 +80,22 @@ class HubStorage:
                 FOREIGN KEY (agent_id) REFERENCES agents (agent_id)
             );
 
+            CREATE TABLE IF NOT EXISTS task_artifacts (
+                agent_id TEXT NOT NULL,
+                task_name TEXT NOT NULL,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (agent_id, task_name, name),
+                FOREIGN KEY (agent_id) REFERENCES agents (agent_id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_tasks_agent ON tasks (agent_id);
             CREATE INDEX IF NOT EXISTS idx_tasks_started ON tasks (started_at);
             CREATE INDEX IF NOT EXISTS idx_events_agent ON events (agent_id);
             CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events (timestamp);
+            CREATE INDEX IF NOT EXISTS idx_task_artifacts_task
+                ON task_artifacts (agent_id, task_name, updated_at);
             """
         )
         await self._db.commit()
@@ -285,6 +297,61 @@ class HubStorage:
         rows = await cursor.fetchall()
         columns = [desc[0] for desc in cursor.description]
         return [dict(zip(columns, row)) for row in rows]
+
+    async def upsert_task_artifacts(
+        self,
+        *,
+        agent_id: str,
+        task_name: str,
+        artifacts: dict[str, str],
+        replace: bool = False,
+    ) -> None:
+        """Persist task artifacts for a specific agent/task."""
+        if not self._db or not agent_id or not task_name:
+            return
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        if replace:
+            await self._db.execute(
+                "DELETE FROM task_artifacts WHERE agent_id = ? AND task_name = ?",
+                (agent_id, task_name),
+            )
+
+        if artifacts:
+            rows = [
+                (agent_id, task_name, name, content, now)
+                for name, content in artifacts.items()
+            ]
+            await self._db.executemany(
+                """
+                INSERT INTO task_artifacts (agent_id, task_name, name, content, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(agent_id, task_name, name) DO UPDATE SET
+                    content = excluded.content,
+                    updated_at = excluded.updated_at
+                """,
+                rows,
+            )
+
+        await self._db.commit()
+
+    async def get_task_artifacts(self, *, agent_id: str, task_name: str) -> dict[str, str]:
+        """Get persisted artifacts for an agent/task pair."""
+        if not self._db or not agent_id or not task_name:
+            return {}
+
+        cursor = await self._db.execute(
+            """
+            SELECT name, content
+            FROM task_artifacts
+            WHERE agent_id = ? AND task_name = ?
+            ORDER BY name ASC
+            """,
+            (agent_id, task_name),
+        )
+        rows = await cursor.fetchall()
+        return {str(row[0]): str(row[1]) for row in rows}
 
 
 # Global storage instance

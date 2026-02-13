@@ -1,9 +1,10 @@
 import { Link, useLocation } from "react-router-dom"
-import { Moon, Sun, Menu, X, Sparkles, LogOut } from "lucide-react"
+import { Moon, Sun, Menu, X, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useTheme } from "@/hooks/useTheme"
 import { cn } from "@/lib/utils"
 import { useState, useEffect } from "react"
+import galangalLogo from "@/assets/galangalLogo.svg"
 
 const navItems = [
   { path: "/", label: "Dashboard" },
@@ -34,8 +35,13 @@ export function Header() {
       <div className="container flex h-16 items-center">
         <div className="mr-4 flex">
           <Link to="/" className="mr-8 flex items-center gap-3 group">
-            <div className="relative flex items-center justify-center w-9 h-9 rounded-lg bg-gradient-to-br from-primary to-purple-400 shadow-lg shadow-primary/25 group-hover:shadow-primary/40 transition-shadow">
-              <Sparkles className="w-5 h-5 text-white" />
+            <div className="relative flex items-center justify-center w-9 h-9 rounded-lg bg-muted/70 ring-1 ring-border/70 overflow-hidden">
+              <img
+                src={galangalLogo}
+                alt=""
+                aria-hidden="true"
+                className="h-7 w-7 object-contain dark:brightness-125 dark:contrast-125"
+              />
             </div>
             <span className="font-bold text-lg gradient-text">Galangal Hub</span>
           </Link>

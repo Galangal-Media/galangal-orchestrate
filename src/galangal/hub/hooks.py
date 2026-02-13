@@ -97,7 +97,7 @@ async def _send_task_artifacts_snapshot(task_name: str) -> None:
     if not client:
         return
     artifacts = _load_task_artifacts_snapshot(task_name)
-    await client.send_artifacts(artifacts, replace=True)
+    await client.send_artifacts(artifacts, replace=True, task_name=task_name)
 
 
 def notify_stage_start(state: WorkflowState, stage: Stage) -> None:

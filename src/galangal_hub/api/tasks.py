@@ -67,3 +67,22 @@ async def get_task(agent_id: str, task_name: str) -> dict[str, Any]:
             }
 
     return {"error": "Task not found"}
+
+
+@router.get("/{agent_id}/{task_name}/artifacts")
+async def get_task_artifacts(agent_id: str, task_name: str) -> dict[str, Any]:
+    """Get artifacts for a specific task from DB (merged with in-memory live artifacts)."""
+    persisted = await storage.get_task_artifacts(agent_id=agent_id, task_name=task_name)
+    merged = dict(persisted)
+
+    # If task is currently active, overlay latest in-memory artifacts.
+    agent = manager.get_agent(agent_id)
+    if agent and agent.task and agent.task.task_name == task_name:
+        merged.update(agent.artifacts)
+
+    return {
+        "agent_id": agent_id,
+        "task_name": task_name,
+        "artifacts": merged,
+        "count": len(merged),
+    }
