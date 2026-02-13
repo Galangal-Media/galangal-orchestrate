@@ -341,11 +341,10 @@ grep "COMPLETED" galangal-tasks/my-task/DEVELOPMENT.md
 
 ### View Validation Logs
 
-Stage logs include validation output:
+Validation output is stored in task DB logs (`.galangal/tasks.db`, `task_logs` table):
 
-```bash
-cat galangal-tasks/my-task/logs/dev_1.log
-```
+- In Hub: open the task detail page and use **Live Output**.
+- Programmatically: read `task_logs` rows from `.galangal/tasks.db` for the task.
 
 ## Best Practices
 

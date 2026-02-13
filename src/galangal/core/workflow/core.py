@@ -10,13 +10,12 @@ from typing import TYPE_CHECKING, Any
 from galangal.ai import get_backend_for_stage
 from galangal.ai.base import PauseCheck
 from galangal.config.loader import get_config
-from galangal.core.artifacts import artifact_exists, artifact_path, read_artifact, write_artifact
+from galangal.core.artifacts import artifact_exists, delete_artifact, read_artifact, write_artifact
 from galangal.core.state import (
     STAGE_ORDER,
     Stage,
     WorkflowState,
     get_conditional_stages,
-    get_task_dir,
     save_state,
     should_skip_for_task_type,
 )
@@ -32,6 +31,56 @@ if TYPE_CHECKING:
 
 # Get conditional stages from metadata (cached at module load)
 CONDITIONAL_STAGES: dict[Stage, str] = get_conditional_stages()
+
+
+def get_task_dir(task_name: str):
+    """Compatibility shim for tests patching this symbol."""
+    from galangal.core.state import get_task_dir as _get_task_dir
+
+    return _get_task_dir(task_name)
+
+
+def _append_task_log(task_name: str, line: str, *, line_type: str = "system") -> None:
+    """Best-effort DB task log append."""
+    if not line:
+        return
+    try:
+        from galangal.core.task_index import TaskIndex
+
+        TaskIndex().append_task_log_line(
+            task_name=task_name,
+            line=line,
+            line_type=line_type,
+        )
+    except Exception:
+        pass
+
+
+def _append_task_log_block(
+    task_name: str,
+    *,
+    title: str,
+    content: str,
+    line_type: str = "system",
+) -> None:
+    """Append a titled multi-line block to task DB logs."""
+    _append_task_log(task_name, title, line_type=line_type)
+    if not content:
+        return
+    lines = content.splitlines()
+    if not lines:
+        return
+    try:
+        from galangal.core.task_index import TaskIndex
+
+        TaskIndex().append_task_log_lines(
+            task_name=task_name,
+            lines=lines,
+            line_type=line_type,
+        )
+    except Exception:
+        for line in lines:
+            _append_task_log(task_name, line, line_type=line_type)
 
 
 def _format_issues(issues: list[dict[str, Any]]) -> str:
@@ -271,17 +320,12 @@ def _execute_test_gate(
     task_name = state.task_name
     test_config = config.test_gate
     project_root = get_project_root()
-    logs_dir = get_task_dir(task_name) / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
 
     max_output_chars = 200_000
     output_queue_size = 200
 
-    def _sanitize_filename(name: str) -> str:
-        cleaned = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in name.lower())
-        return cleaned.strip("_") or "test"
-
     tui_app.add_activity("Running test gate checks...", "🧪")
+    _append_task_log(task_name, "=== TEST_GATE START ===", line_type="meta")
 
     # Track results for each test suite
     results: list[dict[str, Any]] = []
@@ -292,7 +336,6 @@ def _execute_test_gate(
         proc: subprocess.Popen,
         output_tail: deque[str],
         queue: Queue,
-        log_handle: Any | None,
         truncated_flag: list[bool],
     ) -> None:
         """Read process output, stream to queue, and keep a bounded tail."""
@@ -301,13 +344,6 @@ def _execute_test_gate(
             for line in iter(proc.stdout.readline, ""):
                 if not line:
                     break
-                if log_handle:
-                    try:
-                        log_handle.write(line)
-                    except (OSError, ValueError):
-                        # OSError: disk full, etc.
-                        # ValueError: I/O operation on closed file (during shutdown)
-                        log_handle = None
 
                 output_tail.append(line)
                 output_chars += len(line)
@@ -316,8 +352,16 @@ def _execute_test_gate(
                     removed = output_tail.popleft()
                     output_chars -= len(removed)
 
+                clean_line = line.rstrip("\n")
                 try:
-                    queue.put(line.rstrip("\n"), timeout=1)
+                    from galangal.hub.hooks import notify_output
+
+                    notify_output(clean_line, "test_gate", task_name=task_name)
+                except Exception:
+                    _append_task_log(task_name, clean_line, line_type="test_gate")
+
+                try:
+                    queue.put(clean_line, timeout=1)
                 except Full:
                     pass
         finally:
@@ -334,15 +378,13 @@ def _execute_test_gate(
         output_truncated = [False]
         exit_code = -1
         timed_out = False
-        log_handle = None
-        log_path = logs_dir / f"test_gate_{_sanitize_filename(test.name)}.log"
+        _append_task_log(
+            task_name,
+            f"[TEST_GATE] Running '{test.name}' command: {test.command}",
+            line_type="meta",
+        )
 
         try:
-            try:
-                log_handle = open(log_path, "w", encoding="utf-8")
-            except OSError:
-                log_handle = None
-
             # Start process with stdout/stderr combined and piped
             proc = subprocess.Popen(
                 test.command,
@@ -358,7 +400,7 @@ def _execute_test_gate(
             output_queue: Queue = Queue(maxsize=output_queue_size)
             reader_thread = threading.Thread(
                 target=stream_output,
-                args=(proc, output_tail, output_queue, log_handle, output_truncated),
+                args=(proc, output_tail, output_queue, output_truncated),
                 daemon=True,
             )
             reader_thread.start()
@@ -402,19 +444,14 @@ def _execute_test_gate(
         except Exception as e:
             output_tail.append(f"Error running command: {e}")
             exit_code = -1
-        finally:
-            if log_handle:
-                try:
-                    log_handle.close()
-                except OSError:
-                    pass
 
         # Process results - include bounded tail for artifact
         output = "".join(output_tail)
         if output_truncated[0]:
             output = (
                 f"[Output truncated to last {max_output_chars} characters. "
-                f"Full log: {log_path}]\n\n{output}"
+                "Full output is available in task_logs (.galangal/tasks.db).]\n\n"
+                f"{output}"
             )
 
         if timed_out:
@@ -447,10 +484,16 @@ def _execute_test_gate(
 
             if passed:
                 tui_app.add_activity(f"✓ {test.name} passed", "✅")
+                _append_task_log(task_name, f"[TEST_GATE] '{test.name}' passed", line_type="meta")
             else:
                 tui_app.add_activity(f"✗ {test.name} failed (exit code {exit_code})", "❌")
                 all_passed = False
                 failed_tests.append(test.name)
+                _append_task_log(
+                    task_name,
+                    f"[TEST_GATE] '{test.name}' failed (exit code {exit_code})",
+                    line_type="meta",
+                )
 
                 # Stop on first failure if fail_fast is enabled
                 if test_config.fail_fast:
@@ -501,10 +544,12 @@ def _execute_test_gate(
     if all_passed:
         message = f"All {total_count} test suite(s) passed"
         tui_app.show_message(f"Test Gate: {message}", "success")
+        _append_task_log(task_name, f"=== TEST_GATE PASS: {message} ===", line_type="meta")
         return StageResult.create_success(message)
     else:
         message = f"Test gate failed: {len(failed_tests)} test suite(s) failed"
         tui_app.show_message(f"Test Gate: {message}", "error")
+        _append_task_log(task_name, f"=== TEST_GATE FAIL: {message} ===", line_type="meta")
         return StageResult.rollback_required(
             message=message,
             rollback_to=Stage.DEV,
@@ -529,7 +574,7 @@ def execute_stage(
     with project-specific overrides. Retry context is appended when
     state.attempt > 1.
 
-    All prompts and outputs are logged to the task's logs/ directory.
+    Stage metadata and output context are logged to task DB logs in `.galangal/tasks.db`.
 
     Args:
         state: Current workflow state containing stage, task_name, attempt count,
@@ -630,16 +675,17 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
 """
         prompt = f"{prompt}\n\n{retry_context}"
 
-    # Set up log file for streaming output
-    logs_dir = get_task_dir(task_name) / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    log_file = logs_dir / f"{stage.value.lower()}_{state.attempt}.log"
-
-    # Write prompt header to log file
-    with open(log_file, "w") as f:
-        f.write(f"=== Prompt ===\n{prompt}\n\n")
-        f.write(f"=== Backend: {backend.name} ===\n")
-        f.write("=== Streaming Output ===\n")
+    _append_task_log(
+        task_name,
+        f"=== STAGE {stage.value} ATTEMPT {state.attempt} START (backend={backend.name}) ===",
+        line_type="meta",
+    )
+    _append_task_log_block(
+        task_name,
+        title="=== Prompt ===",
+        content=prompt,
+        line_type="prompt",
+    )
 
     tui_app.add_activity(f"Using {backend.name} backend", "🤖")
 
@@ -652,17 +698,24 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         ui=ui,
         pause_check=pause_check,
         stage=stage.value,
-        log_file=str(log_file),  # Pass log file for streaming
+        log_file=None,
     )
 
-    # Add completion marker to log
-    with open(log_file, "a") as f:
-        f.write(f"\n=== Result: {invoke_result.type.value} ===\n")
-        if invoke_result.message:
-            f.write(f"{invoke_result.message}\n")
+    _append_task_log(
+        task_name,
+        f"=== STAGE RESULT: {invoke_result.type.value} ===",
+        line_type="meta",
+    )
+    if invoke_result.message:
+        _append_task_log(task_name, invoke_result.message, line_type="meta")
 
     # Return early if AI invocation failed
     if not invoke_result.success:
+        _append_task_log(
+            task_name,
+            f"=== STAGE {stage.value} FAILED BEFORE VALIDATION ===",
+            line_type="meta",
+        )
         return invoke_result
 
     # Post-process for read-only backends (e.g., Codex with read_only=true)
@@ -676,15 +729,18 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     runner = ValidationRunner()
     result = runner.validate_stage(stage.value, task_name)
 
-    # Log validation details including rollback_to for debugging
-    with open(log_file, "a") as f:
-        f.write("\n=== Validation ===\n")
-        f.write(f"success: {result.success}\n")
-        f.write(f"message: {result.message}\n")
-        f.write(f"rollback_to: {result.rollback_to}\n")
-        f.write(f"skipped: {result.skipped}\n")
-        if result.output:
-            f.write(f"\n=== Validation Output ===\n{result.output}\n")
+    _append_task_log(task_name, "=== Validation ===", line_type="validation")
+    _append_task_log(task_name, f"success: {result.success}", line_type="validation")
+    _append_task_log(task_name, f"message: {result.message}", line_type="validation")
+    _append_task_log(task_name, f"rollback_to: {result.rollback_to}", line_type="validation")
+    _append_task_log(task_name, f"skipped: {result.skipped}", line_type="validation")
+    if result.output:
+        _append_task_log_block(
+            task_name,
+            title="=== Validation Output ===",
+            content=result.output,
+            line_type="validation",
+        )
 
     duration = time.time() - start_time
 
@@ -699,6 +755,7 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
 
     if result.success:
         tui_app.show_message(result.message, "success")
+        _append_task_log(task_name, f"=== STAGE {stage.value} SUCCESS ===", line_type="meta")
         workflow_logger.stage_completed(
             stage=stage.value,
             task_name=task_name,
@@ -716,6 +773,11 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
             )
 
         tui_app.show_message(result.message, "error")
+        _append_task_log(
+            task_name,
+            f"=== STAGE {stage.value} VALIDATION FAILED ===",
+            line_type="meta",
+        )
         workflow_logger.stage_failed(
             stage=stage.value,
             task_name=task_name,
@@ -800,18 +862,16 @@ def archive_rollback_if_exists(task_name: str, tui_app: WorkflowTUIApp) -> None:
         return
 
     rollback_content = read_artifact("ROLLBACK.md", task_name) or ""
-    resolved_path = artifact_path("ROLLBACK_RESOLVED.md", task_name)
 
     resolution_note = f"\n\n## Resolved: {now_iso()}\n\nIssues fixed by DEV stage.\n"
-
-    if resolved_path.exists():
-        existing = resolved_path.read_text()
-        resolved_path.write_text(existing + "\n---\n" + rollback_content + resolution_note)
+    existing = read_artifact("ROLLBACK_RESOLVED.md", task_name)
+    if existing:
+        resolved_content = existing + "\n---\n" + rollback_content + resolution_note
     else:
-        resolved_path.write_text(rollback_content + resolution_note)
+        resolved_content = rollback_content + resolution_note
 
-    rollback_path = artifact_path("ROLLBACK.md", task_name)
-    rollback_path.unlink()
+    write_artifact("ROLLBACK_RESOLVED.md", resolved_content, task_name)
+    delete_artifact("ROLLBACK.md", task_name)
 
     tui_app.add_activity("Archived ROLLBACK.md → ROLLBACK_RESOLVED.md", "📋")
 

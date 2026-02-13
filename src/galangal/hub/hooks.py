@@ -8,7 +8,8 @@ and events with the hub server.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Coroutine, Any
+from collections.abc import Coroutine
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from galangal.core.state import Stage, WorkflowState
@@ -61,6 +62,7 @@ def notify_state_saved(state: WorkflowState) -> None:
     if client and client.connected:
         # Run async in background (thread-safe)
         _schedule_async(_send_state_update(state))
+        _schedule_async(_send_task_artifacts_snapshot(state.task_name))
 
 
 async def _send_state_update(state: WorkflowState) -> None:
@@ -68,6 +70,34 @@ async def _send_state_update(state: WorkflowState) -> None:
     client = get_hub_client()
     if client:
         await client.send_state(state)
+
+
+def _load_task_artifacts_snapshot(task_name: str) -> dict[str, str]:
+    """Load all present task artifacts from DB for hub display."""
+    try:
+        from galangal.core.task_index import TaskIndex
+
+        index = TaskIndex()
+        artifacts: dict[str, str] = {}
+        for name in index.list_task_artifacts(task_name=task_name):
+            content = index.read_artifact(task_name=task_name, name=name)
+            if content is None:
+                continue
+            if len(content) > 50000:
+                content = content[:50000] + "\n\n[... truncated]"
+            artifacts[name] = content
+        return artifacts
+    except Exception:
+        return {}
+
+
+async def _send_task_artifacts_snapshot(task_name: str) -> None:
+    """Send latest DB-backed artifacts for task to hub."""
+    client = get_hub_client()
+    if not client:
+        return
+    artifacts = _load_task_artifacts_snapshot(task_name)
+    await client.send_artifacts(artifacts, replace=True)
 
 
 def notify_stage_start(state: WorkflowState, stage: Stage) -> None:
@@ -302,14 +332,38 @@ async def _send_artifacts(artifacts: dict[str, str]) -> None:
         await client.send_artifacts(artifacts)
 
 
-def notify_output(line: str, line_type: str = "raw") -> None:
+def _resolve_active_task_name() -> str | None:
+    """Best-effort active task lookup for DB log persistence."""
+    try:
+        from galangal.core.tasks import get_active_task
+
+        return get_active_task()
+    except Exception:
+        return None
+
+
+def notify_output(line: str, line_type: str = "raw", task_name: str | None = None) -> None:
     """
     Notify hub of CLI output.
 
     Args:
         line: The output line content.
         line_type: Type of line (raw, activity, tool, error).
+        task_name: Optional explicit task name for DB log persistence.
     """
+    resolved_task_name = task_name or _resolve_active_task_name()
+    if resolved_task_name and line:
+        try:
+            from galangal.core.task_index import TaskIndex
+
+            TaskIndex().append_task_log_line(
+                task_name=resolved_task_name,
+                line=line.rstrip("\n"),
+                line_type=line_type,
+            )
+        except Exception:
+            pass
+
     client = get_hub_client()
     if client and client.connected:
         _schedule_async(_send_output(line, line_type))

@@ -170,16 +170,8 @@ User Command → CLI
 ```
 galangal-tasks/
 ├── <task-name>/
-│   ├── state.json         # WorkflowState
-│   ├── SPEC.md            # PM output
-│   ├── PLAN.md            # PM output
-│   ├── DESIGN.md          # Design output
-│   ├── DEVELOPMENT.md     # Dev progress
-│   ├── ROLLBACK.md        # Issues to fix
-│   └── logs/
-│       ├── pm_1.log
-│       ├── dev_1.log
-│       └── ...
+│   └── state.json         # WorkflowState (canonical)
+│      (artifacts and task logs are stored in `.galangal/tasks.db`)
 └── done/                  # Completed tasks
 ```
 

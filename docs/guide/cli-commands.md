@@ -11,7 +11,7 @@ This document provides a reference for all Galangal CLI commands.
 | **Workflow Control** | `resume`, `pause`, `approve`, `approve-design` |
 | **Stage Skipping** | `skip-design`, `skip-security`, `skip-migration`, `skip-contract`, `skip-benchmark`, `skip-to` |
 | **Completion** | `complete` |
-| **Utilities** | `status`, `prompts` |
+| **Utilities** | `status`, `prompts`, `index` |
 
 ## Setup Commands
 
@@ -154,6 +154,19 @@ galangal approve-design
 ```
 
 Shortcut for design stage approval. Equivalent to running `approve` when in DESIGN stage.
+
+## Utilities
+
+### index
+
+Manage the local SQLite task index (`.galangal/tasks.db`):
+
+```bash
+galangal index stats
+galangal index rebuild
+galangal index migrate-artifacts
+galangal index compact-done
+```
 
 ## Stage Skipping Commands
 

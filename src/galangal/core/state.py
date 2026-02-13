@@ -791,7 +791,8 @@ class ExecutionState:
         self.attempt += 1
         if len(error) > max_length:
             self.last_failure = (
-                error[:max_length] + "\n\n[... truncated, see logs/ for full output]"
+                error[:max_length]
+                + "\n\n[... truncated, see task logs in .galangal/tasks.db for full output]"
             )
         else:
             self.last_failure = error
@@ -1778,6 +1779,15 @@ def save_state(state: WorkflowState) -> None:
     state_file = task_dir / "state.json"
     with open(state_file, "w") as f:
         json.dump(state.to_dict(), f, indent=2)
+
+    # Best-effort task index update (non-canonical sidecar store).
+    try:
+        from galangal.core.task_index import TaskIndex
+
+        TaskIndex().upsert_state(state)
+    except Exception:
+        # Index failures must not block canonical state persistence.
+        pass
 
     # Notify hub if connected
     from galangal.hub.hooks import notify_state_saved

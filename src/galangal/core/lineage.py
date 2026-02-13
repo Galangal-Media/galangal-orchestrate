@@ -493,19 +493,21 @@ def load_task_artifacts(task_name: str) -> dict[str, str]:
     Returns:
         Dict mapping artifact names to their content.
     """
-    from galangal.core.state import get_task_dir
-
-    task_dir = get_task_dir(task_name)
     artifacts: dict[str, str] = {}
+    try:
+        from galangal.core.task_index import TaskIndex
 
-    if not task_dir.exists():
-        return artifacts
-
-    for path in task_dir.iterdir():
-        if path.is_file() and path.suffix == ".md":
-            try:
-                artifacts[path.name] = path.read_text()
-            except OSError:
-                pass  # Skip unreadable files
+        index = TaskIndex()
+        for name in index.list_task_artifacts(task_name=task_name):
+            # Lineage currently tracks markdown artifacts only.
+            if not name.endswith(".md"):
+                continue
+            content = index.read_artifact(task_name=task_name, name=name)
+            if content is not None:
+                artifacts[name] = content
+    except Exception:
+        # If task index is unavailable/corrupt, return empty set and let
+        # lineage checks degrade gracefully.
+        return {}
 
     return artifacts

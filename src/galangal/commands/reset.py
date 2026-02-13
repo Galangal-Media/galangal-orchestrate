@@ -21,6 +21,12 @@ def cmd_reset(args: argparse.Namespace) -> int:
 
     task_dir = get_task_dir(active)
     if not task_dir.exists():
+        try:
+            from galangal.core.task_index import TaskIndex
+
+            TaskIndex().mark_task_deleted(task_name=active)
+        except Exception:
+            pass
         print_info("Task directory not found.")
         clear_active_task()
         return 0
@@ -36,6 +42,12 @@ def cmd_reset(args: argparse.Namespace) -> int:
             return 1
 
     shutil.rmtree(task_dir)
+    try:
+        from galangal.core.task_index import TaskIndex
+
+        TaskIndex().mark_task_deleted(task_name=active)
+    except Exception:
+        pass
     clear_active_task()
     print_success(f"Task '{active}' deleted.")
     return 0

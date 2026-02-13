@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from galangal.ai.base import AIBackend, PauseCheck
-from galangal.config.loader import reset_caches
+from galangal.config.loader import reset_caches, set_project_root
 from galangal.config.schema import GalangalConfig, ProjectConfig, StageConfig
 from galangal.core.state import Stage, TaskType, WorkflowState
 from galangal.results import StageResult
@@ -144,6 +144,8 @@ def mock_ui():
 @pytest.fixture
 def galangal_project(tmp_path: Path) -> Path:
     """Create a minimal galangal project structure."""
+    set_project_root(tmp_path)
+
     # Create .galangal directory
     galangal_dir = tmp_path / ".galangal"
     galangal_dir.mkdir()

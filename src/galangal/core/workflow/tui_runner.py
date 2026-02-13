@@ -19,7 +19,7 @@ from rich.console import Console
 
 from galangal.config.loader import get_config
 from galangal.config.schema import GalangalConfig
-from galangal.core.artifacts import parse_stage_plan, write_artifact
+from galangal.core.artifacts import parse_stage_plan, read_artifact, write_artifact
 from galangal.core.state import (
     STAGE_ORDER,
     TASK_TYPE_SKIP_STAGES,
@@ -1046,14 +1046,23 @@ async def _generate_discovery_questions(
 
     prompt = builder.build_discovery_prompt(state, qa_history)
     config = get_config()
-
-    # Log the prompt
-    logs_dir = get_task_dir(state.task_name) / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
     round_num = len(qa_history) + 1
-    log_file = logs_dir / f"discovery_{round_num}.log"
-    with open(log_file, "w") as f:
-        f.write(f"=== Discovery Prompt (Round {round_num}) ===\n{prompt}\n\n")
+    try:
+        from galangal.core.task_index import TaskIndex
+
+        index = TaskIndex()
+        index.append_task_log_line(
+            task_name=state.task_name,
+            line=f"=== DISCOVERY ROUND {round_num} PROMPT ===",
+            line_type="prompt",
+        )
+        index.append_task_log_lines(
+            task_name=state.task_name,
+            lines=prompt.splitlines(),
+            line_type="prompt",
+        )
+    except Exception:
+        pass
 
     # Run AI with fallback support
     backend = get_backend_with_fallback(config.ai.default, config=config)
@@ -1067,9 +1076,23 @@ async def _generate_discovery_questions(
         pause_check=lambda: app._paused,
     )
 
-    # Log output
-    with open(log_file, "a") as f:
-        f.write(f"=== Output ===\n{result.output or result.message}\n")
+    try:
+        from galangal.core.task_index import TaskIndex
+
+        index = TaskIndex()
+        index.append_task_log_line(
+            task_name=state.task_name,
+            line=f"=== DISCOVERY ROUND {round_num} OUTPUT ===",
+            line_type="meta",
+        )
+        if result.output or result.message:
+            index.append_task_log_lines(
+                task_name=state.task_name,
+                lines=(result.output or result.message or "").splitlines(),
+                line_type="raw",
+            )
+    except Exception:
+        pass
 
     if not result.success:
         return None
@@ -1435,7 +1458,29 @@ async def _handle_stage_approval(
     # Prompt for approval (prompt_async handles racing local vs remote)
     prompt_type = PromptType.PLAN_APPROVAL if stage_name == "PM" else PromptType.DESIGN_APPROVAL
     artifact_name = "PLAN.md" if stage_name == "PM" else "DESIGN.md"
-    choice = await app.prompt_async(prompt_type, f"Approve {artifact_name} to continue?")
+    artifact_content = read_artifact(artifact_name, state.task_name) or ""
+    if artifact_content:
+        preview_max_chars = 6000
+        preview = artifact_content.strip()
+        if len(preview) > preview_max_chars:
+            preview = (
+                preview[:preview_max_chars]
+                + "\n\n[... truncated; full artifact is available in Hub > Task > Artifacts]"
+            )
+        prompt_message = (
+            f"Review {artifact_name} below, then choose an action.\n\n"
+            f"--- {artifact_name} ---\n"
+            f"{preview}\n"
+            f"--- End {artifact_name} ---\n\n"
+            f"Approve {artifact_name} to continue?"
+        )
+    else:
+        prompt_message = (
+            f"{artifact_name} is missing or empty.\n\n"
+            f"Approve {artifact_name} to continue?"
+        )
+
+    choice = await app.prompt_async(prompt_type, prompt_message)
 
     if choice == "yes":
         # Check if this was a remote response from the hub

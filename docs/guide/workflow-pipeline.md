@@ -331,21 +331,15 @@ The workflow pauses at these gates until approval is granted.
 
 ## Logging
 
-Each stage execution is logged:
+Each stage execution is logged to the task database (`.galangal/tasks.db`, `task_logs` table):
 
 ```
-galangal-tasks/<task-name>/logs/
-├── pm_1.log
-├── pm_2.log      # Retry
-├── design_1.log
-├── dev_1.log
-├── dev_2.log     # After rollback
-└── ...
+task_logs(task_name, logged_at, line_type, line)
 ```
 
 Logs include:
 - Full prompt sent
-- Claude's complete output
+- AI/backend output
 - Tool use events
 - Final result
 

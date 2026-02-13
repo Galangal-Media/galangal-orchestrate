@@ -209,6 +209,12 @@ class CodexBackend(AIBackend):
             nonlocal last_activity_time
             if ui:
                 ui.add_raw_line(line)
+            try:
+                from galangal.hub.hooks import notify_output
+
+                notify_output(line, "raw")
+            except Exception:
+                pass
             line = line.strip()
             if line and not line.startswith("{"):
                 if ui:
@@ -345,6 +351,12 @@ class CodexBackend(AIBackend):
         def on_output(line: str) -> None:
             if ui:
                 ui.add_raw_line(line)
+            try:
+                from galangal.hub.hooks import notify_output
+
+                notify_output(line, "raw")
+            except Exception:
+                pass
             stripped = line.strip()
             if ui and stripped and not stripped.startswith("{"):
                 ui.add_activity(f"codex: {stripped[:100]}", "💬", verbose_only=True)

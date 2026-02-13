@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from galangal.config.loader import set_project_root
 from galangal.config.schema import GalangalConfig, StageConfig
+from galangal.core.artifacts import read_artifact, write_artifact
 from galangal.core.state import Stage, TaskType, WorkflowState
 from galangal.core.workflow.core import get_next_stage, handle_rollback
 from galangal.results import StageResult, StageResultType
@@ -46,17 +48,15 @@ class TestHandleRollback:
                 output="Test failures detected",
             )
 
-            # Patch get_task_dir at the source (state module) and in artifacts
-            with patch("galangal.core.state.get_task_dir", return_value=task_dir):
-                with patch("galangal.core.artifacts.get_task_dir", return_value=task_dir):
-                    with patch("galangal.core.workflow.core.save_state"):
-                        handled = handle_rollback(state, result)
+            set_project_root(Path(tmpdir))
+            with patch("galangal.core.workflow.core.save_state"):
+                handled = handle_rollback(state, result)
 
             assert handled is True
             assert state.stage == Stage.DEV
             assert state.attempt == 1
             assert "QA" in state.last_failure
-            assert (task_dir / "ROLLBACK.md").exists()
+            assert read_artifact("ROLLBACK.md", "test-task") is not None
 
     def test_ignores_non_rollback_results(self):
         """Test that handle_rollback ignores non-rollback results."""
@@ -112,10 +112,9 @@ class TestHandleRollback:
                 output="Needs code fix, not new tests",
             )
 
-            with patch("galangal.core.state.get_task_dir", return_value=task_dir):
-                with patch("galangal.core.artifacts.get_task_dir", return_value=task_dir):
-                    with patch("galangal.core.workflow.core.save_state"):
-                        handled = handle_rollback(state, result)
+            set_project_root(Path(tmpdir))
+            with patch("galangal.core.workflow.core.save_state"):
+                handled = handle_rollback(state, result)
 
             assert handled is True
             assert state.stage == Stage.DEV
@@ -130,7 +129,8 @@ class TestHandleRollback:
 
             # Create existing rollback log
             existing_content = "# Rollback Log\n\nPrevious rollback info.\n"
-            (task_dir / "ROLLBACK.md").write_text(existing_content)
+            set_project_root(Path(tmpdir))
+            write_artifact("ROLLBACK.md", existing_content, task_name="test-task")
 
             state = make_state(task_name="test-task", stage=Stage.TEST, attempt=2)
 
@@ -139,13 +139,10 @@ class TestHandleRollback:
                 rollback_to=Stage.DEV,
             )
 
-            # Patch get_task_dir at the source (state module) and in artifacts
-            with patch("galangal.core.state.get_task_dir", return_value=task_dir):
-                with patch("galangal.core.artifacts.get_task_dir", return_value=task_dir):
-                    with patch("galangal.core.workflow.core.save_state"):
-                        handle_rollback(state, result)
+            with patch("galangal.core.workflow.core.save_state"):
+                handle_rollback(state, result)
 
-            rollback_content = (task_dir / "ROLLBACK.md").read_text()
+            rollback_content = read_artifact("ROLLBACK.md", "test-task") or ""
             assert "Previous rollback info" in rollback_content
             assert "Tests still failing" in rollback_content
             assert "TEST" in rollback_content

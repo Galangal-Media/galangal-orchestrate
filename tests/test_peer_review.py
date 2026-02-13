@@ -553,40 +553,53 @@ class TestArchiveArtifact:
 
     def test_archive_creates_new_file(self, tmp_path):
         """First archive creates the archive file with original content."""
-        from galangal.core.artifacts import archive_artifact
+        from galangal.config.loader import set_project_root
+        from galangal.core.artifacts import (
+            archive_artifact,
+            artifact_exists,
+            read_artifact,
+            write_artifact,
+        )
+
+        set_project_root(tmp_path)
+        (tmp_path / "galangal-tasks" / "test-task").mkdir(parents=True)
 
         # Create the source artifact
-        (tmp_path / "PM_PEER_REVIEW.md").write_text("# Review\nNeeds work")
+        write_artifact("PM_PEER_REVIEW.md", "# Review\nNeeds work", task_name="test-task")
 
-        with patch("galangal.core.artifacts.artifact_path", side_effect=lambda name, tn=None: tmp_path / name):
-            result = archive_artifact("PM_PEER_REVIEW.md", "PM_PEER_REVIEW_PREV.md")
+        result = archive_artifact("PM_PEER_REVIEW.md", "PM_PEER_REVIEW_PREV.md", task_name="test-task")
 
         assert result is True
-        assert not (tmp_path / "PM_PEER_REVIEW.md").exists()
-        assert (tmp_path / "PM_PEER_REVIEW_PREV.md").read_text() == "# Review\nNeeds work"
+        assert not artifact_exists("PM_PEER_REVIEW.md", "test-task")
+        assert read_artifact("PM_PEER_REVIEW_PREV.md", "test-task") == "# Review\nNeeds work"
 
     def test_archive_appends_with_separator(self, tmp_path):
         """Subsequent archives append with --- separator for multi-loop history."""
-        from galangal.core.artifacts import archive_artifact
+        from galangal.config.loader import set_project_root
+        from galangal.core.artifacts import archive_artifact, read_artifact, write_artifact
+
+        set_project_root(tmp_path)
+        (tmp_path / "galangal-tasks" / "test-task").mkdir(parents=True)
 
         # Create existing archive and new artifact
-        (tmp_path / "PM_PEER_REVIEW_PREV.md").write_text("# Round 1\nFirst feedback")
-        (tmp_path / "PM_PEER_REVIEW.md").write_text("# Round 2\nSecond feedback")
+        write_artifact("PM_PEER_REVIEW_PREV.md", "# Round 1\nFirst feedback", task_name="test-task")
+        write_artifact("PM_PEER_REVIEW.md", "# Round 2\nSecond feedback", task_name="test-task")
 
-        with patch("galangal.core.artifacts.artifact_path", side_effect=lambda name, tn=None: tmp_path / name):
-            result = archive_artifact("PM_PEER_REVIEW.md", "PM_PEER_REVIEW_PREV.md")
+        result = archive_artifact("PM_PEER_REVIEW.md", "PM_PEER_REVIEW_PREV.md", task_name="test-task")
 
         assert result is True
-        content = (tmp_path / "PM_PEER_REVIEW_PREV.md").read_text()
+        content = read_artifact("PM_PEER_REVIEW_PREV.md", "test-task") or ""
         assert "# Round 1\nFirst feedback" in content
         assert "\n\n---\n\n" in content
         assert "# Round 2\nSecond feedback" in content
 
     def test_archive_nonexistent_returns_false(self, tmp_path):
         """Returns False when source artifact doesn't exist."""
+        from galangal.config.loader import set_project_root
         from galangal.core.artifacts import archive_artifact
 
-        with patch("galangal.core.artifacts.artifact_path", side_effect=lambda name, tn=None: tmp_path / name):
-            result = archive_artifact("PM_PEER_REVIEW.md", "PM_PEER_REVIEW_PREV.md")
+        set_project_root(tmp_path)
+        (tmp_path / "galangal-tasks" / "test-task").mkdir(parents=True)
+        result = archive_artifact("PM_PEER_REVIEW.md", "PM_PEER_REVIEW_PREV.md", task_name="test-task")
 
         assert result is False

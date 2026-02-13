@@ -113,6 +113,28 @@ function parseOutputLine(line: string, index: number): ParsedOutput | null {
   }
 }
 
+function artifactSection(name: string): string {
+  const upper = name.toUpperCase()
+  if (["SPEC.MD", "PLAN.MD", "DISCOVERY_LOG.MD", "QUESTIONS.MD", "ANSWERS.MD", "APPROVAL.MD"].includes(upper)) {
+    return "PM"
+  }
+  if (upper.startsWith("DESIGN") || upper === "DESIGN.MD") return "DESIGN"
+  if (upper.startsWith("PREFLIGHT")) return "PREFLIGHT"
+  if (upper.startsWith("DEVELOPMENT") || upper === "DEV.MD") return "DEV"
+  if (upper.startsWith("MIGRATION")) return "MIGRATION"
+  if (upper.startsWith("TEST")) return "TEST"
+  if (upper.startsWith("CONTRACT")) return "CONTRACT"
+  if (upper.startsWith("QA")) return "QA"
+  if (upper.startsWith("BENCHMARK")) return "BENCHMARK"
+  if (upper.startsWith("SECURITY")) return "SECURITY"
+  if (upper.startsWith("REVIEW")) return "REVIEW"
+  if (upper.startsWith("DOCS")) return "DOCS"
+  if (upper.startsWith("SUMMARY")) return "SUMMARY"
+  if (upper.endsWith("_DECISION")) return "DECISIONS"
+  if (upper.endsWith("_SKIP.MD")) return "SKIPS"
+  return "OTHER"
+}
+
 export function TaskDetail() {
   const { agentId, taskName } = useParams<{ agentId: string; taskName: string }>()
   const [agent, setAgent] = useState<AgentDetailData | null>(null)
@@ -223,6 +245,13 @@ export function TaskDetail() {
   }
 
   const task = agent.task
+  const artifactNames = Object.keys(agent.artifacts || {}).sort((a, b) => a.localeCompare(b))
+  const artifactsBySection = artifactNames.reduce<Record<string, string[]>>((acc, name) => {
+    const section = artifactSection(name)
+    if (!acc[section]) acc[section] = []
+    acc[section].push(name)
+    return acc
+  }, {})
 
   if (!task || task.task_name !== taskName) {
     return (
@@ -481,14 +510,45 @@ export function TaskDetail() {
       </section>
 
       {/* Artifacts */}
-      {agent.artifacts && Object.keys(agent.artifacts).length > 0 && (
-        <section className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-1 h-6 rounded-full bg-primary" />
-            <h2 className="text-xl font-semibold">Artifacts</h2>
-          </div>
-          <ArtifactViewer artifacts={agent.artifacts} />
-        </section>
+      {artifactNames.length > 0 && (
+        <>
+          <section className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-1 h-6 rounded-full bg-info" />
+              <h2 className="text-xl font-semibold">Database Files</h2>
+              <span className="text-sm text-muted-foreground">({artifactNames.length})</span>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {Object.entries(artifactsBySection)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([section, names]) => (
+                  <Card key={section} className="card-hover">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center justify-between">
+                        <span>{section}</span>
+                        <Badge variant="outline" className="text-xs">{names.length}</Badge>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {names.map((name) => (
+                        <div key={name} className="font-mono text-xs text-muted-foreground break-all">
+                          {name}
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                ))}
+            </div>
+          </section>
+
+          <section className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-1 h-6 rounded-full bg-primary" />
+              <h2 className="text-xl font-semibold">Artifacts</h2>
+            </div>
+            <ArtifactViewer artifacts={agent.artifacts} />
+          </section>
+        </>
       )}
     </div>
   )

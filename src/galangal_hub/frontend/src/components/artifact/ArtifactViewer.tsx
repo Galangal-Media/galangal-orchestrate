@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { ChevronDown, ChevronRight, FileText } from "lucide-react"
-import Markdown from "react-markdown"
+import Markdown, { type Components } from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { cn } from "@/lib/utils"
 
 interface ArtifactViewerProps {
@@ -9,6 +10,21 @@ interface ArtifactViewerProps {
 
 function isMarkdownFile(name: string): boolean {
   return name.toLowerCase().endsWith(".md")
+}
+
+const markdownComponents: Components = {
+  table: ({ children }) => (
+    <div className="my-4 overflow-x-auto">
+      <table className="w-full min-w-[480px] border-collapse border border-border text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-muted/60">{children}</thead>,
+  th: ({ children }) => (
+    <th className="border border-border px-3 py-2 text-left font-semibold text-foreground">{children}</th>
+  ),
+  td: ({ children }) => (
+    <td className="border border-border px-3 py-2 align-top text-muted-foreground">{children}</td>
+  ),
 }
 
 export function ArtifactViewer({ artifacts }: ArtifactViewerProps) {
@@ -58,7 +74,9 @@ export function ArtifactViewer({ artifacts }: ArtifactViewerProps) {
           >
             {isMarkdownFile(name) ? (
               <div className="p-4 bg-card prose max-w-none text-foreground">
-                <Markdown>{content}</Markdown>
+                <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                  {content}
+                </Markdown>
               </div>
             ) : (
               <pre className="p-4 text-sm overflow-x-auto bg-card">

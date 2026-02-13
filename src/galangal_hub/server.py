@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
-from fastapi.staticfiles import StaticFiles
 
 from galangal_hub.auth import verify_websocket_auth
 from galangal_hub.connection import manager
@@ -395,8 +394,9 @@ async def agent_websocket(websocket: WebSocket) -> None:
 
                 agent_id = registered_agent_id
                 artifacts = payload.get("artifacts", {})
+                replace = bool(payload.get("replace", False))
                 if artifacts and isinstance(artifacts, dict):
-                    await manager.update_artifacts(agent_id, artifacts)
+                    await manager.update_artifacts(agent_id, artifacts, replace=replace)
                     logger.info(f"Agent {agent_id}: artifacts updated - {list(artifacts.keys())}")
 
             elif msg_type == MessageType.GITHUB_ISSUES:

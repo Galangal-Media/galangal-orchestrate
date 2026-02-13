@@ -16,6 +16,17 @@ The active task is tracked in:
 .galangal/active_task
 ```
 
+A query/index sidecar database is maintained at:
+
+```
+.galangal/tasks.db
+```
+
+`tasks.db` is now the canonical artifact store (`*.md`, decision files).
+`tasks.db` also stores task output logs (`task_logs`) for hub/live-output history.
+`PLAN.md` and `SUMMARY.md` are mirrored to task folders for human reference and git commits.
+`state.json` remains the canonical workflow state record.
+
 ## WorkflowState Model
 
 The `WorkflowState` dataclass (`core/state.py`) contains:
@@ -210,24 +221,7 @@ Each task has its own directory:
 ```
 galangal-tasks/add-user-auth/
 ├── state.json           # WorkflowState
-├── SPEC.md              # PM output
-├── PLAN.md              # PM output
-├── DISCOVERY_LOG.md     # PM Q&A
-├── DESIGN.md            # Design output
-├── DEVELOPMENT.md       # Dev progress
-├── ROLLBACK.md          # Issues to fix
-├── ROLLBACK_RESOLVED.md # Fixed issues
-├── TEST_PLAN.md         # Test output
-├── QA_REPORT.md         # QA output
-├── SECURITY_CHECKLIST.md
-├── REVIEW_NOTES.md
-├── DOCS_REPORT.md
-└── logs/
-    ├── pm_1.log
-    ├── design_1.log
-    ├── dev_1.log
-    ├── dev_2.log
-    └── ...
+└── (artifacts/logs are stored in `.galangal/tasks.db`)
 ```
 
 ## State Transitions

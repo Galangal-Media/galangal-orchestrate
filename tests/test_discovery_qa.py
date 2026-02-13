@@ -249,28 +249,22 @@ This should be ignored.
 class TestDiscoveryLogWriting:
     """Tests for _write_discovery_log function."""
 
-    def test_write_single_round(self, tmp_path, monkeypatch):
+    def test_write_single_round(self, tmp_path):
         """Test writing a discovery log with one Q&A round."""
+        from galangal.config.loader import set_project_root
+        from galangal.core.artifacts import read_artifact
         from galangal.core.workflow.tui_runner import _write_discovery_log
 
         # Setup task directory
         task_dir = tmp_path / "galangal-tasks" / "test-task"
         task_dir.mkdir(parents=True)
-
-        # Mock get_task_dir to return our temp path
-        monkeypatch.setattr(
-            "galangal.core.artifacts.get_task_dir",
-            lambda name: task_dir,
-        )
+        set_project_root(tmp_path)
 
         qa_rounds = [{"questions": ["What auth?", "What scope?"], "answers": ["JWT", "API only"]}]
 
         _write_discovery_log("test-task", qa_rounds)
 
-        log_path = task_dir / "DISCOVERY_LOG.md"
-        assert log_path.exists()
-
-        content = log_path.read_text()
+        content = read_artifact("DISCOVERY_LOG.md", "test-task") or ""
         assert "# Discovery Log" in content
         assert "## Round 1" in content
         assert "### Questions" in content
@@ -280,17 +274,15 @@ class TestDiscoveryLogWriting:
         assert "1. JWT" in content
         assert "2. API only" in content
 
-    def test_write_multiple_rounds(self, tmp_path, monkeypatch):
+    def test_write_multiple_rounds(self, tmp_path):
         """Test writing a discovery log with multiple Q&A rounds."""
+        from galangal.config.loader import set_project_root
+        from galangal.core.artifacts import read_artifact
         from galangal.core.workflow.tui_runner import _write_discovery_log
 
         task_dir = tmp_path / "galangal-tasks" / "test-task"
         task_dir.mkdir(parents=True)
-
-        monkeypatch.setattr(
-            "galangal.core.artifacts.get_task_dir",
-            lambda name: task_dir,
-        )
+        set_project_root(tmp_path)
 
         qa_rounds = [
             {"questions": ["Q1?"], "answers": ["A1"]},
@@ -299,7 +291,7 @@ class TestDiscoveryLogWriting:
 
         _write_discovery_log("test-task", qa_rounds)
 
-        content = (task_dir / "DISCOVERY_LOG.md").read_text()
+        content = read_artifact("DISCOVERY_LOG.md", "test-task") or ""
         assert "## Round 1" in content
         assert "## Round 2" in content
         assert "1. Q1?" in content

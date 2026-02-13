@@ -11,84 +11,95 @@ from galangal.core.state import get_task_dir
 from galangal.exceptions import TaskError
 
 
-def artifact_path(name: str, task_name: str | None = None) -> Path:
-    """Get path to an artifact file."""
+def _resolve_task_name(task_name: str | None = None) -> str:
+    """Resolve task name from arg or active task."""
     from galangal.core.tasks import get_active_task
 
     if task_name is None:
         task_name = get_active_task()
     if task_name is None:
         raise TaskError("No active task")
-    return get_task_dir(task_name) / name
+    return task_name
+
+
+def artifact_path(name: str, task_name: str | None = None) -> Path:
+    """Get the legacy filesystem path for an artifact.
+
+    Artifacts are stored canonically in SQLite, but this helper is kept for
+    components that still need a task-relative file path for non-artifact files.
+    """
+    resolved = _resolve_task_name(task_name)
+    return get_task_dir(resolved) / name
 
 
 def artifact_exists(name: str, task_name: str | None = None) -> bool:
-    """Check if an artifact exists."""
+    """Check if an artifact exists in canonical DB storage."""
     try:
-        return artifact_path(name, task_name).exists()
+        from galangal.core.task_index import TaskIndex
+
+        return TaskIndex().artifact_exists(task_name=_resolve_task_name(task_name), name=name)
     except TaskError:
+        return False
+    except Exception:
+        # Fail closed; upstream validation can surface missing artifacts.
         return False
 
 
 def read_artifact(name: str, task_name: str | None = None) -> str | None:
-    """Read an artifact file."""
+    """Read artifact content from canonical DB storage."""
     try:
-        path = artifact_path(name, task_name)
-        if path.exists():
-            return path.read_text()
+        from galangal.core.task_index import TaskIndex
+
+        return TaskIndex().read_artifact(task_name=_resolve_task_name(task_name), name=name)
     except TaskError:
+        pass
+    except Exception:
         pass
     return None
 
 
 def delete_artifact(name: str, task_name: str | None = None) -> bool:
-    """Delete an artifact file if it exists.
+    """Delete an artifact from canonical DB storage.
 
-    Returns True if the file was deleted, False if it didn't exist.
+    Returns True if deleted, False if it didn't exist.
     """
     try:
-        path = artifact_path(name, task_name)
-        if path.exists():
-            path.unlink()
-            return True
+        from galangal.core.task_index import TaskIndex
+
+        return TaskIndex().delete_artifact(task_name=_resolve_task_name(task_name), name=name)
     except TaskError:
+        pass
+    except Exception:
         pass
     return False
 
 
 def archive_artifact(name: str, archive_name: str, task_name: str | None = None) -> bool:
-    """Archive an artifact by appending its content to an archive file, then deleting it.
+    """Archive an artifact by appending to another DB artifact, then deleting source.
 
     Used during peer review rollback to preserve full reviewer feedback while
     allowing the peer review to re-trigger. Supports multi-loop history by
-    appending with a separator when the archive already exists.
+    appending with a separator when archive artifact already exists.
 
     Args:
         name: Current artifact filename to archive (e.g., "PM_PEER_REVIEW.md").
-        archive_name: Archive filename to append to (e.g., "PM_PEER_REVIEW_PREV.md").
+        archive_name: Archive artifact to append to (e.g., "PM_PEER_REVIEW_PREV.md").
         task_name: Task name, or None to use active task.
 
     Returns:
         True if the artifact was archived, False if it didn't exist.
     """
     try:
-        path = artifact_path(name, task_name)
-        if not path.exists():
-            return False
+        from galangal.core.task_index import TaskIndex
 
-        content = path.read_text()
-        archive_path = artifact_path(archive_name, task_name)
-        archive_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if archive_path.exists():
-            existing = archive_path.read_text()
-            archive_path.write_text(f"{existing}\n\n---\n\n{content}")
-        else:
-            archive_path.write_text(content)
-
-        path.unlink()
-        return True
+        return TaskIndex().archive_artifact(
+            task_name=_resolve_task_name(task_name),
+            name=name,
+            archive_name=archive_name,
+        )
     except TaskError:
+        return False
+    except Exception:
         return False
 
 
@@ -98,7 +109,7 @@ def write_artifact(
     task_name: str | None = None,
     stage: str | None = None,
 ) -> None:
-    """Write an artifact file.
+    """Write an artifact to canonical DB storage.
 
     Args:
         name: Artifact filename.
@@ -106,12 +117,22 @@ def write_artifact(
         task_name: Task name, or None to use active task.
         stage: Optional stage that generated this artifact (for lineage tracking).
     """
-    path = artifact_path(name, task_name)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+    resolved_task_name = _resolve_task_name(task_name)
+
+    try:
+        from galangal.core.task_index import TaskIndex
+
+        TaskIndex().record_artifact_write(
+            task_name=resolved_task_name,
+            name=name,
+            content=content,
+            stage=stage,
+        )
+    except Exception:
+        pass
 
     # Record lineage if enabled
-    _record_lineage_if_enabled(name, content, task_name, stage)
+    _record_lineage_if_enabled(name, content, resolved_task_name, stage)
 
 
 def _record_lineage_if_enabled(

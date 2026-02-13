@@ -323,3 +323,32 @@ class TestBaseBranchCheck:
 
                 assert success is False
                 assert "Failed to switch" in msg
+
+
+class TestCmdIndexCompactDone:
+    """Tests for the index compact-done command."""
+
+    def test_compact_done_returns_zero_on_success(self):
+        """Command should report success when compaction completes."""
+        from galangal.commands.index import cmd_index_compact_done
+
+        args = argparse.Namespace()
+
+        with patch("galangal.commands.index.require_initialized", return_value=True):
+            with patch("galangal.commands.index.TaskIndex") as mock_index_cls:
+                mock_index = mock_index_cls.return_value
+                mock_index.compact_done_markdown.return_value = {
+                    "tasks": 3,
+                    "kept": 4,
+                    "restored": 2,
+                    "deleted": 7,
+                    "migrated": 11,
+                }
+
+                with patch("galangal.commands.index.print_success") as mock_success:
+                    with patch("galangal.commands.index.console.print") as mock_print:
+                        result = cmd_index_compact_done(args)
+
+        assert result == 0
+        mock_success.assert_called_once()
+        mock_print.assert_called_once()

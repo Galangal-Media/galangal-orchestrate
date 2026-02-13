@@ -128,6 +128,12 @@ class GeminiBackend(AIBackend):
             """Process each output line."""
             if ui:
                 ui.add_raw_line(line)
+            try:
+                from galangal.hub.hooks import notify_output
+
+                notify_output(line, "raw")
+            except Exception:
+                pass
             self._process_stream_line(line, ui)
 
         def on_idle(elapsed: float) -> None:

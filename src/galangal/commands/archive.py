@@ -3,7 +3,6 @@ Archive command - move old completed tasks to archive.
 """
 
 import argparse
-import gzip
 import json
 import re
 import shutil
@@ -257,6 +256,21 @@ def cmd_archive(args: argparse.Namespace) -> int:
             console.print(f"  [#b8bb26]✓[/] {message}")
             # Update index
             index[task_dir.name] = metadata
+            try:
+                from galangal.core.task_index import TaskIndex
+
+                archive_path = (
+                    archive_dir / f"{task_dir.name}.tar.gz"
+                    if args.compress
+                    else archive_dir / task_dir.name
+                )
+                TaskIndex().mark_task_status(
+                    task_name=task_dir.name,
+                    status="archived",
+                    location=archive_path,
+                )
+            except Exception:
+                pass
             archived += 1
         else:
             console.print(f"  [#fb4934]✗[/] {message}")
@@ -369,5 +383,16 @@ def cmd_archive_restore(args: argparse.Namespace) -> int:
     if task_name in index:
         del index[task_name]
         save_archive_index(index)
+
+    try:
+        from galangal.core.task_index import TaskIndex
+
+        TaskIndex().mark_task_status(
+            task_name=task_name,
+            status="done",
+            location=done_dir / task_name,
+        )
+    except Exception:
+        pass
 
     return 0

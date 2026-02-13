@@ -99,6 +99,12 @@ class ConnectionManager:
         async with self._get_lock():
             if agent_id in self._agents:
                 previous_state = self._agents[agent_id].task
+                if previous_state and (
+                    state is None or previous_state.task_name != state.task_name
+                ):
+                    # New task (or idle): avoid showing stale artifacts/output.
+                    self._agents[agent_id].artifacts = {}
+                    self._agents[agent_id].output_lines = []
                 self._agents[agent_id].task = state
         await self._notify_change()
         return previous_state
@@ -127,17 +133,27 @@ class ConnectionManager:
                 self._agents[agent_id].current_prompt = prompt
         await self._notify_change()
 
-    async def update_artifacts(self, agent_id: str, artifacts: dict[str, str]) -> None:
+    async def update_artifacts(
+        self,
+        agent_id: str,
+        artifacts: dict[str, str],
+        *,
+        replace: bool = False,
+    ) -> None:
         """
         Update the artifacts for an agent.
 
         Args:
             agent_id: Agent ID.
             artifacts: Dict mapping artifact names to content.
+            replace: If True, replace all artifacts for the agent task.
         """
         async with self._get_lock():
             if agent_id in self._agents:
-                self._agents[agent_id].artifacts.update(artifacts)
+                if replace:
+                    self._agents[agent_id].artifacts = dict(artifacts)
+                else:
+                    self._agents[agent_id].artifacts.update(artifacts)
         await self._notify_change()
 
     async def clear_prompt(self, agent_id: str) -> None:

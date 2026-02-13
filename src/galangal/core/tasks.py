@@ -48,6 +48,15 @@ def clear_active_task() -> None:
 
 def list_tasks() -> list[tuple[str, str, str, str]]:
     """List all tasks. Returns [(name, stage, task_type, description), ...]."""
+    # Prefer the indexed view for fast lookup and consistent status reporting.
+    try:
+        from galangal.core.task_index import TaskIndex
+
+        return TaskIndex().list_tasks(statuses=("active",))
+    except Exception:
+        # Fall back to filesystem scan if index is unavailable/corrupt.
+        pass
+
     tasks = []
     tasks_dir = get_tasks_dir()
     if not tasks_dir.exists():

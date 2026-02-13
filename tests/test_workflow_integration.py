@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from galangal.config.schema import GalangalConfig, StageConfig
+from galangal.core.artifacts import artifact_exists, read_artifact
 from galangal.core.state import (
     Stage,
     TaskType,
@@ -357,9 +358,8 @@ class TestRollbackIntegration:
         assert "QA" in state.last_failure
 
         # Check ROLLBACK.md was created
-        rollback_md = sample_task / "ROLLBACK.md"
-        assert rollback_md.exists()
-        content = rollback_md.read_text()
+        assert artifact_exists("ROLLBACK.md", "test-task")
+        content = read_artifact("ROLLBACK.md", "test-task") or ""
         assert "Tests failed" in content
         assert "QA" in content
         assert "DEV" in content
@@ -397,10 +397,10 @@ class TestRollbackIntegration:
             archive_rollback_if_exists("test-task", mock_ui)
 
         # ROLLBACK.md should be removed
-        assert not (sample_task / "ROLLBACK.md").exists()
+        assert not artifact_exists("ROLLBACK.md", "test-task")
         # ROLLBACK_RESOLVED.md should be created
-        assert (sample_task / "ROLLBACK_RESOLVED.md").exists()
-        resolved_content = (sample_task / "ROLLBACK_RESOLVED.md").read_text()
+        assert artifact_exists("ROLLBACK_RESOLVED.md", "test-task")
+        resolved_content = read_artifact("ROLLBACK_RESOLVED.md", "test-task") or ""
         assert "Previous rollback info" in resolved_content
         assert "Resolved" in resolved_content
 
@@ -465,7 +465,7 @@ class TestRetryBehavior:
         # Default max_length is 4000
         assert len(state.last_failure) < 4100  # 4000 + truncation message
         assert state.last_failure.startswith("x" * 100)
-        assert "[... truncated, see logs/ for full output]" in state.last_failure
+        assert "[... truncated, see task logs in .galangal/tasks.db for full output]" in state.last_failure
 
     def test_record_failure_preserves_small_errors(self):
         """Test that record_failure preserves errors under max_length."""

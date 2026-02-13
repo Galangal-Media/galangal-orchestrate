@@ -525,16 +525,27 @@ class WorkflowEngine:
         builder = PromptBuilder()
         prompt = builder.build_peer_review_prompt(self.state, stage, backend_name)
 
-        # Set up log file
-        from galangal.core.state import get_task_dir
+        try:
+            from galangal.core.task_index import TaskIndex
 
-        logs_dir = get_task_dir(self.state.task_name) / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        log_file = logs_dir / f"{stage.value.lower()}_peer_review.log"
-
-        with open(log_file, "w") as f:
-            f.write(f"=== Peer Review Prompt ===\n{prompt}\n\n")
-            f.write(f"=== Backend: {backend.name} ===\n")
+            index = TaskIndex()
+            index.append_task_log_line(
+                task_name=self.state.task_name,
+                line=f"=== PEER REVIEW START ({stage.value}, backend={backend.name}) ===",
+                line_type="meta",
+            )
+            index.append_task_log_line(
+                task_name=self.state.task_name,
+                line="=== Peer Review Prompt ===",
+                line_type="prompt",
+            )
+            index.append_task_log_lines(
+                task_name=self.state.task_name,
+                lines=prompt.splitlines(),
+                line_type="prompt",
+            )
+        except Exception:
+            pass
 
         ui = TUIAdapter(tui_app)
 
@@ -545,7 +556,7 @@ class WorkflowEngine:
                 max_turns=20,
                 ui=ui,
                 stage=f"{stage.value}_PEER_REVIEW",
-                log_file=str(log_file),
+                log_file=None,
             )
         except Exception as e:
             tui_app.add_activity(f"Peer review backend failed: {e}", "⚠")
@@ -598,6 +609,17 @@ class WorkflowEngine:
         # Normalize decision
         if decision not in ("APPROVE", "REQUEST_CHANGES"):
             decision = "APPROVE"
+
+        try:
+            from galangal.core.task_index import TaskIndex
+
+            TaskIndex().append_task_log_line(
+                task_name=self.state.task_name,
+                line=f"=== PEER REVIEW RESULT: {decision} ===",
+                line_type="meta",
+            )
+        except Exception:
+            pass
 
         # Write the peer review artifact
         write_artifact(artifact_name, review_notes, self.state.task_name)

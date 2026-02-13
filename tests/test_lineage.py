@@ -3,7 +3,6 @@
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
 
 from galangal.config.schema import (
     ArtifactDependencySpec,
@@ -644,18 +643,21 @@ class TestLoadTaskArtifacts:
     """Tests for load_task_artifacts utility."""
 
     def test_load_artifacts_from_directory(self):
-        """Test loading artifacts from task directory."""
+        """Test loading artifacts from canonical artifact storage."""
         with tempfile.TemporaryDirectory() as tmpdir:
+            from galangal.config.loader import set_project_root
+            from galangal.core.artifacts import write_artifact
+
+            set_project_root(Path(tmpdir))
             task_dir = Path(tmpdir) / "galangal-tasks" / "test-task"
             task_dir.mkdir(parents=True)
 
-            # Create some artifacts
-            (task_dir / "SPEC.md").write_text("# Spec\n\nContent.")
-            (task_dir / "PLAN.md").write_text("# Plan\n\nSteps.")
+            # Create artifacts in DB-backed storage
+            write_artifact("SPEC.md", "# Spec\n\nContent.", task_name="test-task")
+            write_artifact("PLAN.md", "# Plan\n\nSteps.", task_name="test-task")
             (task_dir / "not-markdown.txt").write_text("ignored")
 
-            with patch("galangal.core.state.get_task_dir", return_value=task_dir):
-                artifacts = load_task_artifacts("test-task")
+            artifacts = load_task_artifacts("test-task")
 
             assert "SPEC.md" in artifacts
             assert "PLAN.md" in artifacts
@@ -665,20 +667,22 @@ class TestLoadTaskArtifacts:
     def test_load_artifacts_empty_directory(self):
         """Test loading from empty directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
+            from galangal.config.loader import set_project_root
+
+            set_project_root(Path(tmpdir))
             task_dir = Path(tmpdir) / "galangal-tasks" / "test-task"
             task_dir.mkdir(parents=True)
 
-            with patch("galangal.core.state.get_task_dir", return_value=task_dir):
-                artifacts = load_task_artifacts("test-task")
+            artifacts = load_task_artifacts("test-task")
 
             assert artifacts == {}
 
     def test_load_artifacts_nonexistent_directory(self):
         """Test loading from non-existent directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            task_dir = Path(tmpdir) / "galangal-tasks" / "nonexistent"
+            from galangal.config.loader import set_project_root
 
-            with patch("galangal.core.state.get_task_dir", return_value=task_dir):
-                artifacts = load_task_artifacts("nonexistent")
+            set_project_root(Path(tmpdir))
+            artifacts = load_task_artifacts("nonexistent")
 
             assert artifacts == {}

@@ -49,6 +49,10 @@ galangal resume
 | `galangal status` | Show task status |
 | `galangal resume` | Continue active task |
 | `galangal list` | List all tasks |
+| `galangal index stats` | Show task index DB stats |
+| `galangal index rebuild` | Rebuild task index from task folders |
+| `galangal index migrate-artifacts` | Import legacy artifact files into DB and delete file copies |
+| `galangal index compact-done` | Keep only `PLAN.md` and `SUMMARY.md` in `tasks/done/*` |
 | `galangal complete` | Finalize & create PR |
 
 **Interactive controls during execution:**

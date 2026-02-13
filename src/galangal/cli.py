@@ -323,6 +323,33 @@ def main() -> int:
     mistakes_delete.add_argument("id", type=int, help="Mistake ID to delete")
     mistakes_delete.set_defaults(func=_cmd_mistakes_delete)
 
+    # index
+    index_parser = subparsers.add_parser("index", help="Task index database management")
+    index_subparsers = index_parser.add_subparsers(dest="index_command")
+
+    index_stats = index_subparsers.add_parser("stats", help="Show task index statistics")
+    index_stats.set_defaults(func=_cmd_index_stats)
+
+    index_rebuild = index_subparsers.add_parser(
+        "rebuild", help="Rebuild task index from task directories"
+    )
+    index_rebuild.set_defaults(func=_cmd_index_rebuild)
+
+    index_migrate = index_subparsers.add_parser(
+        "migrate-artifacts",
+        help="Migrate legacy filesystem artifacts into DB storage",
+    )
+    index_migrate.set_defaults(func=_cmd_index_migrate_artifacts)
+
+    index_compact_done = index_subparsers.add_parser(
+        "compact-done",
+        help="Keep only PLAN.md and SUMMARY.md in done task folders",
+    )
+    index_compact_done.set_defaults(func=_cmd_index_compact_done)
+
+    # Default: show stats
+    index_parser.set_defaults(func=_cmd_index_stats)
+
     # archive
     archive_parser = subparsers.add_parser(
         "archive", help="Archive old completed tasks"
@@ -543,6 +570,30 @@ def _cmd_mistakes_delete(args: argparse.Namespace) -> int:
     from galangal.commands.mistakes import cmd_mistakes_delete
 
     return cmd_mistakes_delete(args)
+
+
+def _cmd_index_stats(args: argparse.Namespace) -> int:
+    from galangal.commands.index import cmd_index_stats
+
+    return cmd_index_stats(args)
+
+
+def _cmd_index_rebuild(args: argparse.Namespace) -> int:
+    from galangal.commands.index import cmd_index_rebuild
+
+    return cmd_index_rebuild(args)
+
+
+def _cmd_index_migrate_artifacts(args: argparse.Namespace) -> int:
+    from galangal.commands.index import cmd_index_migrate_artifacts
+
+    return cmd_index_migrate_artifacts(args)
+
+
+def _cmd_index_compact_done(args: argparse.Namespace) -> int:
+    from galangal.commands.index import cmd_index_compact_done
+
+    return cmd_index_compact_done(args)
 
 
 def _cmd_archive(args: argparse.Namespace) -> int:

@@ -456,6 +456,30 @@ async def get_output_lines(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
+    # Prefer canonical DB-backed task logs for active tasks.
+    if agent.task:
+        try:
+            from galangal.core.task_index import TaskIndex
+
+            task_lines = TaskIndex().list_task_log_lines(
+                task_name=agent.task.task_name,
+                since_id=since,
+                limit=1000,
+            )
+            lines = [
+                {
+                    "id": row["id"],
+                    "line": row["line"],
+                    "line_type": row["line_type"],
+                    "timestamp": row["logged_at"],
+                }
+                for row in task_lines
+            ]
+            next_index = task_lines[-1]["id"] if task_lines else since
+            return {"lines": lines, "next_index": next_index}
+        except Exception:
+            pass
+
     lines = manager.get_output_lines(agent_id, since)
     return {
         "lines": lines,
