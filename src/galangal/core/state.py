@@ -119,6 +119,17 @@ class StageMetadata:
     # If True, this stage remains in passed_stages during rollback
     # (e.g., TEST stage - tests don't need to be rewritten after rollback)
     preserve_on_rollback: bool = False
+    # Default validation strategy when no config exists:
+    #   "decision" - check decision file
+    #   "artifacts" - check required artifacts exist
+    #   "decision_or_markers" - try decision file, fall through to artifact markers
+    #   "always_pass" - always succeed
+    #   "none" - always succeed (terminal/no-op stages)
+    default_validation: str = "artifacts"
+    # Subset of produces_artifacts that must exist; empty tuple = all required
+    required_artifacts: tuple[str, ...] = ()
+    # Write TEST_SUMMARY.md on validation command failure
+    write_test_summary: bool = False
 
 
 class Stage(str, Enum):
@@ -186,6 +197,7 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         requires_approval=True,
         approval_artifact="APPROVAL.md",
         produces_artifacts=("SPEC.md", "PLAN.md", "DISCOVERY_LOG.md"),
+        required_artifacts=("SPEC.md", "PLAN.md"),
     ),
     Stage.DESIGN: StageMetadata(
         display_name="Design",
@@ -193,16 +205,19 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         is_skippable=True,
         produces_artifacts=("DESIGN.md",),
         skip_artifact="DESIGN_SKIP.md",
+        required_artifacts=("DESIGN.md",),
     ),
     Stage.PREFLIGHT: StageMetadata(
         display_name="Preflight",
         description="Verify environment and dependencies",
         produces_artifacts=("PREFLIGHT_REPORT.md",),
+        default_validation="none",
     ),
     Stage.DEV: StageMetadata(
         display_name="Development",
         description="Implement the feature or fix",
         produces_artifacts=("DEVELOPMENT.md",),
+        default_validation="always_pass",
     ),
     Stage.MIGRATION: StageMetadata(
         display_name="Migration",
@@ -217,6 +232,8 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         description="Write tests (does not run them)",
         produces_artifacts=("TEST_PLAN.md",),
         preserve_on_rollback=True,  # Tests don't need to be rewritten after rollback
+        required_artifacts=("TEST_PLAN.md",),
+        write_test_summary=True,
     ),
     Stage.TEST_GATE: StageMetadata(
         display_name="Test Gate",
@@ -236,6 +253,7 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
                 False,
             ),
         ),
+        default_validation="decision",
     ),
     Stage.CONTRACT: StageMetadata(
         display_name="Contract",
@@ -254,6 +272,7 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
             ("PASS", True, "QA passed", None, False),
             ("FAIL", False, "QA failed", "DEV", False),
         ),
+        default_validation="decision",
         artifact_schema={
             "notes_file": "QA_REPORT.md",
             "notes_field": "qa_report",
@@ -282,6 +301,7 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
             ("REJECTED", False, "Security review found blocking issues", "DEV", False),
             ("BLOCKED", False, "Security review found blocking issues", "DEV", False),
         ),
+        default_validation="decision",
         artifact_schema={
             "notes_file": "SECURITY_CHECKLIST.md",
             "notes_field": "security_checklist",
@@ -306,6 +326,7 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
                 True,
             ),
         ),
+        default_validation="decision_or_markers",
         artifact_schema={
             "notes_file": "REVIEW_NOTES.md",
             "notes_field": "review_notes",
@@ -318,6 +339,7 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         display_name="Docs",
         description="Update documentation",
         produces_artifacts=("DOCS_REPORT.md",),
+        required_artifacts=("DOCS_REPORT.md",),
     ),
     Stage.SUMMARY: StageMetadata(
         display_name="Summary",
@@ -329,6 +351,7 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
     Stage.COMPLETE: StageMetadata(
         display_name="Complete",
         description="Workflow completed",
+        default_validation="none",
     ),
 }
 

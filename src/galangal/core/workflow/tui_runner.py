@@ -374,13 +374,13 @@ async def _handle_workflow_event(
             choice = await app.prompt_async(
                 PromptType.USER_DECISION,
                 f"Decision file missing for {state.stage.value} stage.\n\n"
-                f"Report preview:\n{artifact_preview}\n\n"
+                f"Report:\n{artifact_preview}\n\n"
                 "Please review and decide:",
             )
 
             if choice == "view":
                 app.add_activity("--- Full Report ---", "📄")
-                for line in (full_content or "No content").split("\n")[:50]:
+                for line in (full_content or "No content").split("\n"):
                     app.add_activity(line, "")
                 app.add_activity("--- End Report ---", "📄")
                 continue

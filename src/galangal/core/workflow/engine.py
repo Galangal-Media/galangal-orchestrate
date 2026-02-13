@@ -302,12 +302,13 @@ class WorkflowEngine:
             )
 
         if result.type == StageResultType.USER_DECISION_NEEDED:
+            artifact_content = result.output or ""
             return event(
                 EventType.USER_DECISION_REQUIRED,
                 stage=stage,
                 message=result.message,
-                artifact_preview=(result.output or "")[:500],
-                full_content=result.output or "",
+                artifact_preview=artifact_content,
+                full_content=artifact_content,
             )
 
         if result.type == StageResultType.ROLLBACK_REQUIRED:

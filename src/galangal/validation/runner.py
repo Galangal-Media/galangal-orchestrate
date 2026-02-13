@@ -144,7 +144,7 @@ def validate_stage_decision(
     return ValidationResult(
         False,
         f"{stage_upper}_DECISION file missing or unclear - user confirmation required",
-        output=truncate_text(content, 2000),
+        output=content,
         needs_user_decision=True,
     )
 
@@ -212,14 +212,26 @@ class ValidationRunner:
         # source of truth for skip logic. By the time we reach validate_stage(),
         # the stage has already been determined to not be skipped.
 
-        # SECURITY stage: use generic decision validation
-        if stage_lower == "security":
-            return validate_stage_decision(
-                "SECURITY",
-                task_name,
-                "SECURITY_CHECKLIST.md",
-                skip_artifact="SECURITY_SKIP.md",
-            )
+        # Look up stage metadata for data-driven checks
+        from galangal.core.state import STAGE_METADATA, Stage
+
+        try:
+            stage_enum = Stage.from_str(stage.upper())
+            metadata = STAGE_METADATA.get(stage_enum)
+        except ValueError:
+            metadata = None
+
+        # Decision-only stages: delegate to decision validation when config exists
+        # but the stage is purely decision-driven (no commands/markers configured)
+        if metadata and metadata.default_validation == "decision" and metadata.decision_file:
+            if not stage_config.commands and not stage_config.artifact:
+                artifact_name = metadata.produces_artifacts[0] if metadata.produces_artifacts else f"{stage.upper()}_REPORT.md"
+                return validate_stage_decision(
+                    stage.upper(),
+                    task_name,
+                    artifact_name,
+                    skip_artifact=metadata.skip_artifact,
+                )
 
         # Run preflight checks (for PREFLIGHT stage)
         if stage_config.checks:
@@ -239,30 +251,36 @@ class ValidationRunner:
                 rollback_to="DEV",
             )
 
-        # Decision file checks - these take precedence over artifact markers
-        # because some backends/stages write explicit decision files
+        # Metadata-driven decision/artifact checks after commands pass
+        if metadata:
+            validation_type = metadata.default_validation
 
-        # TEST stage: just check TEST_PLAN.md exists
-        # (TEST stage only writes tests, TEST_GATE or QA runs them)
-        if stage_lower == "test":
-            if not artifact_exists("TEST_PLAN.md", task_name):
-                return ValidationResult(False, "TEST_PLAN.md not found")
-            # TEST stage passed - tests will be run by TEST_GATE or QA
-            return ValidationResult(True, "Tests written successfully")
+            # Decision-based stages: check decision file
+            if validation_type == "decision" and metadata.decision_file:
+                artifact_name = metadata.produces_artifacts[0] if metadata.produces_artifacts else f"{stage.upper()}_REPORT.md"
+                result = validate_stage_decision(
+                    stage.upper(), task_name, artifact_name,
+                    skip_artifact=metadata.skip_artifact,
+                )
+                if result.success or result.rollback_to:
+                    return result
 
-        # QA stage: check QA_DECISION file
-        if stage_lower == "qa":
-            result = self._check_qa_report(task_name)
-            if not result.success:
-                return result
+            # Decision-or-markers: try decision, fall through to artifact markers
+            if validation_type == "decision_or_markers" and metadata.decision_file:
+                artifact_name = metadata.produces_artifacts[0] if metadata.produces_artifacts else f"{stage.upper()}_REPORT.md"
+                result = validate_stage_decision(stage.upper(), task_name, artifact_name)
+                if result.success or result.rollback_to:
+                    return result
+                # Fall through to artifact marker check
 
-        # REVIEW stage: check REVIEW_DECISION file (for Codex/independent reviews)
-        if stage_lower == "review":
-            result = validate_stage_decision("REVIEW", task_name, "REVIEW_NOTES.md")
-            if result.success or result.rollback_to:
-                # Valid decision found - use it
-                return result
-            # Fall through to artifact marker check if decision file missing/unclear
+            # Artifact-only stages: check required artifacts exist
+            if validation_type == "artifacts":
+                required = metadata.required_artifacts or metadata.produces_artifacts
+                for art_name in required:
+                    if not artifact_exists(art_name, task_name):
+                        return ValidationResult(False, f"{art_name} not found")
+                if required and not stage_config.artifact:
+                    return ValidationResult(True, f"{stage} validation passed")
 
         # Check for pass/fail markers in artifacts (fallback for AI-driven stages)
         if stage_config.artifact and stage_config.pass_marker:
@@ -759,9 +777,16 @@ class ValidationRunner:
         report_content = "\n".join(lines)
         write_artifact("VALIDATION_REPORT.md", report_content, task_name)
 
-        # For TEST stage, also write a concise summary for downstream prompts
-        if stage.upper() == "TEST":
-            self._write_test_summary(task_name, command_results)
+        # Write concise test summary for stages that have write_test_summary=True
+        from galangal.core.state import STAGE_METADATA, Stage
+
+        try:
+            stage_enum = Stage.from_str(stage.upper())
+            metadata = STAGE_METADATA.get(stage_enum)
+            if metadata and metadata.write_test_summary:
+                self._write_test_summary(task_name, command_results)
+        except ValueError:
+            pass
 
     def _write_test_summary(self, task_name: str, command_results: dict[str, Any]) -> None:
         """
@@ -965,10 +990,6 @@ class ValidationRunner:
             needs_user_decision=True,
         )
 
-    def _check_qa_report(self, task_name: str) -> ValidationResult:
-        """Check QA_DECISION file first, then fall back to QA_REPORT.md parsing."""
-        return validate_stage_decision("QA", task_name, "QA_REPORT.md")
-
     def _validate_artifact_schemas(self, stage: str, task_name: str) -> ValidationResult | None:
         """
         Validate artifacts produced by this stage against their schemas.
@@ -1046,77 +1067,68 @@ class ValidationRunner:
 
     def _validate_with_defaults(self, stage: str, task_name: str) -> ValidationResult:
         """
-        Validate a stage using built-in default logic.
+        Validate a stage using metadata-driven default logic.
 
-        Used when no validation config exists for a stage. Implements
-        sensible defaults for each stage:
-        - PM: Requires SPEC.md and PLAN.md
-        - DESIGN: Requires DESIGN.md or DESIGN_SKIP.md
-        - DEV: Always passes (QA will validate)
-        - TEST: Requires TEST_PLAN.md
-        - QA: Checks QA_REPORT.md for PASS/FAIL
-        - SECURITY: Checks SECURITY_CHECKLIST.md for APPROVED/REJECTED
-        - REVIEW: Checks REVIEW_NOTES.md for APPROVE/REQUEST_CHANGES
-        - DOCS: Requires DOCS_REPORT.md
+        Used when no validation config exists for a stage. Looks up
+        StageMetadata.default_validation to determine the strategy:
+        - "always_pass" / "none": Always succeed
+        - "decision": Check decision file via validate_stage_decision()
+        - "decision_or_markers": Try decision file, fall through to artifact check
+        - "artifacts": Check required_artifacts (or produces_artifacts) exist
 
         Args:
             stage: The stage name (case-insensitive).
             task_name: Task name for artifact lookups.
 
         Returns:
-            ValidationResult based on stage-specific defaults.
+            ValidationResult based on metadata-driven defaults.
         """
+        from galangal.core.state import STAGE_METADATA, Stage
+
         stage_upper = stage.upper()
 
-        # PM stage - check for SPEC.md and PLAN.md
-        if stage_upper == "PM":
-            if not artifact_exists("SPEC.md", task_name):
-                return ValidationResult(False, "SPEC.md not found")
-            if not artifact_exists("PLAN.md", task_name):
-                return ValidationResult(False, "PLAN.md not found")
-            return ValidationResult(True, "PM stage validated")
+        # Look up stage metadata
+        try:
+            stage_enum = Stage.from_str(stage_upper)
+            metadata = STAGE_METADATA.get(stage_enum)
+        except ValueError:
+            metadata = None
 
-        # DESIGN stage - check for DESIGN.md or skip marker
-        if stage_upper == "DESIGN":
-            if artifact_exists("DESIGN_SKIP.md", task_name):
-                return ValidationResult(True, "Design skipped")
-            if not artifact_exists("DESIGN.md", task_name):
-                return ValidationResult(False, "DESIGN.md not found")
-            return ValidationResult(True, "Design stage validated")
+        if not metadata:
+            return ValidationResult(True, f"{stage} completed")
 
-        # DEV stage - just check Claude completed
-        if stage_upper == "DEV":
-            return ValidationResult(True, "DEV stage completed - QA will validate")
+        # Check skip artifact first
+        if metadata.skip_artifact and artifact_exists(metadata.skip_artifact, task_name):
+            return ValidationResult(True, f"{stage_upper} skipped")
 
-        # TEST stage - just check TEST_PLAN.md exists
-        # (TEST stage only writes tests, TEST_GATE or QA runs them)
-        if stage_upper == "TEST":
-            if not artifact_exists("TEST_PLAN.md", task_name):
-                return ValidationResult(False, "TEST_PLAN.md not found")
-            return ValidationResult(True, "Tests written successfully")
+        validation_type = metadata.default_validation
 
-        # QA stage - use generic decision validation
-        if stage_upper == "QA":
-            return validate_stage_decision("QA", task_name, "QA_REPORT.md")
+        # Always-pass and no-op stages
+        if validation_type in ("always_pass", "none"):
+            return ValidationResult(True, f"{stage_upper} completed")
 
-        # SECURITY stage - use generic decision validation
-        if stage_upper == "SECURITY":
+        # Decision-based validation
+        if validation_type == "decision":
+            artifact_name = metadata.produces_artifacts[0] if metadata.produces_artifacts else f"{stage_upper}_REPORT.md"
             return validate_stage_decision(
-                "SECURITY",
+                stage_upper,
                 task_name,
-                "SECURITY_CHECKLIST.md",
-                skip_artifact="SECURITY_SKIP.md",
+                artifact_name,
+                skip_artifact=metadata.skip_artifact,
             )
 
-        # REVIEW stage - use generic decision validation
-        if stage_upper == "REVIEW":
-            return validate_stage_decision("REVIEW", task_name, "REVIEW_NOTES.md")
+        # Decision-or-markers: try decision first, fall through to artifacts
+        if validation_type == "decision_or_markers":
+            artifact_name = metadata.produces_artifacts[0] if metadata.produces_artifacts else f"{stage_upper}_REPORT.md"
+            result = validate_stage_decision(stage_upper, task_name, artifact_name)
+            if result.success or result.rollback_to:
+                return result
+            # Fall through to artifact check
 
-        # DOCS stage - check for DOCS_REPORT.md
-        if stage_upper == "DOCS":
-            if not artifact_exists("DOCS_REPORT.md", task_name):
-                return ValidationResult(False, "DOCS_REPORT.md not found")
-            return ValidationResult(True, "Docs stage validated")
+        # Artifact-based validation (also fallback for decision_or_markers)
+        required = metadata.required_artifacts or metadata.produces_artifacts
+        for artifact_name in required:
+            if not artifact_exists(artifact_name, task_name):
+                return ValidationResult(False, f"{artifact_name} not found")
 
-        # Default: pass
-        return ValidationResult(True, f"{stage} completed")
+        return ValidationResult(True, f"{stage_upper} stage validated")
