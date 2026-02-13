@@ -10,7 +10,12 @@ import { useWebSocket } from "@/hooks/useWebSocket"
 import { api } from "@/lib/api"
 import type { AgentInfo, TaskState, PromptData } from "@/types/api"
 import { formatRelativeTime } from "@/lib/utils"
-import { ArrowLeft, GitBranch, Terminal, Clock, AlertTriangle } from "lucide-react"
+import { ArrowLeft, GitBranch, Terminal, Clock, AlertTriangle, Loader2 } from "lucide-react"
+
+function isStageRunning(task: TaskState): boolean {
+  const stage = task.stage.toLowerCase()
+  return !task.awaiting_approval && stage !== "complete" && stage !== "summary" && !stage.includes("fail") && stage !== "error" && stage !== "idle"
+}
 
 interface AgentDetailData {
   agent: AgentInfo
@@ -261,7 +266,10 @@ export function TaskDetail() {
         </Link>
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 min-w-0">
           <h1 className="text-2xl font-bold tracking-tight break-all min-w-0">{task.task_name}</h1>
-          <Badge variant="default" className="text-xs w-fit shrink-0">{task.stage}</Badge>
+          <div className="flex items-center gap-2 w-fit shrink-0">
+            {isStageRunning(task) && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+            <Badge variant="default" className="text-xs">{task.stage}</Badge>
+          </div>
         </div>
         <div className="text-sm text-muted-foreground">
           {agent.agent.project_name} <span className="mx-1 opacity-40">/</span> {agent.agent.hostname}

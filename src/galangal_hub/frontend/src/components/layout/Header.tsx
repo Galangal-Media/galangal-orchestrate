@@ -35,7 +35,7 @@ export function Header() {
       <div className="container flex h-14 items-center">
         <div className="mr-4 flex">
           <Link to="/" className="mr-8 flex items-center gap-2.5 group">
-            <GalangalLogo size={32} />
+            <GalangalLogo size={48} />
             <span className="font-bold text-base text-primary tracking-tight">
               Galangal Hub
             </span>

@@ -18,6 +18,11 @@ const stageBadgeVariant = (stage: string): "default" | "success" | "warning" | "
   return "default"
 }
 
+function isStageRunning(task: TaskState): boolean {
+  const stage = task.stage.toLowerCase()
+  return !task.awaiting_approval && stage !== "complete" && stage !== "summary" && !stage.includes("fail") && stage !== "error" && stage !== "idle"
+}
+
 export function TaskCard({ task, agentId }: TaskCardProps) {
   return (
     <Link to={`/agents/${agentId}/tasks/${task.task_name}`}>
@@ -25,7 +30,10 @@ export function TaskCard({ task, agentId }: TaskCardProps) {
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2 min-w-0">
             <div className="font-semibold text-base break-all min-w-0 leading-tight">{task.task_name}</div>
-            <Badge variant={stageBadgeVariant(task.stage)} className="text-[10px] shrink-0">{task.stage}</Badge>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {isStageRunning(task) && <span className="status-dot status-running" />}
+              <Badge variant={stageBadgeVariant(task.stage)} className="text-[10px]">{task.stage}</Badge>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-2">

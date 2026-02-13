@@ -32,7 +32,7 @@
   --color-info: #38bdf8;
 
   /* Chrome */
-  --color-header: #0c0c0c;
+  --color-header: #161515;
   --color-header-border: #1e1e1e;
 
   /* Code blocks */
@@ -122,6 +122,22 @@ body {
   50% {
     opacity: 0.7;
     box-shadow: 0 0 12px var(--color-warning);
+  }
+}
+
+.status-running {
+  @apply bg-primary;
+  animation: pulse-running 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-running {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 4px var(--color-primary);
+  }
+  50% {
+    opacity: 0.4;
+    box-shadow: 0 0 8px var(--color-primary);
   }
 }
 
