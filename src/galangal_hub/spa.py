@@ -60,6 +60,9 @@ def get_spa_router(dist_dir: Path | None = None) -> APIRouter:
     @router.get("/agents/{agent_id:path}", response_class=HTMLResponse)
     @router.get("/tasks", response_class=HTMLResponse)
     @router.get("/tasks/{path:path}", response_class=HTMLResponse)
+    @router.get("/environments", response_class=HTMLResponse)
+    @router.get("/environments/{env_id:path}", response_class=HTMLResponse)
+    @router.get("/credentials", response_class=HTMLResponse)
     async def spa_routes(request: Request) -> Response:
         """Serve the SPA index.html for client-side routes."""
         if not await check_auth(request):

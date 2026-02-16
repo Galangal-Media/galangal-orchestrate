@@ -38,8 +38,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan - initialize and cleanup resources."""
     # Initialize storage
     await storage.initialize()
+
+    # Initialize environment subsystem
+    from galangal_hub.environments.process_manager import process_manager
+    from galangal_hub.environments.routes import set_env_storage
+    from galangal_hub.environments.storage import EnvironmentStorage
+
+    if storage._db:
+        env_storage = EnvironmentStorage(storage._db)
+        set_env_storage(env_storage)
+        await process_manager.restore_on_startup(env_storage)
+
     yield
+
     # Cleanup
+    from galangal_hub.environments.process_manager import process_manager as pm
+
+    await pm.stop_all()
     await storage.close()
 
 
@@ -473,6 +488,11 @@ def create_app(
     app.include_router(agents.router)
     app.include_router(tasks.router)
     app.include_router(actions.router)
+
+    # Environment routes
+    from galangal_hub.environments.routes import router as env_router
+
+    app.include_router(env_router)
 
     # Mount React SPA
     from galangal_hub.spa import get_spa_router, mount_spa_static

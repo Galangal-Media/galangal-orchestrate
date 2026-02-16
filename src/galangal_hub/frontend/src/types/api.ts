@@ -72,7 +72,7 @@ export interface TaskRecord {
 
 // WebSocket message types
 export interface WSMessage {
-  type: 'refresh' | 'prompt' | 'prompt_cleared' | 'output'
+  type: 'refresh' | 'prompt' | 'prompt_cleared' | 'output' | 'env_status'
   agent_id?: string
   agent_name?: string
   task_name?: string
@@ -109,4 +109,118 @@ export interface GitHubIssue {
   labels: string[]
   state: string
   author: string
+}
+
+// Environment types
+export type AIProvider = 'claude' | 'openai' | 'gemini'
+export type EnvironmentStatus = 'stopped' | 'cloning' | 'ready' | 'starting' | 'running' | 'error'
+export type StartMode = 'shell' | 'docker_compose'
+
+export interface CredentialProfile {
+  id: string
+  name: string
+  provider: AIProvider
+  credentials: Record<string, string>
+  created_at: string
+  updated_at: string
+}
+
+export interface CredentialProfileCreate {
+  name: string
+  provider: AIProvider
+  credentials: Record<string, string>
+}
+
+export interface Environment {
+  id: string
+  name: string
+  repo_url: string
+  branch: string
+  local_path: string
+  status: EnvironmentStatus
+  provider: AIProvider
+  credential_profile_id: string | null
+  env_vars: Record<string, string>
+  env_files: Record<string, string>
+  start_mode: StartMode
+  start_command: string | null
+  stop_command: string | null
+  docker_compose_file: string | null
+  ports: number[]
+  vault: VaultConfig | null
+  agent_id: string | null
+  editor_port: number | null
+  error_message: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface EnvironmentWithAgent extends Environment {
+  agent_connected: boolean
+  agent_name: string | null
+}
+
+export interface EnvironmentCreate {
+  name: string
+  repo_url: string
+  branch?: string
+  provider?: AIProvider
+  credential_profile_id?: string | null
+  env_vars?: Record<string, string>
+  env_files?: Record<string, string>
+  start_mode?: StartMode
+  start_command?: string | null
+  stop_command?: string | null
+  docker_compose_file?: string | null
+  ports?: number[]
+  vault?: VaultConfig | null
+}
+
+export interface EnvironmentUpdate {
+  name?: string
+  branch?: string
+  provider?: AIProvider
+  credential_profile_id?: string | null
+  env_vars?: Record<string, string>
+  env_files?: Record<string, string>
+  start_mode?: StartMode
+  start_command?: string | null
+  stop_command?: string | null
+  docker_compose_file?: string | null
+  ports?: number[]
+  vault?: VaultConfig | null
+}
+
+export interface GitStatus {
+  branch: string
+  clean: boolean
+  last_commit_hash: string
+  last_commit_message: string
+  remote_branches: string[]
+}
+
+// Vault types
+export type VaultProvider = 'doppler'
+
+export interface DopplerSettings {
+  token: string
+}
+
+export interface VaultConfig {
+  enabled: boolean
+  provider: VaultProvider | null
+  doppler: DopplerSettings | null
+}
+
+export interface EditorStatus {
+  running: boolean
+  port: number | null
+  url: string | null
+}
+
+export interface DopplerStatus {
+  installed: boolean
+  authenticated: boolean
+  project: string | null
+  config: string | null
 }

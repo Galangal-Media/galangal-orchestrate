@@ -5,6 +5,8 @@ import { AgentDetail } from "@/pages/AgentDetail"
 import { AgentsList } from "@/pages/AgentsList"
 import { TasksList } from "@/pages/TasksList"
 import { TaskDetail } from "@/pages/TaskDetail"
+import { EnvironmentsList } from "@/pages/EnvironmentsList"
+import { EnvironmentDetail } from "@/pages/EnvironmentDetail"
 import { useTheme } from "@/hooks/useTheme"
 import { useEffect } from "react"
 
@@ -27,6 +29,8 @@ function App() {
           <Route path="/agents/:agentId" element={<AgentDetail />} />
           <Route path="/agents/:agentId/tasks/:taskName" element={<TaskDetail />} />
           <Route path="/tasks" element={<TasksList />} />
+          <Route path="/environments" element={<EnvironmentsList />} />
+          <Route path="/environments/:envId" element={<EnvironmentDetail />} />
         </Route>
       </Routes>
     </BrowserRouter>

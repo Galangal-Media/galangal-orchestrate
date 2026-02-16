@@ -10,6 +10,7 @@ const navItems = [
   { path: "/", label: "Dashboard" },
   { path: "/agents", label: "Agents" },
   { path: "/tasks", label: "Tasks" },
+  { path: "/environments", label: "Environments" },
 ]
 
 export function Header() {

@@ -365,7 +365,92 @@ galangal config edit
 
 ---
 
-## 6. Debug Mode
+## 6. Hub Environments
+
+### CORS Errors Between Services
+
+**Symptom:** Your environment runs a frontend (e.g. `:3031`) and a backend API (e.g. `:5022`) on different ports. The browser console shows the API request succeeds (200 OK) but the response body says "failed to load response data". The frontend can't read API responses.
+
+**Cause:** This is a CORS (Cross-Origin Resource Sharing) issue. When a frontend on one origin (e.g. `http://localhost:3031`) makes a request to an API on a different origin (e.g. `http://localhost:5022`), the browser blocks the response unless the API explicitly allows it with the `Access-Control-Allow-Origin` header.
+
+Even though both are on `localhost`, different ports = different origins to the browser.
+
+**Diagnosis:** Look at the API response headers. You'll see something like:
+```
+access-control-allow-credentials: true
+```
+But no `Access-Control-Allow-Origin` header — that's the missing piece.
+
+**Solution:** Configure CORS on your backend API to allow the frontend origin.
+
+**FastAPI:**
+```python
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3031"],  # or use env var
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+**Express/Node:**
+```javascript
+const cors = require('cors');
+app.use(cors({
+  origin: 'http://localhost:3031',
+  credentials: true,
+}));
+```
+
+**Django:**
+```python
+# settings.py (with django-cors-headers)
+CORS_ALLOWED_ORIGINS = ["http://localhost:3031"]
+CORS_ALLOW_CREDENTIALS = True
+```
+
+**Tip:** Many frameworks support a `CORS_ORIGINS` environment variable. Add it to your environment's env vars in the hub so you can configure it per-environment without changing code:
+
+```
+CORS_ORIGINS=http://localhost:3031
+```
+
+### Services Can't Reach Each Other in Docker
+
+**Symptom:** Frontend container can't reach the backend via `localhost:5022`.
+
+**Cause:** In Docker Compose, each container has its own network. `localhost` inside a container refers to that container, not the host or other containers.
+
+**Solution:** For server-side calls between containers, use the Docker Compose service name:
+```yaml
+services:
+  frontend:
+    environment:
+      - API_URL=http://backend:5022
+  backend:
+    # ...
+```
+
+For client-side (browser) calls, `localhost` works because the browser runs on the host — just make sure ports are published in docker-compose.
+
+### Git Pull Fails With "Divergent Branches"
+
+**Symptom:** Pulling latest changes fails with "diverging branches" or "not possible to fast-forward".
+
+**Cause:** The local branch and remote branch have diverged — both have commits the other doesn't.
+
+**Solution:** Use the Git tab in the environment detail page. When a pull fails due to divergence, the hub shows three options:
+
+- **Rebase** — replays your local commits on top of remote (cleanest history)
+- **Merge** — creates a merge commit combining both (preserves all history)
+- **Reset to remote** — discards all local changes and matches remote exactly
+
+---
+
+## 7. Debug Mode
 
 When all else fails, enable debug mode for detailed logs:
 

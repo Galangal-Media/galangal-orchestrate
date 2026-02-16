@@ -31,6 +31,14 @@
   --color-destructive-foreground: #ffffff;
   --color-info: #38bdf8;
 
+  /* Popover / dropdown menus */
+  --color-popover: #1a1a1a;
+  --color-popover-foreground: #e4e4e0;
+
+  /* Input / ring */
+  --color-input: #282826;
+  --color-ring: #d7df23;
+
   /* Chrome */
   --color-header: #161515;
   --color-header-border: #1e1e1e;
@@ -54,6 +62,10 @@
   --color-foreground: #1a1a1a;
   --color-card: #ffffff;
   --color-card-foreground: #1a1a1a;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #1a1a1a;
+  --color-input: #ddddd6;
+  --color-ring: #7d8316;
   --color-muted: #efefe9;
   --color-muted-foreground: #5c5c58;
   --color-border: #ddddd6;

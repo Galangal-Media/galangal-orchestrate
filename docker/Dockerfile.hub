@@ -65,10 +65,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies + code-server for the in-browser editor
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    git \
     gosu \
+    && curl -fsSL https://code-server.dev/install.sh | sh \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /bin/bash --uid 1000 appuser
 
@@ -88,8 +90,9 @@ RUN chmod +x /entrypoint.sh
 # Create data directory (will be overwritten by volume mount)
 RUN mkdir -p /data && chown appuser:appuser /data
 
-# Expose the default port
+# Expose the hub port and editor port range (code-server instances)
 EXPOSE 8080
+EXPOSE 13370-13389
 
 # Environment variables
 ENV HUB_DB_PATH=/data/hub.db \

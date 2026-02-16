@@ -45,6 +45,7 @@ class HubStorage:
         await self._db.executescript(
             """
             CREATE TABLE IF NOT EXISTS agents (
+
                 agent_id TEXT PRIMARY KEY,
                 hostname TEXT NOT NULL,
                 project_name TEXT NOT NULL,
@@ -98,6 +99,12 @@ class HubStorage:
                 ON task_artifacts (agent_id, task_name, updated_at);
             """
         )
+        await self._db.commit()
+
+        # Create environment-related tables
+        from galangal_hub.environments.storage import create_environment_tables
+
+        await create_environment_tables(self._db)
         await self._db.commit()
 
     async def upsert_agent(self, info: AgentInfo) -> None:
