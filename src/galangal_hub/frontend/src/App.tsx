@@ -7,6 +7,8 @@ import { TasksList } from "@/pages/TasksList"
 import { TaskDetail } from "@/pages/TaskDetail"
 import { EnvironmentsList } from "@/pages/EnvironmentsList"
 import { EnvironmentDetail } from "@/pages/EnvironmentDetail"
+import { AIKeysList } from "@/pages/AIKeysList"
+import { ProfilesList } from "@/pages/ProfilesList"
 import { useTheme } from "@/hooks/useTheme"
 import { useEffect } from "react"
 
@@ -31,6 +33,8 @@ function App() {
           <Route path="/tasks" element={<TasksList />} />
           <Route path="/environments" element={<EnvironmentsList />} />
           <Route path="/environments/:envId" element={<EnvironmentDetail />} />
+          <Route path="/ai-keys" element={<AIKeysList />} />
+          <Route path="/profiles" element={<ProfilesList />} />
         </Route>
       </Routes>
     </BrowserRouter>

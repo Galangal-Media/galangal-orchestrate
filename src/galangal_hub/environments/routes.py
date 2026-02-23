@@ -11,7 +11,7 @@ import os
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
 
 from galangal_hub.environments.credentials import (
     credentials_to_env_vars,
@@ -29,6 +29,9 @@ from galangal_hub.environments.git_ops import (
     reset_to_remote,
 )
 from galangal_hub.environments.models import (
+    ClaudeAccount,
+    ClaudeAccountCreate,
+    ConfigUpdateRequest,
     CredentialProfile,
     CredentialProfileCreate,
     CredentialProfileUpdate,
@@ -39,6 +42,9 @@ from galangal_hub.environments.models import (
     EnvironmentWithAgent,
     EnvFileWrite,
     GitStatus,
+    Profile,
+    ProfileCreate,
+    ProfileUpdate,
 )
 from galangal_hub.environments.process_manager import process_manager
 from galangal_hub.environments.storage import EnvironmentStorage
@@ -165,6 +171,344 @@ async def test_credential(profile_id: str) -> dict:
         valid = bool(creds)
 
     return {"valid": valid, "provider": provider}
+
+
+# ============================================================
+# Claude Account Routes
+# ============================================================
+
+
+def _account_config_dir(account_id: str) -> Path:
+    """Get the isolated config directory for a Claude Max account."""
+    return Path(SOURCE_DIR) / "claude-accounts" / account_id
+
+
+@router.get("/claude-accounts")
+async def list_claude_accounts() -> list[ClaudeAccount]:
+    """List all Claude Max accounts."""
+    return await _storage().list_claude_accounts()
+
+
+@router.post("/claude-accounts")
+async def create_claude_account(data: ClaudeAccountCreate) -> ClaudeAccount:
+    """Create a new Claude Max account."""
+    existing = await _storage().get_claude_account_by_name(data.name)
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Account name '{data.name}' already exists")
+
+    account_id = __import__("uuid").uuid4().hex[:12]
+    config_dir = _account_config_dir(account_id)
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    return await _storage().create_claude_account(data, str(config_dir))
+
+
+@router.delete("/claude-accounts/{account_id}")
+async def delete_claude_account(account_id: str) -> dict:
+    """Delete a Claude Max account (fails if in use)."""
+    if await _storage().is_claude_account_in_use(account_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete: account is used by one or more profiles",
+        )
+
+    row = await _storage().get_claude_account(account_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Claude account not found")
+
+    # Remove config directory
+    config_dir = Path(row["config_dir"])
+    if config_dir.exists():
+        shutil.rmtree(str(config_dir), ignore_errors=True)
+
+    deleted = await _storage().delete_claude_account(account_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Claude account not found")
+    return {"status": "deleted"}
+
+
+@router.post("/claude-accounts/{account_id}/login")
+async def login_claude_account(account_id: str) -> dict:
+    """Start an interactive ``claude auth login`` session.
+
+    The actual terminal interaction happens over the WebSocket at
+    ``/ws/claude-accounts/{id}/terminal``.  This REST endpoint just
+    validates the account exists (kept for backwards-compat / simple check).
+    """
+    row = await _storage().get_claude_account(account_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Claude account not found")
+    return {"status": "ok"}
+
+
+async def claude_account_terminal(websocket: WebSocket, account_id: str) -> None:
+    """WebSocket endpoint: interactive bash shell for a Claude account.
+
+    Spawns bash with ``CLAUDE_CONFIG_DIR`` pointing at the account's
+    isolated config directory so the user can run ``claude auth login``,
+    ``claude auth status``, etc. interactively via xterm.js.
+    """
+    import pty as pty_mod
+    import select as select_mod
+    import struct
+    import fcntl
+    import termios
+
+    await websocket.accept()
+
+    row = await _storage().get_claude_account(account_id)
+    if not row:
+        await websocket.close(code=1008, reason="Account not found")
+        return
+
+    config_dir = Path(row["config_dir"])
+    config_dir.mkdir(parents=True, exist_ok=True)
+    provider = row.get("provider", "claude")
+
+    env = {**os.environ}
+    env.pop("CLAUDECODE", None)
+    env["TERM"] = "xterm-256color"
+
+    # Set provider-specific config directory env vars
+    if provider == "claude":
+        env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+    elif provider == "codex":
+        env["CODEX_HOME"] = str(config_dir)
+    elif provider == "gemini":
+        env["GEMINI_HOME"] = str(config_dir)
+
+    master_fd, slave_fd = pty_mod.openpty()
+
+    # Set an initial window size on the PTY
+    winsize = struct.pack("HHHH", 30, 120, 0, 0)
+    fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+
+    pid = os.fork()
+    if pid == 0:
+        # Child — become session leader, attach to slave PTY, exec bash
+        os.close(master_fd)
+        os.setsid()
+        os.dup2(slave_fd, 0)
+        os.dup2(slave_fd, 1)
+        os.dup2(slave_fd, 2)
+        if slave_fd > 2:
+            os.close(slave_fd)
+        os.execvpe("bash", ["bash", "--login"], env)
+    else:
+        os.close(slave_fd)
+        loop = asyncio.get_event_loop()
+
+        async def _pty_reader() -> None:
+            """Read PTY output and send to WebSocket."""
+            try:
+                while True:
+                    readable = await loop.run_in_executor(
+                        None,
+                        lambda: select_mod.select([master_fd], [], [], 0.5)[0],
+                    )
+                    if readable:
+                        data = await loop.run_in_executor(
+                            None, lambda: os.read(master_fd, 4096)
+                        )
+                        if not data:
+                            break
+                        await websocket.send_bytes(data)
+                    else:
+                        # Check if child is still alive
+                        try:
+                            result = os.waitpid(pid, os.WNOHANG)
+                            if result[0] != 0:
+                                break
+                        except ChildProcessError:
+                            break
+            except (WebSocketDisconnect, Exception):
+                pass
+
+        reader_task = asyncio.create_task(_pty_reader())
+
+        try:
+            while True:
+                msg = await websocket.receive()
+                if msg.get("type") == "websocket.disconnect":
+                    break
+                # Handle resize messages (JSON with cols/rows)
+                text = msg.get("text")
+                if text and text.startswith('{"resize"'):
+                    try:
+                        resize = json_mod.loads(text)["resize"]
+                        winsize = struct.pack(
+                            "HHHH", resize["rows"], resize["cols"], 0, 0
+                        )
+                        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+                        os.kill(pid, 28)  # SIGWINCH
+                        continue
+                    except Exception:
+                        pass
+                data = msg.get("bytes") or (text.encode() if text else b"")
+                if data:
+                    try:
+                        os.write(master_fd, data)
+                    except OSError:
+                        break
+        except WebSocketDisconnect:
+            pass
+        finally:
+            reader_task.cancel()
+            try:
+                os.kill(pid, 9)
+            except (ProcessLookupError, OSError):
+                pass
+            try:
+                os.waitpid(pid, 0)
+            except (ChildProcessError, OSError):
+                pass
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+
+            # Refresh auth status after terminal closes
+            await _refresh_account_status(account_id, provider, str(config_dir))
+
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+
+
+@router.post("/claude-accounts/{account_id}/logout")
+async def logout_claude_account(account_id: str) -> dict:
+    """Logout from a Claude Max account."""
+    row = await _storage().get_claude_account(account_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Claude account not found")
+
+    config_dir = Path(row["config_dir"])
+    env = {**os.environ, "CLAUDE_CONFIG_DIR": str(config_dir)}
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "claude", "auth", "logout",
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=10)
+    except FileNotFoundError:
+        pass  # CLI not installed
+    except asyncio.TimeoutError:
+        pass
+    except Exception:
+        pass
+
+    # Update DB
+    await _storage().update_claude_account(
+        account_id, logged_in=False, email=None, subscription_type=None
+    )
+    return {"status": "logged_out"}
+
+
+async def _refresh_account_status(
+    account_id: str, provider: str, config_dir: str
+) -> dict:
+    """Check auth status for any CLI provider and update the DB."""
+    env = {**os.environ}
+    env.pop("CLAUDECODE", None)
+
+    if provider == "claude":
+        env["CLAUDE_CONFIG_DIR"] = config_dir
+        cmd = ["claude", "auth", "status", "--json"]
+    elif provider == "codex":
+        # Codex CLI stores auth in ~/.codex/auth.json (ignores env overrides)
+        codex_auth = Path.home() / ".codex" / "auth.json"
+        if codex_auth.exists():
+            try:
+                data = json_mod.loads(codex_auth.read_text())
+                tokens = data.get("tokens", {})
+                email = None
+                plan_type = "pro"
+                # Extract email from JWT id_token payload (base64 middle segment)
+                id_token = tokens.get("id_token", "")
+                if id_token:
+                    import base64
+                    parts = id_token.split(".")
+                    if len(parts) >= 2:
+                        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+                        claims = json_mod.loads(base64.urlsafe_b64decode(payload))
+                        email = claims.get("email")
+                        auth_info = claims.get("https://api.openai.com/auth", {})
+                        plan_type = auth_info.get("chatgpt_plan_type", "pro")
+                has_tokens = bool(tokens.get("access_token"))
+                if has_tokens:
+                    await _storage().update_claude_account(
+                        account_id, logged_in=True, email=email, subscription_type=plan_type
+                    )
+                    return {"logged_in": True, "email": email, "subscription_type": plan_type}
+            except Exception:
+                pass
+        await _storage().update_claude_account(account_id, logged_in=False)
+        return {"logged_in": False}
+    elif provider == "gemini":
+        # Gemini CLI stores auth in ~/.gemini/ (ignores env overrides)
+        gemini_dir = Path.home() / ".gemini"
+        accounts_file = gemini_dir / "google_accounts.json"
+        creds_file = gemini_dir / "oauth_creds.json"
+        if accounts_file.exists() and creds_file.exists():
+            try:
+                accounts = json_mod.loads(accounts_file.read_text())
+                email = accounts.get("active")
+                await _storage().update_claude_account(
+                    account_id, logged_in=True, email=email, subscription_type="gemini"
+                )
+                return {"logged_in": True, "email": email, "subscription_type": "gemini"}
+            except Exception:
+                pass
+        await _storage().update_claude_account(account_id, logged_in=False)
+        return {"logged_in": False}
+    else:
+        return {"logged_in": False, "error": f"Unknown provider: {provider}"}
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        data = json_mod.loads(stdout.decode())
+
+        logged_in = data.get("loggedIn", False)
+        await _storage().update_claude_account(
+            account_id,
+            email=data.get("email") or None,
+            logged_in=logged_in,
+            subscription_type=data.get("subscriptionType") or None,
+        )
+        return {
+            "logged_in": logged_in,
+            "email": data.get("email"),
+            "subscription_type": data.get("subscriptionType"),
+        }
+    except FileNotFoundError:
+        return {"logged_in": False, "error": f"{provider} CLI not found"}
+    except asyncio.TimeoutError:
+        return {"logged_in": False, "error": "Status check timed out"}
+    except Exception as e:
+        return {"logged_in": False, "error": str(e)}
+
+
+@router.get("/claude-accounts/{account_id}/status")
+async def get_claude_account_status(account_id: str) -> dict:
+    """Poll auth status for a CLI subscription account."""
+    row = await _storage().get_claude_account(account_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    provider = row.get("provider", "claude")
+    config_dir = row["config_dir"]
+    result = await _refresh_account_status(account_id, provider, config_dir)
+    result["account_name"] = row["name"]
+    return result
 
 
 # ============================================================
@@ -545,7 +889,188 @@ async def reset_environment(env_id: str) -> dict:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================
+# Profile Routes
+# ============================================================
+
+
+@router.get("/profiles")
+async def list_profiles() -> list[Profile]:
+    """List all profiles."""
+    return await _storage().list_profiles()
+
+
+@router.post("/profiles")
+async def create_profile(data: ProfileCreate) -> Profile:
+    """Create a new profile."""
+    # Validate mutual exclusion: can't have both API key and subscription for same provider
+    for cred, acct, label in [
+        (data.claude_credential_id, data.claude_account_id, "Claude"),
+        (data.codex_credential_id, data.codex_account_id, "Codex"),
+        (data.gemini_credential_id, data.gemini_account_id, "Gemini"),
+    ]:
+        if cred and acct:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot set both {label} API key and {label} subscription account",
+            )
+
+    # Validate credential IDs exist
+    for cred_id, label in [
+        (data.claude_credential_id, "Claude"),
+        (data.codex_credential_id, "Codex"),
+        (data.gemini_credential_id, "Gemini"),
+    ]:
+        if cred_id:
+            row = await _storage().get_credential_profile(cred_id)
+            if not row:
+                raise HTTPException(status_code=400, detail=f"{label} credential not found")
+
+    # Validate subscription accounts exist
+    for acct_id, label in [
+        (data.claude_account_id, "Claude"),
+        (data.codex_account_id, "Codex"),
+        (data.gemini_account_id, "Gemini"),
+    ]:
+        if acct_id:
+            row = await _storage().get_claude_account(acct_id)
+            if not row:
+                raise HTTPException(status_code=400, detail=f"{label} subscription account not found")
+
+    return await _storage().create_profile(data)
+
+
+@router.get("/profiles/{profile_id}")
+async def get_profile(profile_id: str) -> Profile:
+    """Get a profile by ID."""
+    profile = await _storage().get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return profile
+
+
+@router.put("/profiles/{profile_id}")
+async def update_profile(profile_id: str, data: ProfileUpdate) -> dict:
+    """Update a profile."""
+    existing = await _storage().get_profile(profile_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    # Validate mutual exclusion for each provider after update
+    for cred_field, acct_field, label in [
+        ("claude_credential_id", "claude_account_id", "Claude"),
+        ("codex_credential_id", "codex_account_id", "Codex"),
+        ("gemini_credential_id", "gemini_account_id", "Gemini"),
+    ]:
+        new_cred = getattr(data, cred_field)
+        new_acct = getattr(data, acct_field)
+        eff_cred = new_cred if new_cred is not None else getattr(existing, cred_field)
+        eff_acct = new_acct if new_acct is not None else getattr(existing, acct_field)
+        if eff_cred == "":
+            eff_cred = None
+        if eff_acct == "":
+            eff_acct = None
+        if eff_cred and eff_acct:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot set both {label} API key and {label} subscription account",
+            )
+
+    # Validate credential IDs
+    for cred_id, label in [
+        (data.claude_credential_id, "Claude"),
+        (data.codex_credential_id, "Codex"),
+        (data.gemini_credential_id, "Gemini"),
+    ]:
+        if cred_id:
+            row = await _storage().get_credential_profile(cred_id)
+            if not row:
+                raise HTTPException(status_code=400, detail=f"{label} credential not found")
+
+    # Validate subscription accounts exist
+    for acct_id, label in [
+        (data.claude_account_id, "Claude"),
+        (data.codex_account_id, "Codex"),
+        (data.gemini_account_id, "Gemini"),
+    ]:
+        if acct_id and acct_id != "":
+            row = await _storage().get_claude_account(acct_id)
+            if not row:
+                raise HTTPException(status_code=400, detail=f"{label} subscription account not found")
+
+    updated = await _storage().update_profile(profile_id, data)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return {"status": "updated"}
+
+
+@router.delete("/profiles/{profile_id}")
+async def delete_profile(profile_id: str) -> dict:
+    """Delete a profile (fails if in use by environments)."""
+    if await _storage().is_profile_in_use(profile_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete: profile is used by one or more environments",
+        )
+
+    deleted = await _storage().delete_profile(profile_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return {"status": "deleted"}
+
+
 # --- Agent Lifecycle ---
+
+
+async def _resolve_profile_env_vars(profile: Profile) -> dict[str, str]:
+    """Resolve all credential env vars from a profile's linked credentials."""
+    env_vars: dict[str, str] = {}
+
+    # Claude: prefer Max account over API key
+    if profile.claude_account_id:
+        row = await _storage().get_claude_account(profile.claude_account_id)
+        if row:
+            env_vars["CLAUDE_CONFIG_DIR"] = row["config_dir"]
+    elif profile.claude_credential_id:
+        row = await _storage().get_credential_profile(profile.claude_credential_id)
+        if row:
+            try:
+                creds = decrypt_credentials(row["credentials"])
+                env_vars.update(credentials_to_env_vars("claude", creds))
+            except Exception:
+                logger.warning(f"Failed to decrypt credentials for profile {profile.name}, provider claude")
+
+    # Codex: prefer subscription account over API key
+    if profile.codex_account_id:
+        row = await _storage().get_claude_account(profile.codex_account_id)
+        if row:
+            # Codex uses ~/.codex/ directly (no env override needed for single-account)
+            pass
+    elif profile.codex_credential_id:
+        row = await _storage().get_credential_profile(profile.codex_credential_id)
+        if row:
+            try:
+                creds = decrypt_credentials(row["credentials"])
+                env_vars.update(credentials_to_env_vars("openai", creds))
+            except Exception:
+                logger.warning(f"Failed to decrypt credentials for profile {profile.name}, provider openai")
+
+    # Gemini: prefer subscription account over API key
+    if profile.gemini_account_id:
+        row = await _storage().get_claude_account(profile.gemini_account_id)
+        if row:
+            # Gemini uses ~/.gemini/ directly (no env override needed for single-account)
+            pass
+    elif profile.gemini_credential_id:
+        row = await _storage().get_credential_profile(profile.gemini_credential_id)
+        if row:
+            try:
+                creds = decrypt_credentials(row["credentials"])
+                env_vars.update(credentials_to_env_vars("gemini", creds))
+            except Exception:
+                logger.warning(f"Failed to decrypt credentials for profile {profile.name}, provider gemini")
+
+    return env_vars
 
 
 @router.post("/environments/{env_id}/agent/start")
@@ -565,9 +1090,13 @@ async def start_agent(env_id: str) -> dict:
             detail=f"Cannot start agent from status '{env.status.value}'",
         )
 
-    # Get credentials if a profile is set
+    # Get credentials - prefer profile_id, fall back to credential_profile_id
     agent_env_vars: dict[str, str] = {}
-    if env.credential_profile_id:
+    if env.profile_id:
+        profile = await _storage().get_profile(env.profile_id)
+        if profile:
+            agent_env_vars = await _resolve_profile_env_vars(profile)
+    elif env.credential_profile_id:
         row = await _storage().get_credential_profile(env.credential_profile_id)
         if row:
             try:
@@ -715,6 +1244,69 @@ async def get_doppler_status(token: str | None = None) -> dict:
         "project": project,
         "config": config,
     }
+
+
+# ============================================================
+# Config Editor Routes
+# ============================================================
+
+
+@router.get("/environments/{env_id}/config")
+async def get_galangal_config(env_id: str) -> dict:
+    """Read .galangal/config.yaml from the environment's repo."""
+    env = await _storage().get_environment(env_id)
+    if not env:
+        raise HTTPException(status_code=404, detail="Environment not found")
+
+    config_path = Path(env.local_path) / ".galangal" / "config.yaml"
+    if not config_path.exists():
+        return {"config": {}, "raw": "", "exists": False}
+
+    try:
+        import yaml
+
+        raw = config_path.read_text()
+        parsed = yaml.safe_load(raw) or {}
+        return {"config": parsed, "raw": raw, "exists": True}
+    except Exception as e:
+        return {"config": {}, "raw": config_path.read_text() if config_path.exists() else "", "exists": True, "error": str(e)}
+
+
+@router.put("/environments/{env_id}/config")
+async def update_galangal_config(env_id: str, data: ConfigUpdateRequest) -> dict:
+    """Write .galangal/config.yaml to the environment's repo."""
+    env = await _storage().get_environment(env_id)
+    if not env:
+        raise HTTPException(status_code=404, detail="Environment not found")
+
+    local = Path(env.local_path)
+    if not local.exists():
+        raise HTTPException(status_code=400, detail="Environment directory does not exist")
+
+    config_dir = local / ".galangal"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "config.yaml"
+
+    try:
+        import yaml
+
+        if data.raw is not None:
+            # Validate YAML
+            yaml.safe_load(data.raw)
+            config_path.write_text(data.raw)
+        elif data.config is not None:
+            yaml_str = yaml.dump(data.config, default_flow_style=False, sort_keys=False)
+            config_path.write_text(yaml_str)
+        else:
+            raise HTTPException(status_code=400, detail="Provide either 'config' or 'raw'")
+
+        return {"status": "saved"}
+    except yaml.YAMLError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {e}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # --- Helpers ---

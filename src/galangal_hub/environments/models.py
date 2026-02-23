@@ -106,6 +106,7 @@ class EnvironmentCreate(BaseModel):
     branch: str = "main"
     provider: AIProvider = AIProvider.CLAUDE
     credential_profile_id: str | None = None
+    profile_id: str | None = None
     env_vars: dict[str, str] = Field(default_factory=dict)
     env_files: dict[str, str] = Field(default_factory=dict)  # filename -> content
     start_mode: StartMode = StartMode.DOCKER_COMPOSE
@@ -123,6 +124,7 @@ class EnvironmentUpdate(BaseModel):
     branch: str | None = None
     provider: AIProvider | None = None
     credential_profile_id: str | None = None
+    profile_id: str | None = None
     env_vars: dict[str, str] | None = None
     env_files: dict[str, str] | None = None
     start_mode: StartMode | None = None
@@ -144,6 +146,7 @@ class Environment(BaseModel):
     status: EnvironmentStatus
     provider: AIProvider
     credential_profile_id: str | None = None
+    profile_id: str | None = None
     env_vars: dict[str, str] = Field(default_factory=dict)
     env_files: dict[str, str] = Field(default_factory=dict)
     start_mode: StartMode
@@ -180,3 +183,86 @@ class GitStatus(BaseModel):
     last_commit_hash: str
     last_commit_message: str
     remote_branches: list[str] = Field(default_factory=list)
+
+
+# --- CLI Account Models (Claude Max, Codex, Gemini CLI logins) ---
+
+
+class CLIAccountProvider(str, Enum):
+    """Providers that support CLI subscription login."""
+
+    CLAUDE = "claude"
+    CODEX = "codex"
+    GEMINI = "gemini"
+
+
+class ClaudeAccountCreate(BaseModel):
+    """Request to create a CLI subscription account."""
+
+    name: str
+    provider: CLIAccountProvider = CLIAccountProvider.CLAUDE
+
+
+class ClaudeAccount(BaseModel):
+    """A CLI subscription account (Claude Max, Codex, Gemini)."""
+
+    id: str
+    name: str
+    provider: str = "claude"
+    email: str | None = None
+    logged_in: bool = False
+    subscription_type: str | None = None
+    created_at: str
+    updated_at: str
+
+
+# --- Profile Models ---
+
+
+class ProfileCreate(BaseModel):
+    """Request to create a profile that bundles multiple AI credentials."""
+
+    name: str
+    claude_credential_id: str | None = None
+    claude_account_id: str | None = None
+    codex_credential_id: str | None = None
+    codex_account_id: str | None = None
+    gemini_credential_id: str | None = None
+    gemini_account_id: str | None = None
+
+
+class ProfileUpdate(BaseModel):
+    """Request to update a profile."""
+
+    name: str | None = None
+    claude_credential_id: str | None = None
+    claude_account_id: str | None = None
+    codex_credential_id: str | None = None
+    codex_account_id: str | None = None
+    gemini_credential_id: str | None = None
+    gemini_account_id: str | None = None
+
+
+class Profile(BaseModel):
+    """A profile bundling multiple AI credentials."""
+
+    id: str
+    name: str
+    claude_credential_id: str | None = None
+    claude_account_id: str | None = None
+    codex_credential_id: str | None = None
+    codex_account_id: str | None = None
+    gemini_credential_id: str | None = None
+    gemini_account_id: str | None = None
+    created_at: str
+    updated_at: str
+
+
+# --- Config Editor Models ---
+
+
+class ConfigUpdateRequest(BaseModel):
+    """Request to update .galangal/config.yaml."""
+
+    config: dict[str, Any] | None = None  # Structured config dict
+    raw: str | None = None  # Raw YAML string

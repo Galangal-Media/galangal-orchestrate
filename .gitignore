@@ -72,3 +72,5 @@ galangal-tasks/
 ideas/
 .test_venv
 /GEMINI.md
+hub.db
+/environments

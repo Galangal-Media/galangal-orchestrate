@@ -1,5 +1,8 @@
 import type {
   AgentWithState,
+  ClaudeAccount,
+  ClaudeAccountCreate,
+  ClaudeAccountStatus,
   CreateTaskRequest,
   CredentialProfile,
   CredentialProfileCreate,
@@ -9,8 +12,12 @@ import type {
   EnvironmentCreate,
   EnvironmentUpdate,
   EnvironmentWithAgent,
+  GalangalConfig,
   GitHubIssue,
   GitStatus,
+  Profile,
+  ProfileCreate,
+  ProfileUpdate,
   QAAnswer,
   TaskRecord,
   WorkflowEvent,
@@ -271,6 +278,82 @@ async function getDopplerStatus(token?: string): Promise<DopplerStatus> {
   return fetchJson<DopplerStatus>(`${BASE_URL}/doppler/status${params}`)
 }
 
+// Claude Accounts
+async function getClaudeAccounts(): Promise<ClaudeAccount[]> {
+  return fetchJson<ClaudeAccount[]>(`${BASE_URL}/claude-accounts`)
+}
+
+async function createClaudeAccount(data: ClaudeAccountCreate): Promise<ClaudeAccount> {
+  return fetchJson<ClaudeAccount>(`${BASE_URL}/claude-accounts`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+async function deleteClaudeAccount(accountId: string): Promise<void> {
+  await fetchJson(`${BASE_URL}/claude-accounts/${accountId}`, { method: 'DELETE' })
+}
+
+async function loginClaudeAccount(accountId: string): Promise<{ status: string; auth_url?: string; code_verifier?: string }> {
+  return fetchJson(`${BASE_URL}/claude-accounts/${accountId}/login`, { method: 'POST' })
+}
+
+async function logoutClaudeAccount(accountId: string): Promise<void> {
+  await fetchJson(`${BASE_URL}/claude-accounts/${accountId}/logout`, { method: 'POST' })
+}
+
+async function getClaudeAccountStatus(accountId: string): Promise<ClaudeAccountStatus> {
+  return fetchJson<ClaudeAccountStatus>(`${BASE_URL}/claude-accounts/${accountId}/status`)
+}
+
+async function submitClaudeAuthTokens(
+  accountId: string,
+  tokens: { access_token: string; refresh_token: string; expires_in: number }
+): Promise<{ status: string; email?: string; subscription_type?: string }> {
+  return fetchJson(`${BASE_URL}/claude-accounts/${accountId}/auth-callback`, {
+    method: 'POST',
+    body: JSON.stringify(tokens),
+  })
+}
+
+// Profiles
+async function getProfiles(): Promise<Profile[]> {
+  return fetchJson<Profile[]>(`${BASE_URL}/profiles`)
+}
+
+async function createProfile(data: ProfileCreate): Promise<Profile> {
+  return fetchJson<Profile>(`${BASE_URL}/profiles`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+async function updateProfile(profileId: string, data: ProfileUpdate): Promise<void> {
+  await fetchJson(`${BASE_URL}/profiles/${profileId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+async function deleteProfile(profileId: string): Promise<void> {
+  await fetchJson(`${BASE_URL}/profiles/${profileId}`, { method: 'DELETE' })
+}
+
+// Galangal Config
+async function getGalangalConfig(envId: string): Promise<GalangalConfig> {
+  return fetchJson<GalangalConfig>(`${BASE_URL}/environments/${envId}/config`)
+}
+
+async function updateGalangalConfig(
+  envId: string,
+  data: { config?: Record<string, unknown>; raw?: string }
+): Promise<void> {
+  await fetchJson(`${BASE_URL}/environments/${envId}/config`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
 // Export as api object for convenience
 export const api = {
   getAgents,
@@ -316,6 +399,22 @@ export const api = {
   isEditorAvailable,
   // Doppler
   getDopplerStatus,
+  // Claude Accounts
+  getClaudeAccounts,
+  createClaudeAccount,
+  deleteClaudeAccount,
+  loginClaudeAccount,
+  logoutClaudeAccount,
+  getClaudeAccountStatus,
+  submitClaudeAuthTokens,
+  // Profiles
+  getProfiles,
+  createProfile,
+  updateProfile,
+  deleteProfile,
+  // Galangal Config
+  getGalangalConfig,
+  updateGalangalConfig,
 }
 
 // Also export individual functions
@@ -359,4 +458,17 @@ export {
   getEditorStatus,
   isEditorAvailable,
   getDopplerStatus,
+  getClaudeAccounts,
+  createClaudeAccount,
+  deleteClaudeAccount,
+  loginClaudeAccount,
+  logoutClaudeAccount,
+  getClaudeAccountStatus,
+  submitClaudeAuthTokens,
+  getProfiles,
+  createProfile,
+  updateProfile,
+  deleteProfile,
+  getGalangalConfig,
+  updateGalangalConfig,
 }

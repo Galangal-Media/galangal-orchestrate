@@ -140,6 +140,7 @@ export interface Environment {
   status: EnvironmentStatus
   provider: AIProvider
   credential_profile_id: string | null
+  profile_id: string | null
   env_vars: Record<string, string>
   env_files: Record<string, string>
   start_mode: StartMode
@@ -166,6 +167,7 @@ export interface EnvironmentCreate {
   branch?: string
   provider?: AIProvider
   credential_profile_id?: string | null
+  profile_id?: string | null
   env_vars?: Record<string, string>
   env_files?: Record<string, string>
   start_mode?: StartMode
@@ -181,6 +183,7 @@ export interface EnvironmentUpdate {
   branch?: string
   provider?: AIProvider
   credential_profile_id?: string | null
+  profile_id?: string | null
   env_vars?: Record<string, string>
   env_files?: Record<string, string>
   start_mode?: StartMode
@@ -197,6 +200,75 @@ export interface GitStatus {
   last_commit_hash: string
   last_commit_message: string
   remote_branches: string[]
+}
+
+// CLI Account types (Claude Max, Codex, Gemini subscriptions)
+export type CLIAccountProvider = 'claude' | 'codex' | 'gemini'
+
+export interface ClaudeAccount {
+  id: string
+  name: string
+  provider: CLIAccountProvider
+  email: string | null
+  logged_in: boolean
+  subscription_type: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ClaudeAccountCreate {
+  name: string
+  provider?: CLIAccountProvider
+}
+
+export interface ClaudeAccountStatus {
+  logged_in: boolean
+  email?: string | null
+  subscription_type?: string | null
+  account_name?: string
+  error?: string
+}
+
+// Profile types
+export interface Profile {
+  id: string
+  name: string
+  claude_credential_id: string | null
+  claude_account_id: string | null
+  codex_credential_id: string | null
+  codex_account_id: string | null
+  gemini_credential_id: string | null
+  gemini_account_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ProfileCreate {
+  name: string
+  claude_credential_id?: string | null
+  claude_account_id?: string | null
+  codex_credential_id?: string | null
+  codex_account_id?: string | null
+  gemini_credential_id?: string | null
+  gemini_account_id?: string | null
+}
+
+export interface ProfileUpdate {
+  name?: string
+  claude_credential_id?: string | null
+  claude_account_id?: string | null
+  codex_credential_id?: string | null
+  codex_account_id?: string | null
+  gemini_credential_id?: string | null
+  gemini_account_id?: string | null
+}
+
+// Config editor types
+export interface GalangalConfig {
+  config: Record<string, unknown>
+  raw: string
+  exists: boolean
+  error?: string
 }
 
 // Vault types

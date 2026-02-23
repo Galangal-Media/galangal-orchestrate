@@ -5,8 +5,7 @@ import { api } from "@/lib/api"
 import type {
   EnvironmentWithAgent,
   EnvironmentCreate,
-  CredentialProfile,
-  AIProvider,
+  Profile,
   StartMode,
   WSMessage,
   VaultProvider,
@@ -43,7 +42,7 @@ const statusVariant: Record<string, "default" | "secondary" | "destructive" | "s
 
 export function EnvironmentsList() {
   const [environments, setEnvironments] = useState<EnvironmentWithAgent[]>([])
-  const [credentials, setCredentials] = useState<CredentialProfile[]>([])
+  const [profiles, setProfiles] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -52,12 +51,12 @@ export function EnvironmentsList() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [envs, creds] = await Promise.all([
+      const [envs, profs] = await Promise.all([
         api.getEnvironments(),
-        api.getCredentialProfiles(),
+        api.getProfiles(),
       ])
       setEnvironments(envs)
-      setCredentials(creds)
+      setProfiles(profs)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch environments")
@@ -123,7 +122,7 @@ export function EnvironmentsList() {
                 <DialogTitle>Create Environment</DialogTitle>
               </DialogHeader>
               <CreateEnvironmentForm
-                credentials={credentials}
+                profiles={profiles}
                 onSubmit={handleCreate}
                 onCancel={() => setCreateOpen(false)}
               />
@@ -203,19 +202,18 @@ function EnvironmentCard({ env }: { env: EnvironmentWithAgent }) {
 }
 
 function CreateEnvironmentForm({
-  credentials,
+  profiles,
   onSubmit,
   onCancel,
 }: {
-  credentials: CredentialProfile[]
+  profiles: Profile[]
   onSubmit: (data: EnvironmentCreate) => Promise<void>
   onCancel: () => void
 }) {
   const [name, setName] = useState("")
   const [repoUrl, setRepoUrl] = useState("")
   const [branch, setBranch] = useState("main")
-  const [provider, setProvider] = useState<AIProvider>("claude")
-  const [credentialId, setCredentialId] = useState<string>("__none__")
+  const [profileId, setProfileId] = useState<string>("__none__")
   const [startMode, setStartMode] = useState<StartMode>("docker_compose")
   const [startCommand, setStartCommand] = useState("")
   const [stopCommand, setStopCommand] = useState("")
@@ -245,8 +243,7 @@ function CreateEnvironmentForm({
         name,
         repo_url: repoUrl,
         branch,
-        provider,
-        credential_profile_id: credentialId !== "__none__" ? credentialId : undefined,
+        profile_id: profileId !== "__none__" ? profileId : undefined,
         start_mode: startMode,
         start_command: startMode === "shell" ? startCommand || undefined : undefined,
         stop_command: startMode === "shell" ? stopCommand || undefined : undefined,
@@ -297,37 +294,19 @@ function CreateEnvironmentForm({
           />
         </div>
         <div className="space-y-2">
-          <label className="text-sm font-medium">AI Provider</label>
-          <Select value={provider} onValueChange={(v) => setProvider(v as AIProvider)}>
+          <label className="text-sm font-medium">Profile</label>
+          <Select value={profileId} onValueChange={setProfileId}>
             <SelectTrigger>
-              <SelectValue />
+              <SelectValue placeholder="None" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="claude">Claude</SelectItem>
-              <SelectItem value="openai">OpenAI</SelectItem>
-              <SelectItem value="gemini">Gemini</SelectItem>
+              <SelectItem value="__none__">None</SelectItem>
+              {profiles.map((p) => (
+                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
-      </div>
-
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Credential Profile</label>
-        <Select value={credentialId} onValueChange={setCredentialId}>
-          <SelectTrigger>
-            <SelectValue placeholder="None" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">None</SelectItem>
-            {credentials
-              .filter((c) => c.provider === provider)
-              .map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-          </SelectContent>
-        </Select>
       </div>
 
       {/* Third-party Vault */}

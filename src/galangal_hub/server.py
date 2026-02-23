@@ -238,6 +238,21 @@ async def agent_websocket(websocket: WebSocket) -> None:
                 await manager.connect(agent_id, websocket, info)
                 await storage.upsert_agent(info)
 
+                # Link agent to environment by matching project_path to local_path
+                try:
+                    from galangal_hub.environments import routes as env_routes
+
+                    if env_routes._env_storage:
+                        env_id_linked = await env_routes._env_storage.set_environment_agent_by_path(
+                            info.project_path, agent_id
+                        )
+                        if env_id_linked:
+                            logger.info(
+                                f"Linked agent {agent_id} to environment {env_id_linked}"
+                            )
+                except Exception as e:
+                    logger.warning(f"Failed to link agent to environment: {e}")
+
                 logger.info(f"Agent registered: {agent_id} ({info.hostname})")
 
                 # Send acknowledgement
@@ -510,6 +525,13 @@ def create_app(
     # Register WebSocket routes
     app.websocket("/ws/dashboard")(dashboard_websocket)
     app.websocket("/ws/agent")(agent_websocket)
+
+    # Terminal WebSocket for Claude account login
+    from galangal_hub.environments.routes import claude_account_terminal
+
+    app.websocket("/ws/claude-accounts/{account_id}/terminal")(
+        claude_account_terminal
+    )
 
     # Register dashboard notification callback
     manager.on_change(notify_dashboards)

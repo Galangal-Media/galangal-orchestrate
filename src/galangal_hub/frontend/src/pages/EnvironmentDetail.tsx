@@ -5,10 +5,9 @@ import { api } from "@/lib/api"
 import type {
   EnvironmentWithAgent,
   EnvironmentUpdate,
-  CredentialProfile,
+  Profile,
   GitStatus,
   EditorStatus,
-  AIProvider,
   StartMode,
   WSMessage,
   VaultProvider,
@@ -41,6 +40,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { DopplerConnect, type DopplerSelection } from "@/components/vault/DopplerConnect"
+import { ConfigEditor } from "@/components/environment/ConfigEditor"
 import Ansi from "ansi-to-react"
 
 const statusVariant: Record<string, "default" | "secondary" | "destructive" | "success" | "warning"> = {
@@ -52,13 +52,13 @@ const statusVariant: Record<string, "default" | "secondary" | "destructive" | "s
   error: "destructive",
 }
 
-type Tab = "config" | "env_vars" | "env_files" | "git" | "logs" | "agent" | "editor"
+type Tab = "config" | "galangal_config" | "env_vars" | "env_files" | "git" | "logs" | "agent" | "editor"
 
 export function EnvironmentDetail() {
   const { envId } = useParams<{ envId: string }>()
   const navigate = useNavigate()
   const [env, setEnv] = useState<EnvironmentWithAgent | null>(null)
-  const [credentials, setCredentials] = useState<CredentialProfile[]>([])
+  const [profiles, setProfiles] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>("config")
@@ -70,12 +70,12 @@ export function EnvironmentDetail() {
   const fetchEnv = useCallback(async () => {
     if (!envId) return
     try {
-      const [envData, creds] = await Promise.all([
+      const [envData, profs] = await Promise.all([
         api.getEnvironment(envId),
-        api.getCredentialProfiles(),
+        api.getProfiles(),
       ])
       setEnv(envData)
-      setCredentials(creds)
+      setProfiles(profs)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch environment")
@@ -273,8 +273,13 @@ export function EnvironmentDetail() {
       {/* Tabs */}
       <div className="border-b border-border">
         <nav className="flex gap-0.5 -mb-px">
-          {(["config", "env_vars", "env_files", "git", "logs", "agent", "editor"] as Tab[]).map((tab) => {
-            const label = tab === "env_vars" ? "Env Vars" : tab === "env_files" ? "Env Files" : tab.charAt(0).toUpperCase() + tab.slice(1)
+          {(["config", "galangal_config", "env_vars", "env_files", "git", "logs", "agent", "editor"] as Tab[]).map((tab) => {
+            const labelMap: Record<string, string> = {
+              env_vars: "Env Vars",
+              env_files: "Env Files",
+              galangal_config: "Galangal Config",
+            }
+            const label = labelMap[tab] || tab.charAt(0).toUpperCase() + tab.slice(1)
             return (
               <button
                 key={tab}
@@ -295,7 +300,10 @@ export function EnvironmentDetail() {
 
       {/* Tab Content */}
       {activeTab === "config" && (
-        <ConfigTab env={env} credentials={credentials} onSaved={fetchEnv} />
+        <ConfigTab env={env} profiles={profiles} onSaved={fetchEnv} />
+      )}
+      {activeTab === "galangal_config" && (
+        <ConfigEditor envId={env.id} />
       )}
       {activeTab === "env_vars" && (
         <EnvVarsTab env={env} onSaved={fetchEnv} />
@@ -322,17 +330,16 @@ export function EnvironmentDetail() {
 // --- Config Tab ---
 function ConfigTab({
   env,
-  credentials,
+  profiles,
   onSaved,
 }: {
   env: EnvironmentWithAgent
-  credentials: CredentialProfile[]
+  profiles: Profile[]
   onSaved: () => void
 }) {
   const [name, setName] = useState(env.name)
   const [branch, setBranch] = useState(env.branch)
-  const [provider, setProvider] = useState<AIProvider>(env.provider)
-  const [credentialId, setCredentialId] = useState(env.credential_profile_id || "__none__")
+  const [profileId, setProfileId] = useState(env.profile_id || "__none__")
   const [startMode, setStartMode] = useState<StartMode>(env.start_mode)
   const [startCommand, setStartCommand] = useState(env.start_command || "")
   const [stopCommand, setStopCommand] = useState(env.stop_command || "")
@@ -367,8 +374,7 @@ function ConfigTab({
       const update: EnvironmentUpdate = {
         name: name !== env.name ? name : undefined,
         branch: branch !== env.branch ? branch : undefined,
-        provider,
-        credential_profile_id: credentialId !== "__none__" ? credentialId : undefined,
+        profile_id: profileId !== "__none__" ? profileId : "",
         start_mode: startMode,
         start_command: startMode === "shell" ? startCommand : null,
         stop_command: startMode === "shell" ? stopCommand : null,
@@ -406,36 +412,22 @@ function ConfigTab({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">AI Provider</label>
-            <Select value={provider} onValueChange={(v) => setProvider(v as AIProvider)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="claude">Claude</SelectItem>
-                <SelectItem value="openai">OpenAI</SelectItem>
-                <SelectItem value="gemini">Gemini</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Credential Profile</label>
-            <Select value={credentialId} onValueChange={setCredentialId}>
-              <SelectTrigger>
-                <SelectValue placeholder="None" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">None</SelectItem>
-                {credentials
-                  .filter((c) => c.provider === provider)
-                  .map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Profile</label>
+          <Select value={profileId} onValueChange={setProfileId}>
+            <SelectTrigger>
+              <SelectValue placeholder="None" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">None</SelectItem>
+              {profiles.map((p) => (
+                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Bundles AI credentials (Claude, Codex, Gemini). Manage profiles in the Profiles page.
+          </p>
         </div>
 
         {/* Third-party Vault */}

@@ -13,6 +13,8 @@ import aiosqlite
 
 from galangal_hub.environments.models import (
     AIProvider,
+    ClaudeAccount,
+    ClaudeAccountCreate,
     CredentialProfile,
     CredentialProfileCreate,
     CredentialProfileUpdate,
@@ -20,6 +22,9 @@ from galangal_hub.environments.models import (
     EnvironmentCreate,
     EnvironmentStatus,
     EnvironmentUpdate,
+    Profile,
+    ProfileCreate,
+    ProfileUpdate,
     StartMode,
     VaultConfig,
 )
@@ -94,6 +99,79 @@ async def create_environment_tables(db: aiosqlite.Connection) -> None:
         await db.commit()
     except Exception:
         pass  # Column already exists
+
+    # Create claude_accounts table
+    await db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS claude_accounts (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            email TEXT,
+            config_dir TEXT NOT NULL,
+            logged_in INTEGER NOT NULL DEFAULT 0,
+            subscription_type TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+
+    # Create profiles table
+    await db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS profiles (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            claude_credential_id TEXT,
+            claude_account_id TEXT,
+            codex_credential_id TEXT,
+            gemini_credential_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (claude_credential_id) REFERENCES credential_profiles (id),
+            FOREIGN KEY (claude_account_id) REFERENCES claude_accounts (id),
+            FOREIGN KEY (codex_credential_id) REFERENCES credential_profiles (id),
+            FOREIGN KEY (gemini_credential_id) REFERENCES credential_profiles (id)
+        );
+        """
+    )
+
+    # Migration: add profile_id column to environments
+    try:
+        await db.execute(
+            "ALTER TABLE environments ADD COLUMN profile_id TEXT REFERENCES profiles(id)"
+        )
+        await db.commit()
+    except Exception:
+        pass  # Column already exists
+
+    # Migration: add claude_account_id column to profiles
+    try:
+        await db.execute(
+            "ALTER TABLE profiles ADD COLUMN claude_account_id TEXT REFERENCES claude_accounts(id)"
+        )
+        await db.commit()
+    except Exception:
+        pass  # Column already exists
+
+    # Migration: add provider column to claude_accounts
+    try:
+        await db.execute(
+            "ALTER TABLE claude_accounts ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'"
+        )
+        await db.commit()
+    except Exception:
+        pass  # Column already exists
+
+    # Migration: add codex_account_id and gemini_account_id to profiles
+    for col in ("codex_account_id", "gemini_account_id"):
+        try:
+            await db.execute(
+                f"ALTER TABLE profiles ADD COLUMN {col} TEXT REFERENCES claude_accounts(id)"
+            )
+            await db.commit()
+        except Exception:
+            pass  # Column already exists
 
 
 class EnvironmentStorage:
@@ -198,9 +276,245 @@ class EnvironmentStorage:
         return cursor.rowcount > 0
 
     async def is_credential_profile_in_use(self, profile_id: str) -> bool:
-        """Check if a credential profile is referenced by any environment."""
+        """Check if a credential profile is referenced by any environment or profile."""
+        # Check environments
         cursor = await self._db.execute(
             "SELECT COUNT(*) FROM environments WHERE credential_profile_id = ?",
+            (profile_id,),
+        )
+        row = await cursor.fetchone()
+        if row and row[0] > 0:
+            return True
+
+        # Check profiles table
+        cursor = await self._db.execute(
+            """SELECT COUNT(*) FROM profiles
+               WHERE claude_credential_id = ? OR codex_credential_id = ? OR gemini_credential_id = ?""",
+            (profile_id, profile_id, profile_id),
+        )
+        row = await cursor.fetchone()
+        return row is not None and row[0] > 0
+
+    # --- Claude Accounts ---
+
+    async def create_claude_account(
+        self, data: ClaudeAccountCreate, config_dir: str
+    ) -> ClaudeAccount:
+        """Create a new CLI subscription account."""
+        now = datetime.now(timezone.utc).isoformat()
+        account_id = str(uuid.uuid4())
+        provider = getattr(data, "provider", "claude") or "claude"
+
+        await self._db.execute(
+            """
+            INSERT INTO claude_accounts (id, name, provider, config_dir, logged_in, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 0, ?, ?)
+            """,
+            (account_id, data.name, provider, config_dir, now, now),
+        )
+        await self._db.commit()
+
+        return ClaudeAccount(
+            id=account_id,
+            name=data.name,
+            provider=provider,
+            logged_in=False,
+            created_at=now,
+            updated_at=now,
+        )
+
+    async def list_claude_accounts(self) -> list[ClaudeAccount]:
+        """List all Claude Max accounts."""
+        cursor = await self._db.execute(
+            "SELECT * FROM claude_accounts ORDER BY name ASC"
+        )
+        rows = await cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        return [_row_to_claude_account(dict(zip(columns, row))) for row in rows]
+
+    async def get_claude_account(self, account_id: str) -> dict[str, Any] | None:
+        """Get a Claude account by ID (raw row)."""
+        cursor = await self._db.execute(
+            "SELECT * FROM claude_accounts WHERE id = ?", (account_id,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        columns = [desc[0] for desc in cursor.description]
+        return dict(zip(columns, row))
+
+    async def get_claude_account_by_name(self, name: str) -> dict[str, Any] | None:
+        """Get a Claude account by name."""
+        cursor = await self._db.execute(
+            "SELECT * FROM claude_accounts WHERE name = ?", (name,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        columns = [desc[0] for desc in cursor.description]
+        return dict(zip(columns, row))
+
+    async def update_claude_account(
+        self,
+        account_id: str,
+        email: str | None = None,
+        logged_in: bool | None = None,
+        subscription_type: str | None = None,
+        name: str | None = None,
+    ) -> bool:
+        """Update a Claude account. Returns True if found and updated."""
+        now = datetime.now(timezone.utc).isoformat()
+        sets: list[str] = ["updated_at = ?"]
+        params: list[Any] = [now]
+
+        if name is not None:
+            sets.append("name = ?")
+            params.append(name)
+        if email is not None:
+            sets.append("email = ?")
+            params.append(email)
+        if logged_in is not None:
+            sets.append("logged_in = ?")
+            params.append(1 if logged_in else 0)
+        if subscription_type is not None:
+            sets.append("subscription_type = ?")
+            params.append(subscription_type)
+
+        params.append(account_id)
+        cursor = await self._db.execute(
+            f"UPDATE claude_accounts SET {', '.join(sets)} WHERE id = ?",
+            params,
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def delete_claude_account(self, account_id: str) -> bool:
+        """Delete a Claude account. Returns True if deleted."""
+        cursor = await self._db.execute(
+            "DELETE FROM claude_accounts WHERE id = ?", (account_id,)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def is_claude_account_in_use(self, account_id: str) -> bool:
+        """Check if a CLI account is referenced by any profile."""
+        cursor = await self._db.execute(
+            """SELECT COUNT(*) FROM profiles
+               WHERE claude_account_id = ? OR codex_account_id = ? OR gemini_account_id = ?""",
+            (account_id, account_id, account_id),
+        )
+        row = await cursor.fetchone()
+        return row is not None and row[0] > 0
+
+    # --- Profiles ---
+
+    async def create_profile(self, data: ProfileCreate) -> Profile:
+        """Create a new profile."""
+        now = datetime.now(timezone.utc).isoformat()
+        profile_id = str(uuid.uuid4())
+
+        await self._db.execute(
+            """
+            INSERT INTO profiles (id, name, claude_credential_id, claude_account_id,
+                                  codex_credential_id, codex_account_id,
+                                  gemini_credential_id, gemini_account_id,
+                                  created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                profile_id,
+                data.name,
+                data.claude_credential_id,
+                data.claude_account_id,
+                data.codex_credential_id,
+                data.codex_account_id,
+                data.gemini_credential_id,
+                data.gemini_account_id,
+                now,
+                now,
+            ),
+        )
+        await self._db.commit()
+
+        return Profile(
+            id=profile_id,
+            name=data.name,
+            claude_credential_id=data.claude_credential_id,
+            claude_account_id=data.claude_account_id,
+            codex_credential_id=data.codex_credential_id,
+            codex_account_id=data.codex_account_id,
+            gemini_credential_id=data.gemini_credential_id,
+            gemini_account_id=data.gemini_account_id,
+            created_at=now,
+            updated_at=now,
+        )
+
+    async def list_profiles(self) -> list[Profile]:
+        """List all profiles."""
+        cursor = await self._db.execute("SELECT * FROM profiles ORDER BY name ASC")
+        rows = await cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        return [Profile(**dict(zip(columns, row))) for row in rows]
+
+    async def get_profile(self, profile_id: str) -> Profile | None:
+        """Get a profile by ID."""
+        cursor = await self._db.execute(
+            "SELECT * FROM profiles WHERE id = ?", (profile_id,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        columns = [desc[0] for desc in cursor.description]
+        return Profile(**dict(zip(columns, row)))
+
+    async def update_profile(self, profile_id: str, data: ProfileUpdate) -> bool:
+        """Update a profile. Returns True if found and updated."""
+        now = datetime.now(timezone.utc).isoformat()
+        sets: list[str] = ["updated_at = ?"]
+        params: list[Any] = [now]
+
+        if data.name is not None:
+            sets.append("name = ?")
+            params.append(data.name)
+        if data.claude_credential_id is not None:
+            sets.append("claude_credential_id = ?")
+            params.append(data.claude_credential_id or None)
+        if data.claude_account_id is not None:
+            sets.append("claude_account_id = ?")
+            params.append(data.claude_account_id or None)
+        if data.codex_credential_id is not None:
+            sets.append("codex_credential_id = ?")
+            params.append(data.codex_credential_id or None)
+        if data.codex_account_id is not None:
+            sets.append("codex_account_id = ?")
+            params.append(data.codex_account_id or None)
+        if data.gemini_credential_id is not None:
+            sets.append("gemini_credential_id = ?")
+            params.append(data.gemini_credential_id or None)
+        if data.gemini_account_id is not None:
+            sets.append("gemini_account_id = ?")
+            params.append(data.gemini_account_id or None)
+
+        params.append(profile_id)
+        cursor = await self._db.execute(
+            f"UPDATE profiles SET {', '.join(sets)} WHERE id = ?",
+            params,
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def delete_profile(self, profile_id: str) -> bool:
+        """Delete a profile. Returns True if deleted."""
+        cursor = await self._db.execute(
+            "DELETE FROM profiles WHERE id = ?", (profile_id,)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def is_profile_in_use(self, profile_id: str) -> bool:
+        """Check if a profile is referenced by any environment."""
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) FROM environments WHERE profile_id = ?",
             (profile_id,),
         )
         row = await cursor.fetchone()
@@ -221,10 +535,10 @@ class EnvironmentStorage:
             """
             INSERT INTO environments (
                 id, name, repo_url, branch, local_path, status, provider,
-                credential_profile_id, env_vars, env_files, start_mode,
+                credential_profile_id, profile_id, env_vars, env_files, start_mode,
                 start_command, stop_command, docker_compose_file, ports, vault,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 env_id,
@@ -235,6 +549,7 @@ class EnvironmentStorage:
                 EnvironmentStatus.CLONING.value,
                 data.provider.value,
                 data.credential_profile_id,
+                data.profile_id,
                 json.dumps(data.env_vars),
                 json.dumps(data.env_files),
                 data.start_mode.value,
@@ -258,6 +573,7 @@ class EnvironmentStorage:
             status=EnvironmentStatus.CLONING,
             provider=data.provider,
             credential_profile_id=data.credential_profile_id,
+            profile_id=data.profile_id,
             env_vars=data.env_vars,
             env_files=data.env_files,
             start_mode=data.start_mode,
@@ -319,6 +635,9 @@ class EnvironmentStorage:
         if data.credential_profile_id is not None:
             sets.append("credential_profile_id = ?")
             params.append(data.credential_profile_id)
+        if data.profile_id is not None:
+            sets.append("profile_id = ?")
+            params.append(data.profile_id or None)
         if data.env_vars is not None:
             sets.append("env_vars = ?")
             params.append(json.dumps(data.env_vars))
@@ -393,6 +712,36 @@ class EnvironmentStorage:
         await self._db.commit()
         return cursor.rowcount > 0
 
+    async def set_environment_agent(self, env_id: str, agent_id: str) -> bool:
+        """Set the agent_id for an environment."""
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = await self._db.execute(
+            "UPDATE environments SET agent_id = ?, updated_at = ? WHERE id = ?",
+            (agent_id, now, env_id),
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def set_environment_agent_by_path(self, local_path: str, agent_id: str) -> str | None:
+        """Link an agent to the environment matching the given local_path.
+
+        Returns the environment ID if matched, None otherwise.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = await self._db.execute(
+            "UPDATE environments SET agent_id = ?, updated_at = ? WHERE local_path = ?",
+            (agent_id, now, local_path),
+        )
+        await self._db.commit()
+        if cursor.rowcount > 0:
+            # Fetch the env id
+            row = await self._db.execute(
+                "SELECT id FROM environments WHERE local_path = ?", (local_path,)
+            )
+            result = await row.fetchone()
+            return result[0] if result else None
+        return None
+
     async def clear_environment_agent(self, env_id: str) -> bool:
         """Clear the agent_id for an environment."""
         now = datetime.now(timezone.utc).isoformat()
@@ -424,6 +773,20 @@ class EnvironmentStorage:
         return [_row_to_environment(dict(zip(columns, row))) for row in rows]
 
 
+def _row_to_claude_account(row: dict[str, Any]) -> ClaudeAccount:
+    """Convert a database row dict to a ClaudeAccount model."""
+    return ClaudeAccount(
+        id=row["id"],
+        name=row["name"],
+        provider=row.get("provider", "claude"),
+        email=row.get("email"),
+        logged_in=bool(row.get("logged_in", 0)),
+        subscription_type=row.get("subscription_type"),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
 def _row_to_environment(row: dict[str, Any]) -> Environment:
     """Convert a database row dict to an Environment model."""
     vault_raw = json.loads(row.get("vault") or "{}")
@@ -438,6 +801,7 @@ def _row_to_environment(row: dict[str, Any]) -> Environment:
         status=EnvironmentStatus(row["status"]),
         provider=AIProvider(row["provider"]),
         credential_profile_id=row.get("credential_profile_id"),
+        profile_id=row.get("profile_id"),
         env_vars=json.loads(row.get("env_vars") or "{}"),
         env_files=json.loads(row.get("env_files") or "{}"),
         start_mode=StartMode(row["start_mode"]),

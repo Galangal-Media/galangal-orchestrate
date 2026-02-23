@@ -11,6 +11,8 @@ const navItems = [
   { path: "/agents", label: "Agents" },
   { path: "/tasks", label: "Tasks" },
   { path: "/environments", label: "Environments" },
+  { path: "/ai-keys", label: "AI Keys" },
+  { path: "/profiles", label: "Profiles" },
 ]
 
 export function Header() {
@@ -33,7 +35,7 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-header-border bg-header/95 backdrop-blur supports-[backdrop-filter]:bg-header/80">
-      <div className="container flex h-14 items-center">
+      <div className="container flex h-18 items-center py-3">
         <div className="mr-4 flex">
           <Link to="/" className="mr-8 flex items-center gap-2.5 group">
             <GalangalLogo size={48} />
