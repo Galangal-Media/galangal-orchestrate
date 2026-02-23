@@ -522,6 +522,12 @@ class WorkflowEngine:
             tui_app.add_activity("Failed to initialize peer review backend, skipping", "⚠")
             return ("APPROVE", "")
 
+        # Force read-only for peer reviews — reviewers never need to edit files.
+        # This ensures backends like codex use structured JSON output, making
+        # decision parsing reliable.
+        if backend.config and not backend.read_only:
+            backend.config.read_only = True
+
         # Build the peer review prompt
         builder = PromptBuilder()
         prompt = builder.build_peer_review_prompt(self.state, stage, backend_name)
@@ -569,36 +575,19 @@ class WorkflowEngine:
 
         output = result.output or ""
 
-        # Parse the review output
+        # Parse the structured JSON review output
         decision = "APPROVE"
         review_notes = output
+        issues: list[dict[str, str]] = []
 
-        # First try structured JSON parsing (works for read-only and editable backends
-        # when prompts request JSON output).
-        json_candidates: list[str] = [output.strip()]
-        json_candidates.extend(
-            line.strip()
-            for line in output.splitlines()
-            if line.strip().startswith("{") and line.strip().endswith("}")
-        )
-        start = output.find("{")
-        end = output.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            json_candidates.append(output[start : end + 1].strip())
-
-        for candidate in json_candidates:
-            if not candidate:
-                continue
-            try:
-                data = json.loads(candidate)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if isinstance(data, dict):
-                decision = str(data.get("decision", "APPROVE")).upper()
+        try:
+            data = json.loads(output)
+            if isinstance(data, dict) and "decision" in data:
+                decision = str(data["decision"]).upper()
                 review_notes = str(data.get("review_notes", output))
-                break
-        else:
-            # Fallback to markdown parsing for normal backend output
+                issues = data.get("issues", [])
+        except (json.JSONDecodeError, TypeError):
+            # Fallback: scan for DECISION: line in markdown output
             for line in output.split("\n"):
                 stripped = line.strip()
                 if stripped.upper().startswith("# DECISION:") or stripped.upper().startswith(
@@ -622,8 +611,21 @@ class WorkflowEngine:
         except Exception:
             pass
 
-        # Write the peer review artifact
-        write_artifact(artifact_name, review_notes, self.state.task_name)
+        # Write a clean markdown artifact with decision at the top
+        lines = [f"# Decision: {decision}", ""]
+        if review_notes and review_notes != output:
+            lines.append(review_notes)
+        else:
+            lines.append(output)
+        if issues:
+            lines.append("")
+            lines.append("## Issues")
+            for issue in issues:
+                severity = issue.get("severity", "unknown")
+                desc = issue.get("description", "")
+                lines.append(f"- **{severity}**: {desc}")
+        artifact_content = "\n".join(lines)
+        write_artifact(artifact_name, artifact_content, self.state.task_name)
         tui_app.add_activity(f"Wrote {artifact_name}", "📝")
 
         return (decision, review_notes)

@@ -83,8 +83,6 @@ def _load_task_artifacts_snapshot(task_name: str) -> dict[str, str]:
             content = index.read_artifact(task_name=task_name, name=name)
             if content is None:
                 continue
-            if len(content) > 50000:
-                content = content[:50000] + "\n\n[... truncated]"
             artifacts[name] = content
         return artifacts
     except Exception:
