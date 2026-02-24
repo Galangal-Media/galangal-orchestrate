@@ -605,6 +605,51 @@ class TaskIndex:
         with self._connect() as conn:
             return self._migrate_all_legacy_artifacts(conn, delete_files=delete_files)
 
+    def ingest_task_artifacts(self, *, task_name: str) -> int:
+        """Import filesystem artifacts for a single task into DB and delete originals.
+
+        Called after each stage completes to ensure files written directly
+        by editable backends (e.g. Claude ``Write`` tool) are captured in
+        canonical DB storage.
+
+        Returns:
+            Number of artifacts ingested.
+        """
+        task_dir = get_tasks_dir() / task_name
+        if not task_dir.is_dir():
+            return 0
+
+        ingested = 0
+        with self._connect() as conn:
+            self._ensure_task_row(conn, task_name)
+            for path in sorted(task_dir.iterdir()):
+                if not path.is_file() or path.name == "state.json":
+                    continue
+                if not self._is_indexable_artifact_name(path.name):
+                    continue
+
+                try:
+                    content = path.read_text()
+                except OSError:
+                    continue
+
+                self._upsert_artifact_conn(
+                    conn,
+                    task_name=task_name,
+                    name=path.name,
+                    content=content,
+                )
+                ingested += 1
+
+                if not self._is_mirrored_artifact(path.name):
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
+
+            conn.commit()
+        return ingested
+
     def compact_done_markdown(
         self,
         *,

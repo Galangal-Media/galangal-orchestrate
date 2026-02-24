@@ -11,9 +11,10 @@ from galangal.ai.codex import CodexBackend
 from galangal.ai.gemini import GeminiBackend
 from galangal.exceptions import AIError, ExitCode
 
+from galangal.core.state import Stage
+
 if TYPE_CHECKING:
     from galangal.config.schema import AIBackendConfig, GalangalConfig
-    from galangal.core.state import Stage
 
 # Registry of available backends
 BACKEND_REGISTRY: dict[str, type[AIBackend]] = {
@@ -27,6 +28,41 @@ DEFAULT_FALLBACKS: dict[str, str] = {
     "codex": "claude",
     "gemini": "claude",
 }
+
+# Stages that produce a decision via review (not mechanical test execution).
+# Read-only backends are preferred here because these stages only need to
+# read code and produce a structured verdict, never edit files.
+REVIEW_LIKE_STAGES: frozenset[Stage] = frozenset({Stage.REVIEW, Stage.SECURITY, Stage.QA})
+
+
+def prepare_backend_for_stage(
+    backend: AIBackend,
+    stage: Stage,
+    *,
+    force_read_only: bool = False,
+) -> bool:
+    """Apply stage-specific configuration to a backend before execution.
+
+    For review-like stages (REVIEW, SECURITY, QA), forces Codex into
+    read-only mode because it doesn't reliably write artifacts in
+    editable mode. Peer review callers can pass ``force_read_only=True``
+    to force any backend into read-only mode.
+
+    Returns:
+        True if the backend was switched to read-only by this call.
+    """
+    if backend.read_only:
+        return False
+
+    should_force = force_read_only or (
+        stage in REVIEW_LIKE_STAGES and backend.name == "codex"
+    )
+
+    if should_force and backend.config:
+        backend.config.read_only = True
+        return True
+
+    return False
 
 
 def get_backend(
@@ -167,8 +203,10 @@ __all__ = [
     "CodexBackend",
     "GeminiBackend",
     "BACKEND_REGISTRY",
+    "REVIEW_LIKE_STAGES",
     "get_backend",
     "get_backend_for_stage",
     "get_backend_with_fallback",
     "is_backend_available",
+    "prepare_backend_for_stage",
 ]

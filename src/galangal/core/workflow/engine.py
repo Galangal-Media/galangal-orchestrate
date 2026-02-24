@@ -500,7 +500,7 @@ class WorkflowEngine:
         """
         import json
 
-        from galangal.ai import get_backend_with_fallback, is_backend_available
+        from galangal.ai import get_backend_with_fallback, is_backend_available, prepare_backend_for_stage
         from galangal.prompts.builder import PromptBuilder
         from galangal.ui.tui import TUIAdapter
 
@@ -523,10 +523,7 @@ class WorkflowEngine:
             return ("APPROVE", "")
 
         # Force read-only for peer reviews — reviewers never need to edit files.
-        # This ensures backends like codex use structured JSON output, making
-        # decision parsing reliable.
-        if backend.config and not backend.read_only:
-            backend.config.read_only = True
+        prepare_backend_for_stage(backend, stage, force_read_only=True)
 
         # Build the peer review prompt
         builder = PromptBuilder()

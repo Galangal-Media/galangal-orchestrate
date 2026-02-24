@@ -7,7 +7,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
-from galangal.ai import get_backend_for_stage
+from galangal.ai import REVIEW_LIKE_STAGES, get_backend_for_stage, prepare_backend_for_stage
 from galangal.ai.base import PauseCheck
 from galangal.config.loader import get_config
 from galangal.core.artifacts import artifact_exists, delete_artifact, read_artifact, write_artifact
@@ -643,6 +643,13 @@ def execute_stage(
     # Get backend first (needed for backend-specific prompts)
     backend = get_backend_for_stage(stage, config, use_fallback=True)
 
+    # Force read-only mode for Codex on review-type stages so artifacts
+    # are written via structured JSON post-processing instead of editable mode.
+    if prepare_backend_for_stage(backend, stage):
+        tui_app.add_activity(
+            f"Forcing read-only mode for {backend.name} on {stage.value}", "🔒"
+        )
+
     # Build prompt
     builder = PromptBuilder()
     # Backend-specific prompts like review_codex.md are intended for read-only
@@ -653,8 +660,7 @@ def execute_stage(
 
     # For read-only backends on review-type stages, use minimal context
     # This gives an unbiased review without Claude's interpretations
-    review_stages = {Stage.REVIEW, Stage.SECURITY, Stage.QA}
-    if backend.read_only and stage in review_stages:
+    if backend.read_only and stage in REVIEW_LIKE_STAGES:
         prompt = builder.build_minimal_review_prompt(state, backend_name=backend.name)
         tui_app.add_activity("Using minimal context for independent review", "📋")
     else:
@@ -722,6 +728,15 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     # These backends return structured JSON instead of writing files directly
     if backend.read_only and invoke_result.output:
         _write_artifacts_from_readonly_output(stage, invoke_result.output, task_name, tui_app)
+
+    # Ingest any filesystem artifacts written by editable backends (e.g. Claude
+    # Write tool) into canonical DB storage and delete the file copies.
+    if not backend.read_only:
+        from galangal.core.task_index import TaskIndex
+
+        ingested = TaskIndex().ingest_task_artifacts(task_name=task_name)
+        if ingested:
+            tui_app.add_activity(f"Ingested {ingested} artifact(s) into DB", "📥")
 
     # Validate stage
     tui_app.add_activity("Validating stage outputs...", "⚙")
@@ -912,6 +927,17 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
     from_stage = state.stage
     target_stage = result.rollback_to
     reason = result.message
+
+    # Enrich rollback reason with review-stage artifact content so the
+    # target stage (usually DEV) has the full feedback without needing
+    # to read the artifact from the DB.
+    if from_stage in REVIEW_LIKE_STAGES:
+        metadata = from_stage.metadata
+        if metadata and metadata.produces_artifacts:
+            notes_artifact = metadata.produces_artifacts[0]
+            notes_content = read_artifact(notes_artifact, task_name)
+            if notes_content:
+                reason = f"{reason}\n\n## {notes_artifact}\n\n{notes_content}"
 
     # Check for rollback loops
     if not state.should_allow_rollback(target_stage):
