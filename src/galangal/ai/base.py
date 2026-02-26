@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from galangal.results import StageResult
 
 if TYPE_CHECKING:
+    from galangal.ai.subprocess import SubprocessResult
     from galangal.config.schema import AIBackendConfig
     from galangal.ui.tui import StageUI
 
@@ -63,6 +64,58 @@ class AIBackend(ABC):
                 arg = arg.replace(f"{{{key}}}", str(value))
             result.append(arg)
         return result
+
+    def _resolve_command_and_args(self, max_turns: int) -> tuple[str, list[str]]:
+        """
+        Resolve the command and args from config or defaults.
+
+        Args:
+            max_turns: Maximum conversation turns for placeholder substitution.
+
+        Returns:
+            Tuple of (command, substituted_args).
+        """
+        if self._config:
+            command = self._config.command
+            args = self._substitute_placeholders(self._config.args, max_turns=max_turns)
+        else:
+            command = self.DEFAULT_COMMAND
+            args = self._substitute_placeholders(self.DEFAULT_ARGS, max_turns=max_turns)
+        return command, args
+
+    def _handle_subprocess_result(
+        self, result: SubprocessResult, ui: StageUI | None, timeout: int
+    ) -> StageResult | None:
+        """
+        Handle common subprocess exit conditions (paused, timed out).
+
+        Returns a StageResult if the condition was handled, or None to continue processing.
+        """
+        if result.paused:
+            if ui:
+                ui.finish(success=False)
+            return StageResult.paused()
+
+        if result.timed_out:
+            return StageResult.timeout(result.timeout_seconds or timeout)
+
+        return None
+
+    @staticmethod
+    def _format_elapsed(elapsed: float) -> str:
+        """Format elapsed seconds into a human-readable string."""
+        minutes = int(elapsed // 60)
+        seconds = int(elapsed % 60)
+        return f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+
+    @staticmethod
+    def _notify_hub_output(line: str) -> None:
+        """Stream a line to hub for remote monitoring. Non-critical."""
+        try:
+            from galangal.hub.hooks import notify_output
+            notify_output(line, "raw")
+        except Exception:
+            pass
 
     @contextmanager
     def _temp_file(

@@ -69,33 +69,8 @@ class GeminiBackend(AIBackend):
         return "gemini"
 
     def _build_command(self, prompt_file: str, max_turns: int) -> str:
-        """
-        Build the shell command to invoke Gemini.
-
-        Uses config.command and config.args if available, otherwise falls back
-        to hard-coded defaults for backwards compatibility.
-
-        Args:
-            prompt_file: Path to temp file containing the prompt
-            max_turns: Maximum turn budget (placeholder for custom args)
-
-        Returns:
-            Shell command string ready for subprocess
-        """
-        if self._config:
-            command = self._config.command
-            args = self._substitute_placeholders(
-                self._config.args,
-                max_turns=max_turns,
-            )
-        else:
-            # Backwards compatibility: use defaults
-            command = self.DEFAULT_COMMAND
-            args = self._substitute_placeholders(
-                self.DEFAULT_ARGS,
-                max_turns=max_turns,
-            )
-
+        """Build the shell command to invoke Gemini."""
+        command, args = self._resolve_command_and_args(max_turns)
         args_str = " ".join(shlex.quote(a) for a in args)
         return f"cat {shlex.quote(prompt_file)} | {shlex.quote(command)} {args_str}"
 
@@ -128,21 +103,13 @@ class GeminiBackend(AIBackend):
             """Process each output line."""
             if ui:
                 ui.add_raw_line(line)
-            try:
-                from galangal.hub.hooks import notify_output
-
-                notify_output(line, "raw")
-            except Exception:
-                pass
+            self._notify_hub_output(line)
             self._process_stream_line(line, ui)
 
         def on_idle(elapsed: float) -> None:
             """Update status when idle."""
             if ui:
-                minutes = int(elapsed // 60)
-                seconds = int(elapsed % 60)
-                time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
-                ui.set_status("waiting", f"Gemini ({time_str})")
+                ui.set_status("waiting", f"Gemini ({self._format_elapsed(elapsed)})")
 
         try:
             with self._temp_file(prompt, suffix=".txt") as prompt_file:
@@ -167,13 +134,9 @@ class GeminiBackend(AIBackend):
 
                 result = runner.run()
 
-                if result.paused:
-                    if ui:
-                        ui.finish(success=False)
-                    return StageResult.paused()
-
-                if result.timed_out:
-                    return StageResult.timeout(result.timeout_seconds or timeout)
+                early_return = self._handle_subprocess_result(result, ui, timeout)
+                if early_return is not None:
+                    return early_return
 
                 # Process completed - analyze output
                 full_output = result.output

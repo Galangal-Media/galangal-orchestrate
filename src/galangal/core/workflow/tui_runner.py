@@ -46,8 +46,16 @@ from galangal.validation.runner import ValidationRunner
 console = Console()
 
 
-async def _init_hub_client(config: GalangalConfig, state: WorkflowState) -> None:
-    """Initialize hub client if configured."""
+async def _init_hub_client(
+    config: GalangalConfig, state: WorkflowState | None = None
+) -> None:
+    """Initialize hub client if configured.
+
+    Args:
+        config: Galangal configuration with hub settings.
+        state: If provided, sends workflow state after connecting.
+            If None, sends idle state (for new task creation).
+    """
     if not config.hub.enabled:
         return
 
@@ -58,7 +66,6 @@ async def _init_hub_client(config: GalangalConfig, state: WorkflowState) -> None
         from galangal.hub.client import HubClient, set_hub_client
         from galangal.hub.hooks import set_main_loop
 
-        # Store main loop for thread-safe async scheduling
         set_main_loop(asyncio.get_running_loop())
 
         project_path = Path.cwd()
@@ -68,18 +75,17 @@ async def _init_hub_client(config: GalangalConfig, state: WorkflowState) -> None
             project_path=project_path,
         )
 
-        # Register action handler
         handler = get_action_handler()
         client.on_action(handler.handle_hub_action)
 
-        # Connect to hub
         connected = await client.connect()
         if connected:
             set_hub_client(client)
-            # Send initial state
-            await client.send_state(state)
+            if state is not None:
+                await client.send_state(state)
+            else:
+                await client.send_idle_state()
     except Exception:
-        # Hub connection failure is non-fatal
         pass
 
 
@@ -648,6 +654,25 @@ async def _handle_user_interrupts(app: WorkflowTUIApp, engine: WorkflowEngine) -
 # =============================================================================
 
 
+def _accept_reviewer_feedback(
+    state: WorkflowState,
+    stage: Stage,
+    review_notes: str,
+) -> str:
+    """Archive peer review artifact and set up rollback for reviewer feedback.
+
+    Returns "rollback" for the caller to act on.
+    """
+    from galangal.core.artifacts import archive_artifact
+
+    artifact_name = f"{stage.value}_PEER_REVIEW.md"
+    archive_artifact(artifact_name, f"{stage.value}_PEER_REVIEW_PREV.md", state.task_name)
+    state.last_failure = f"Peer review feedback: {review_notes[:1500]}"
+    state.reset_attempts(clear_failure=False)
+    save_state(state)
+    return "rollback"
+
+
 async def _handle_peer_review(
     app: WorkflowTUIApp,
     engine: WorkflowEngine,
@@ -660,17 +685,12 @@ async def _handle_peer_review(
     disagrees, either auto-accepts the feedback (default) or shows a
     comparison modal for the user to decide.
 
-    When ``config.peer_review.auto_accept`` is True (the default), reviewer
-    feedback is automatically accepted and the stage re-runs.  If this loops
-    more than ``config.peer_review.max_auto_loops`` times, the user is asked
-    for advice.
-
     Returns:
         "continue" - peer review passed (APPROVE), proceed to approval/advance
         "rollback" - reviewer's changes accepted, stage will re-run
         "break" - user quit
     """
-    from galangal.core.artifacts import archive_artifact, read_artifact
+    from galangal.core.artifacts import read_artifact
 
     state = engine.state
     stage = state.stage
@@ -694,7 +714,6 @@ async def _handle_peer_review(
     if decision == "APPROVE":
         app.add_activity("Peer review: APPROVED", "✅")
         app.show_message("Peer review passed", "success")
-        # Reset loop counter on approval
         peer_review_loops.pop(stage.value, None)
         return "continue"
 
@@ -714,15 +733,7 @@ async def _handle_peer_review(
         app.show_message(
             f"Rolling back {stage.value} with reviewer feedback", "warning"
         )
-        # Archive peer review artifact so review re-triggers after re-run
-        # but full feedback is preserved for the retry prompt
-        artifact_name = f"{stage.value}_PEER_REVIEW.md"
-        archive_artifact(artifact_name, f"{stage.value}_PEER_REVIEW_PREV.md", state.task_name)
-        # Set up rollback
-        state.last_failure = f"Peer review feedback: {review_notes[:1500]}"
-        state.reset_attempts(clear_failure=False)
-        save_state(state)
-        return "rollback"
+        return _accept_reviewer_feedback(state, stage, review_notes)
 
     # Hit loop limit or auto_accept disabled - ask the user
     if pr_config.auto_accept and loop_count >= pr_config.max_auto_loops:
@@ -765,7 +776,6 @@ async def _handle_peer_review(
         choice = await app.prompt_async(PromptType.PEER_REVIEW_DECISION, comparison_msg)
 
         if choice == "view":
-            # Show full review in activity log
             app.add_activity("--- Full Peer Review ---", "📄")
             for line in review_notes.split("\n")[:50]:
                 app.add_activity(line, "")
@@ -781,15 +791,7 @@ async def _handle_peer_review(
         if choice == "accept_reviewer":
             app.add_activity("User accepted reviewer feedback, rolling back", "🔄")
             app.show_message(f"Rolling back {stage.value} with reviewer feedback", "warning")
-            # Archive peer review artifact so review re-triggers after re-run
-            # but full feedback is preserved for the retry prompt
-            artifact_name = f"{stage.value}_PEER_REVIEW.md"
-            archive_artifact(artifact_name, f"{stage.value}_PEER_REVIEW_PREV.md", state.task_name)
-            # Set up rollback
-            state.last_failure = f"Peer review feedback: {review_notes[:1500]}"
-            state.reset_attempts(clear_failure=False)
-            save_state(state)
-            return "rollback"
+            return _accept_reviewer_feedback(state, stage, review_notes)
 
         # quit
         app._workflow_result = "paused"
@@ -1496,15 +1498,9 @@ async def _handle_stage_approval(
             name = await app.text_input_async("Enter approver name:", default_approver)
 
         if name:
-            from galangal.core.utils import now_formatted
+            from galangal.core.artifacts import write_approval_artifact
 
-            approval_content = f"""# {stage_name} Approval
-
-- **Status:** Approved
-- **Approved By:** {name}
-- **Date:** {now_formatted()}
-"""
-            write_artifact(approval_artifact, approval_content, state.task_name)
+            write_approval_artifact(stage_name, name, approval_artifact, state.task_name)
             app.show_message(f"{stage_name} approved by {name}", "success")
 
             # PM-specific: Parse and store stage plan
@@ -1701,41 +1697,55 @@ async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -
         app._workflow_result = "paused"
 
 
-async def _init_hub_for_new_task(config: GalangalConfig) -> None:
-    """Initialize hub client for new task creation (without existing state)."""
-    if not config.hub.enabled:
-        return
+async def _download_screenshots_if_available(
+    app: WorkflowTUIApp,
+    issue_body: str | None,
+    task_name: str,
+) -> list[str] | None:
+    """Download screenshots from a GitHub issue body if available.
 
+    Returns list of local screenshot paths, or None.
+    """
+    if not issue_body:
+        return None
+
+    app.set_status("setup", "downloading screenshots")
     try:
-        from pathlib import Path
+        from galangal.github.issues import download_issue_screenshots
 
-        from galangal.hub.action_handler import get_action_handler
-        from galangal.hub.client import HubClient, set_hub_client
-        from galangal.hub.hooks import set_main_loop
-
-        # Store main loop for thread-safe async scheduling
-        set_main_loop(asyncio.get_running_loop())
-
-        project_path = Path.cwd()
-        client = HubClient(
-            config=config.hub,
-            project_name=config.project.name,
-            project_path=project_path,
+        task_dir = get_task_dir(task_name)
+        screenshot_paths = await asyncio.to_thread(
+            download_issue_screenshots,
+            issue_body,
+            task_dir,
         )
+        if screenshot_paths:
+            app.show_message(
+                f"Downloaded {len(screenshot_paths)} screenshot(s)",
+                "success",
+            )
+            return screenshot_paths
+    except Exception as e:
+        from galangal.core.utils import debug_exception
 
-        # Register action handler
-        handler = get_action_handler()
-        client.on_action(handler.handle_hub_action)
+        debug_exception("Screenshot download failed", e)
+        app.show_message(f"Screenshot download failed: {e}", "warning")
+    return None
 
-        # Connect to hub
-        connected = await client.connect()
-        if connected:
-            set_hub_client(client)
-            # Send idle state to signal readiness for new task
-            await client.send_idle_state()
-    except Exception:
-        # Hub connection failure is non-fatal
-        pass
+
+async def _mark_issue_in_progress(app: WorkflowTUIApp, github_issue: int | None) -> None:
+    """Mark a GitHub issue as in-progress. Non-critical."""
+    if not github_issue:
+        return
+    try:
+        from galangal.github.issues import mark_issue_in_progress
+
+        await asyncio.to_thread(mark_issue_in_progress, github_issue)
+        app.show_message("Marked issue as in-progress", "info")
+    except Exception as e:
+        from galangal.core.utils import debug_exception
+
+        debug_exception("Failed to mark issue as in-progress", e)
 
 
 async def _wait_for_remote_task_create(timeout: float = 0.5) -> Any | None:
@@ -1783,7 +1793,7 @@ def _start_new_task_tui() -> str:
     async def task_creation_loop() -> None:
         """Async task creation flow."""
         # Initialize hub connection for receiving CREATE_TASK actions
-        await _init_hub_for_new_task(config)
+        await _init_hub_client(config)
 
         try:
             app.add_activity("[bold]Starting new task...[/bold]", "🆕")
@@ -1926,29 +1936,11 @@ def _start_new_task_tui() -> str:
             app.show_message(f"Task name: {task_info['name']}", "info")
 
             # Step 3.5: Download screenshots if from GitHub issue
-            if issue_body_for_screenshots:
-                app.set_status("setup", "downloading screenshots")
-                try:
-                    from galangal.github.issues import download_issue_screenshots
-
-                    task_dir = get_task_dir(task_info["name"])
-                    screenshot_paths = await asyncio.to_thread(
-                        download_issue_screenshots,
-                        issue_body_for_screenshots,
-                        task_dir,
-                    )
-                    if screenshot_paths:
-                        task_info["screenshots"] = screenshot_paths
-                        app.show_message(
-                            f"Downloaded {len(screenshot_paths)} screenshot(s)",
-                            "success",
-                        )
-                except Exception as e:
-                    from galangal.core.utils import debug_exception
-
-                    debug_exception("Screenshot download failed", e)
-                    app.show_message(f"Screenshot download failed: {e}", "warning")
-                    # Non-critical - continue without screenshots
+            screenshots = await _download_screenshots_if_available(
+                app, issue_body_for_screenshots, task_info["name"]
+            )
+            if screenshots:
+                task_info["screenshots"] = screenshots
 
             # Step 4: Create the task
             app.set_status("setup", "creating task")
@@ -1965,19 +1957,7 @@ def _start_new_task_tui() -> str:
             if success:
                 app.show_message(message, "success")
                 app._workflow_result = "task_created"
-
-                # Mark issue as in-progress if from GitHub
-                if task_info["github_issue"]:
-                    try:
-                        from galangal.github.issues import mark_issue_in_progress
-
-                        await asyncio.to_thread(mark_issue_in_progress, task_info["github_issue"])
-                        app.show_message("Marked issue as in-progress", "info")
-                    except Exception as e:
-                        from galangal.core.utils import debug_exception
-
-                        debug_exception("Failed to mark issue as in-progress", e)
-                        # Non-critical - continue anyway
+                await _mark_issue_in_progress(app, task_info["github_issue"])
             else:
                 app.show_error("Task creation failed", message)
                 app._workflow_result = "error"
@@ -2106,28 +2086,11 @@ async def _handle_remote_task_create(
         app.show_message(f"Task name: {task_info['name']}", "info")
 
         # Download screenshots if from GitHub issue
-        if issue_body_for_screenshots:
-            app.set_status("setup", "downloading screenshots")
-            try:
-                from galangal.github.issues import download_issue_screenshots
-
-                task_dir = get_task_dir(task_info["name"])
-                screenshot_paths = await asyncio.to_thread(
-                    download_issue_screenshots,
-                    issue_body_for_screenshots,
-                    task_dir,
-                )
-                if screenshot_paths:
-                    task_info["screenshots"] = screenshot_paths
-                    app.show_message(
-                        f"Downloaded {len(screenshot_paths)} screenshot(s)",
-                        "success",
-                    )
-            except Exception as e:
-                from galangal.core.utils import debug_exception
-
-                debug_exception("Screenshot download failed", e)
-                app.show_message(f"Screenshot download failed: {e}", "warning")
+        screenshots = await _download_screenshots_if_available(
+            app, issue_body_for_screenshots, task_info["name"]
+        )
+        if screenshots:
+            task_info["screenshots"] = screenshots
 
         # Create the task
         app.set_status("setup", "creating task")
@@ -2144,16 +2107,7 @@ async def _handle_remote_task_create(
         if success:
             app.show_message(message, "success")
             app._workflow_result = "task_created"
-
-            # Mark issue as in-progress if from GitHub
-            if task_info["github_issue"]:
-                try:
-                    from galangal.github.issues import mark_issue_in_progress
-
-                    await asyncio.to_thread(mark_issue_in_progress, task_info["github_issue"])
-                    app.show_message("Marked issue as in-progress", "info")
-                except Exception:
-                    pass  # Non-critical
+            await _mark_issue_in_progress(app, task_info["github_issue"])
         else:
             app.show_error("Task creation failed", message)
             app._workflow_result = "error"

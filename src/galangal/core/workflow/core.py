@@ -1010,32 +1010,6 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
 
 
 def _log_mistake_from_rollback(task_name: str, stage: str, reason: str) -> None:
-    """
-    Log a mistake from a rollback for future reference.
-
-    This enables the AI to learn from past mistakes in this repo.
-    Fails silently if mistake tracking is not available.
-    """
-    try:
-        from galangal.mistakes import MistakeTracker
-
-        tracker = MistakeTracker()
-
-        # Extract a short description from the reason
-        # The reason often contains detailed feedback - use first sentence
-        description = reason.split(".")[0].strip() if reason else "Validation failure"
-        if len(description) > 100:
-            description = description[:100] + "..."
-
-        tracker.log(
-            description=description,
-            feedback=reason,
-            stage=stage,
-            task=task_name,
-        )
-    except ImportError:
-        # sentence-transformers not installed - silently skip
-        pass
-    except Exception:
-        # Don't fail rollback if mistake tracking fails
-        pass
+    """Log a mistake from a rollback for future reference."""
+    from galangal.mistakes import log_mistake
+    log_mistake(reason, stage=stage, task_name=task_name)

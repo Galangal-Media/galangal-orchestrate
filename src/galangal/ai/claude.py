@@ -41,33 +41,8 @@ class ClaudeBackend(AIBackend):
         return "claude"
 
     def _build_command(self, prompt_file: str, max_turns: int) -> str:
-        """
-        Build the shell command to invoke Claude.
-
-        Uses config.command and config.args if available, otherwise falls back
-        to hard-coded defaults for backwards compatibility.
-
-        Args:
-            prompt_file: Path to temp file containing the prompt
-            max_turns: Maximum conversation turns
-
-        Returns:
-            Shell command string ready for subprocess
-        """
-        if self._config:
-            command = self._config.command
-            args = self._substitute_placeholders(
-                self._config.args,
-                max_turns=max_turns,
-            )
-        else:
-            # Backwards compatibility: use defaults
-            command = self.DEFAULT_COMMAND
-            args = self._substitute_placeholders(
-                self.DEFAULT_ARGS,
-                max_turns=max_turns,
-            )
-
+        """Build the shell command to invoke Claude."""
+        command, args = self._resolve_command_and_args(max_turns)
         args_str = " ".join(args)
         return f"cat '{prompt_file}' | {command} {args_str}"
 
@@ -90,12 +65,7 @@ class ClaudeBackend(AIBackend):
             if ui:
                 ui.add_raw_line(line)
             self._process_stream_line(line, ui, pending_tools)
-            # Stream to hub for remote monitoring
-            try:
-                from galangal.hub.hooks import notify_output
-                notify_output(line, "raw")
-            except Exception:
-                pass  # Hub streaming is non-critical
+            self._notify_hub_output(line)
 
         def on_idle(elapsed: float) -> None:
             """Update status when idle."""
@@ -128,13 +98,9 @@ class ClaudeBackend(AIBackend):
 
                 result = runner.run()
 
-                if result.paused:
-                    if ui:
-                        ui.finish(success=False)
-                    return StageResult.paused()
-
-                if result.timed_out:
-                    return StageResult.timeout(result.timeout_seconds or timeout)
+                early_return = self._handle_subprocess_result(result, ui, timeout)
+                if early_return is not None:
+                    return early_return
 
                 # Process completed - analyze output
                 full_output = result.output

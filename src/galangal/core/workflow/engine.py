@@ -849,31 +849,13 @@ class WorkflowEngine:
             to_stage=target_stage,
         )
 
-    def _log_interrupt_mistake(self, task_name: str, stage: str, feedback: str) -> None:
+    @staticmethod
+    def _log_interrupt_mistake(task_name: str, stage: str, feedback: str) -> None:
         """Log an interrupt as a mistake for future learning."""
-        try:
-            from galangal.mistakes import MistakeTracker
-
-            if not feedback:
-                return  # No feedback means nothing to learn from
-
-            tracker = MistakeTracker()
-
-            # Extract description from feedback
-            description = feedback.split(".")[0].strip()
-            if len(description) > 100:
-                description = description[:100] + "..."
-
-            tracker.log(
-                description=description,
-                feedback=feedback,
-                stage=stage,
-                task=task_name,
-            )
-        except ImportError:
-            pass
-        except Exception:
-            pass
+        if not feedback:
+            return
+        from galangal.mistakes import log_mistake
+        log_mistake(feedback, stage=stage, task_name=task_name)
 
     def _handle_approval(
         self, approved: bool, approver: str = "", reason: str = ""
@@ -884,16 +866,12 @@ class WorkflowEngine:
         approval_artifact = metadata.approval_artifact
 
         if approved and approver:
-            from galangal.core.utils import now_formatted
-
-            content = f"""# {stage.value} Approval
-
-- **Status:** Approved
-- **Approved By:** {approver}
-- **Date:** {now_formatted()}
-"""
             if approval_artifact:
-                write_artifact(approval_artifact, content, self.state.task_name)
+                from galangal.core.artifacts import write_approval_artifact
+
+                write_approval_artifact(
+                    stage.value, approver, approval_artifact, self.state.task_name
+                )
 
             # PM-specific: Parse and store stage plan
             if stage == Stage.PM:

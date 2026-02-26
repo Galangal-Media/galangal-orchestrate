@@ -209,12 +209,7 @@ class CodexBackend(AIBackend):
             nonlocal last_activity_time
             if ui:
                 ui.add_raw_line(line)
-            try:
-                from galangal.hub.hooks import notify_output
-
-                notify_output(line, "raw")
-            except Exception:
-                pass
+            self._notify_hub_output(line)
             line = line.strip()
             if line and not line.startswith("{"):
                 if ui:
@@ -226,15 +221,13 @@ class CodexBackend(AIBackend):
             if not ui:
                 return
 
-            minutes = int(elapsed // 60)
-            seconds = int(elapsed % 60)
-            time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+            time_str = self._format_elapsed(elapsed)
             ui.set_status("running", f"Codex running (read-only, {time_str})")
 
             current_time = time.time()
             if current_time - last_activity_time >= 30.0:
-                if minutes > 0:
-                    ui.add_activity(f"Still running... ({minutes}m elapsed)", "⏳")
+                if elapsed >= 60:
+                    ui.add_activity(f"Still running... ({time_str} elapsed)", "⏳")
                 else:
                     ui.add_activity("Still running...", "⏳")
                 last_activity_time = current_time
@@ -264,13 +257,9 @@ class CodexBackend(AIBackend):
                     log_file=log_file,
                 )
 
-                if result.paused:
-                    if ui:
-                        ui.finish(success=False)
-                    return StageResult.paused()
-
-                if result.timed_out:
-                    return StageResult.timeout(result.timeout_seconds or timeout)
+                early_return = self._handle_subprocess_result(result, ui, timeout)
+                if early_return is not None:
+                    return early_return
 
                 if result.exit_code != 0:
                     if ui:
@@ -301,9 +290,7 @@ class CodexBackend(AIBackend):
                     if ui:
                         issues_count = len(output_data.get("issues", []))
                         elapsed = time.time() - start_time
-                        minutes = int(elapsed // 60)
-                        seconds = int(elapsed % 60)
-                        time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+                        time_str = self._format_elapsed(elapsed)
 
                         if decision in {"APPROVE", "APPROVED", "PASS"}:
                             ui.add_activity(
@@ -351,12 +338,7 @@ class CodexBackend(AIBackend):
         def on_output(line: str) -> None:
             if ui:
                 ui.add_raw_line(line)
-            try:
-                from galangal.hub.hooks import notify_output
-
-                notify_output(line, "raw")
-            except Exception:
-                pass
+            self._notify_hub_output(line)
             stripped = line.strip()
             if ui and stripped and not stripped.startswith("{"):
                 ui.add_activity(f"codex: {stripped[:100]}", "💬", verbose_only=True)
@@ -364,10 +346,7 @@ class CodexBackend(AIBackend):
         def on_idle(elapsed: float) -> None:
             if not ui:
                 return
-            minutes = int(elapsed // 60)
-            seconds = int(elapsed % 60)
-            time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
-            ui.set_status("running", f"Codex executing ({time_str})")
+            ui.set_status("running", f"Codex executing ({self._format_elapsed(elapsed)})")
 
         try:
             with self._temp_file(prompt, suffix=".txt") as prompt_file:
@@ -388,13 +367,9 @@ class CodexBackend(AIBackend):
                     log_file=log_file,
                 )
 
-                if result.paused:
-                    if ui:
-                        ui.finish(success=False)
-                    return StageResult.paused()
-
-                if result.timed_out:
-                    return StageResult.timeout(result.timeout_seconds or timeout)
+                early_return = self._handle_subprocess_result(result, ui, timeout)
+                if early_return is not None:
+                    return early_return
 
                 output = result.output
 

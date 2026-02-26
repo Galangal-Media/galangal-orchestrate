@@ -168,6 +168,12 @@ def cmd_start(args: argparse.Namespace) -> int:
     result_code = {"value": 0}
 
     def task_creation_thread():
+        def _abort(result: str = "cancelled") -> None:
+            """Mark task creation as failed/cancelled and schedule exit."""
+            app._workflow_result = result
+            result_code["value"] = 1
+            app.call_from_thread(app.set_timer, 0.5, app.exit)
+
         try:
             app.add_activity("[bold]Starting new task...[/bold]", "🆕")
 
@@ -213,9 +219,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                             f"Could not switch to {base_branch}: {message}",
                             "error",
                         )
-                        app._workflow_result = "error"
-                        result_code["value"] = 1
-                        app.call_from_thread(app.set_timer, 0.5, app.exit)
+                        _abort("error")
                         return
                 else:
                     # User chose not to switch - continue on current branch
@@ -253,9 +257,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 source_event.wait()
 
                 if source_result["value"] == "quit":
-                    app._workflow_result = "cancelled"
-                    result_code["value"] = 1
-                    app.call_from_thread(app.set_timer, 0.5, app.exit)
+                    _abort()
                     return
 
                 if source_result["value"] == "github":
@@ -272,9 +274,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                             app.show_message(
                                 "GitHub not ready. Run 'galangal github check'", "error"
                             )
-                            app._workflow_result = "error"
-                            result_code["value"] = 1
-                            app.call_from_thread(app.set_timer, 0.5, app.exit)
+                            _abort("error")
                             return
 
                         task_info["github_repo"] = check.repo_name
@@ -286,9 +286,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                         issues = list_issues()
                         if not issues:
                             app.show_message("No issues with 'galangal' label found", "warning")
-                            app._workflow_result = "cancelled"
-                            result_code["value"] = 1
-                            app.call_from_thread(app.set_timer, 0.5, app.exit)
+                            _abort()
                             return
 
                         # Show issue selection
@@ -305,9 +303,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                         issue_event.wait()
 
                         if issue_result["value"] is None:
-                            app._workflow_result = "cancelled"
-                            result_code["value"] = 1
-                            app.call_from_thread(app.set_timer, 0.5, app.exit)
+                            _abort()
                             return
 
                         # Get the selected issue details
@@ -346,9 +342,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                     except Exception as e:
                         debug_exception("GitHub integration failed", e)
                         app.show_message(f"GitHub error: {e}", "error")
-                        app._workflow_result = "error"
-                        result_code["value"] = 1
-                        app.call_from_thread(app.set_timer, 0.5, app.exit)
+                        _abort("error")
                         return
 
             # Step 1: Get task type (if not already set from GitHub labels)
@@ -370,9 +364,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 type_event.wait()
 
                 if type_result["value"] == "quit":
-                    app._workflow_result = "cancelled"
-                    result_code["value"] = 1
-                    app.call_from_thread(app.set_timer, 0.5, app.exit)
+                    _abort()
                     return
 
                 # Map selection to TaskType
@@ -396,9 +388,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 
                 if not task_info["description"]:
                     app.show_message("Task description required", "error")
-                    app._workflow_result = "cancelled"
-                    result_code["value"] = 1
-                    app.call_from_thread(app.set_timer, 0.5, app.exit)
+                    _abort()
                     return
 
             # Step 3: Generate task name if not provided
@@ -414,17 +404,13 @@ def cmd_start(args: argparse.Namespace) -> int:
                 valid, error_msg = is_valid_task_name(task_info["name"])
                 if not valid:
                     app.show_message(f"Invalid task name: {error_msg}", "error")
-                    app._workflow_result = "cancelled"
-                    result_code["value"] = 1
-                    app.call_from_thread(app.set_timer, 0.5, app.exit)
+                    _abort()
                     return
 
                 # Check if name already exists
                 if task_name_exists(task_info["name"]):
                     app.show_message(f"Task '{task_info['name']}' already exists", "error")
-                    app._workflow_result = "cancelled"
-                    result_code["value"] = 1
-                    app.call_from_thread(app.set_timer, 0.5, app.exit)
+                    _abort()
                     return
 
             app.show_message(f"Task name: {task_info['name']}", "success")

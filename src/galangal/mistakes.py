@@ -31,6 +31,37 @@ DEDUP_THRESHOLD = 0.3
 MAX_PROMPT_WARNINGS = 5
 
 
+def log_mistake(
+    text: str,
+    stage: str,
+    task_name: str,
+    default_description: str = "Validation failure",
+) -> None:
+    """Log a mistake for future learning. Fails silently if unavailable.
+
+    Args:
+        text: Full feedback/reason text.
+        stage: Stage where the mistake occurred.
+        task_name: Task name for context.
+        default_description: Fallback description if text is empty.
+    """
+    try:
+        tracker = MistakeTracker()
+        description = text.split(".")[0].strip() if text else default_description
+        if len(description) > 100:
+            description = description[:100] + "..."
+        tracker.log(
+            description=description,
+            feedback=text or default_description,
+            stage=stage,
+            task=task_name,
+        )
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+
 @dataclass
 class Mistake:
     """A recorded mistake from a previous task."""

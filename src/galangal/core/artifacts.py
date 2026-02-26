@@ -186,6 +186,31 @@ def _record_lineage_if_enabled(
         pass
 
 
+def write_approval_artifact(
+    stage_name: str,
+    approver: str,
+    artifact_name: str,
+    task_name: str | None = None,
+) -> None:
+    """Write a standardized approval artifact.
+
+    Args:
+        stage_name: Stage being approved (e.g., "PM", "DESIGN").
+        approver: Name of the approver.
+        artifact_name: Artifact filename (e.g., "APPROVAL.md").
+        task_name: Task name, or None to use active task.
+    """
+    from galangal.core.utils import now_formatted
+
+    content = f"""# {stage_name} Approval
+
+- **Status:** Approved
+- **Approved By:** {approver}
+- **Date:** {now_formatted()}
+"""
+    write_artifact(artifact_name, content, task_name)
+
+
 def write_skip_artifact(stage: str, reason: str, task_name: str | None = None) -> None:
     """Write a standardized skip artifact for a stage.
 
