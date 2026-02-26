@@ -117,7 +117,7 @@ services:
     network_mode: "service:tailscale"
 
     volumes:
-      - galangal-hub-data:/data
+      - ${HUB_CONFIG_DIR:-./config}:/data
 
     environment:
       - HUB_HOST=0.0.0.0
@@ -145,7 +145,5 @@ services:
 # Volumes
 # -----------------------------------------------------------------------------
 volumes:
-  galangal-hub-data:
-    driver: local
   tailscale-state:
     driver: local

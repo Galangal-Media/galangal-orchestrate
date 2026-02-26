@@ -6,7 +6,7 @@
 #   docker build -f docker/Dockerfile.hub -t galangal-hub .
 #
 # Run:
-#   docker run -p 8080:8080 -v galangal-hub-data:/data galangal-hub
+#   docker run -p 8080:8080 -v ./config:/data galangal-hub
 #
 # =============================================================================
 

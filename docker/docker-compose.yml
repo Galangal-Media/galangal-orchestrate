@@ -48,8 +48,11 @@ services:
       - "${HUB_PORT:-8080}:8080"
 
     volumes:
-      # Persist SQLite database across container restarts
-      - galangal-hub-data:/data
+      # Persist database and encryption keys on the host filesystem.
+      # This survives image updates, docker compose down, and volume prunes.
+      # Set HUB_CONFIG_DIR in .env to match your server's convention
+      # (e.g., /home/docker/galangal-hub/config)
+      - ${HUB_CONFIG_DIR:-./config}:/data
 
     environment:
       # -----------------------------------------------------------------------
@@ -113,16 +116,11 @@ services:
       # - "traefik.http.services.galangal-hub.loadbalancer.server.port=8080"
 
 # -----------------------------------------------------------------------------
-# Volumes
+# Notes
 # -----------------------------------------------------------------------------
-volumes:
-  galangal-hub-data:
-    driver: local
-    # Optional: Specify a host path for easier backups
-    # driver_opts:
-    #   type: none
-    #   o: bind
-    #   device: /path/to/galangal-hub-data
+# Data is stored in ${HUB_CONFIG_DIR:-./config} on the host.
+# Set HUB_CONFIG_DIR in .env to customize the location.
+# Backups: just copy the host config directory.
 
 # -----------------------------------------------------------------------------
 # Networks (Optional)

@@ -75,6 +75,7 @@ Uncomment the Traefik labels in `docker-compose.yml` or configure your reverse p
 |----------|---------|-------------|
 | `HUB_VERSION` | `latest` | Docker image tag |
 | `HUB_PORT` | `8080` | Port to expose on host |
+| `HUB_CONFIG_DIR` | `./config` | Host directory for persistent config (DB, keys) |
 | `HUB_API_KEY` | (none) | API key for authentication |
 | `TS_AUTHKEY` | (required for Tailscale) | Tailscale auth key |
 | `TS_HOSTNAME` | `galangal-hub` | Hostname on Tailnet |
@@ -116,19 +117,39 @@ docker-compose up -d
 
 ### Backup Database
 
-```bash
-# Find volume location
-docker volume inspect galangal-hub-data
+Data is stored on the host at `${HUB_CONFIG_DIR}` (default: `./config/`):
 
-# Or copy from container
-docker cp galangal-hub:/data/hub.db ./hub-backup.db
+```bash
+# Copy the config directory
+cp -r ./config ./config-backup
 ```
 
 ### Reset Database
 
 ```bash
-docker-compose down -v  # Warning: deletes all data
+docker-compose down
+rm -rf ./config  # Warning: deletes all data
 docker-compose up -d
+```
+
+### Migrating from Named Volumes
+
+If you were using an older version with Docker named volumes:
+
+```bash
+# 1. Copy data from the old volume
+mkdir -p ./config
+docker cp galangal-hub:/data/hub.db ./config/hub.db
+docker cp galangal-hub:/data/.hub_secret ./config/.hub_secret
+
+# 2. Stop and update
+docker-compose down
+
+# 3. Start with new config (will use bind mount)
+docker-compose up -d
+
+# 4. Optionally remove the old named volume
+docker volume rm galangal-hub-data  # old named volume
 ```
 
 ## Build Locally

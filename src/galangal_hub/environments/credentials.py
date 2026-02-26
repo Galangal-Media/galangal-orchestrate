@@ -30,8 +30,10 @@ def _get_fernet() -> Fernet:
 
     key = os.environ.get("HUB_SECRET_KEY")
     if not key:
-        # Auto-generate and persist to /data/.hub_secret
-        secret_path = Path(os.environ.get("HUB_SOURCE_DIR", os.getcwd())) / ".hub_secret"
+        # Auto-generate and persist alongside the database in /data/
+        db_path = os.environ.get("HUB_DB_PATH", "/data/hub.db")
+        data_dir = Path(db_path).parent
+        secret_path = data_dir / ".hub_secret"
         if secret_path.exists():
             key = secret_path.read_text().strip()
         else:
