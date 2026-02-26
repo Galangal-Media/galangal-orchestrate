@@ -7,6 +7,31 @@ from galangal.core.task_index import TaskIndex
 from galangal.ui.console import console, print_error, print_success
 
 
+def cmd_index_check(args: argparse.Namespace) -> int:
+    """Check task index database integrity."""
+    if not require_initialized():
+        return 1
+
+    index = TaskIndex()
+    result = index.check_integrity()
+
+    if result["ok"]:
+        print_success(f"Database OK: {result['db_path']}")
+        return 0
+
+    print_error(f"Database problem: {result['db_path']}")
+    if result.get("error"):
+        console.print(f"  Error: {result['error']}")
+    if result["integrity_check"] != "ok":
+        console.print(f"  Integrity: {result['integrity_check']}")
+    if result["foreign_key_errors"]:
+        console.print(f"  Foreign key violations: {result['foreign_key_errors']}")
+
+    console.print("\nTo rebuild the database from task files:")
+    console.print("  galangal index rebuild")
+    return 1
+
+
 def cmd_index_stats(args: argparse.Namespace) -> int:
     """Show task index database statistics."""
     if not require_initialized():

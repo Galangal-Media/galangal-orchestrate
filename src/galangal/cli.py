@@ -142,6 +142,12 @@ def main() -> int:
     doctor_parser = subparsers.add_parser("doctor", help="Verify environment setup")
     doctor_parser.set_defaults(func=_cmd_doctor)
 
+    # check-database
+    check_db_parser = subparsers.add_parser(
+        "check-database", help="Check task index database integrity"
+    )
+    check_db_parser.set_defaults(func=_cmd_index_check)
+
     # start
     start_parser = subparsers.add_parser("start", help="Start new task")
     start_parser.add_argument(
@@ -326,6 +332,9 @@ def main() -> int:
     # index
     index_parser = subparsers.add_parser("index", help="Task index database management")
     index_subparsers = index_parser.add_subparsers(dest="index_command")
+
+    index_check = index_subparsers.add_parser("check", help="Check database integrity")
+    index_check.set_defaults(func=_cmd_index_check)
 
     index_stats = index_subparsers.add_parser("stats", help="Show task index statistics")
     index_stats.set_defaults(func=_cmd_index_stats)
@@ -579,6 +588,12 @@ def _cmd_mistakes_delete(args: argparse.Namespace) -> int:
     from galangal.commands.mistakes import cmd_mistakes_delete
 
     return cmd_mistakes_delete(args)
+
+
+def _cmd_index_check(args: argparse.Namespace) -> int:
+    from galangal.commands.index import cmd_index_check
+
+    return cmd_index_check(args)
 
 
 def _cmd_index_stats(args: argparse.Namespace) -> int:

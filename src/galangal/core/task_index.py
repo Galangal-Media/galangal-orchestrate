@@ -48,6 +48,30 @@ class TaskIndex:
 
     def _connect(self, *, bootstrap: bool = True) -> sqlite3.Connection:
         """Open and initialize a SQLite connection."""
+        try:
+            return self._open_and_init(bootstrap=bootstrap)
+        except sqlite3.DatabaseError:
+            if not self.db_path.exists():
+                raise
+
+            from rich.prompt import Confirm
+
+            print(f"\n[!] Task index database is corrupted: {self.db_path}")
+            if Confirm.ask(
+                "Delete the corrupted database and rebuild from task files?",
+                default=True,
+            ):
+                self.db_path.unlink(missing_ok=True)
+                # Also remove WAL/SHM journal files if present.
+                for suffix in ("-wal", "-shm"):
+                    self.db_path.with_name(self.db_path.name + suffix).unlink(
+                        missing_ok=True
+                    )
+                return self._open_and_init(bootstrap=bootstrap)
+            raise
+
+    def _open_and_init(self, *, bootstrap: bool = True) -> sqlite3.Connection:
+        """Open DB file, set pragmas, init schema, and optionally bootstrap."""
         conn = sqlite3.connect(str(self.db_path), timeout=5)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
@@ -56,7 +80,8 @@ class TaskIndex:
             conn.execute("PRAGMA journal_mode = WAL")
             conn.execute("PRAGMA synchronous = NORMAL")
         except sqlite3.DatabaseError:
-            pass
+            conn.close()
+            raise
 
         self._init_schema(conn)
         if bootstrap:
@@ -1072,6 +1097,45 @@ class TaskIndex:
                 )
             )
         return out
+
+    def check_integrity(self) -> dict[str, Any]:
+        """Run SQLite integrity and foreign-key checks on the database.
+
+        Returns a dict with ``ok`` bool and detail fields.
+        """
+        result: dict[str, Any] = {
+            "ok": True,
+            "exists": self.db_path.exists(),
+            "db_path": str(self.db_path),
+            "integrity_check": "ok",
+            "foreign_key_errors": 0,
+            "error": None,
+        }
+        if not self.db_path.exists():
+            result["ok"] = False
+            result["error"] = "database file does not exist"
+            return result
+
+        try:
+            conn = sqlite3.connect(str(self.db_path), timeout=5)
+            # Quick integrity check (stops after first error).
+            integrity = conn.execute("PRAGMA integrity_check(1)").fetchone()
+            integrity_val = str(integrity[0]) if integrity else "unknown"
+            result["integrity_check"] = integrity_val
+            if integrity_val != "ok":
+                result["ok"] = False
+
+            fk_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
+            result["foreign_key_errors"] = len(fk_errors)
+            if fk_errors:
+                result["ok"] = False
+
+            conn.close()
+        except sqlite3.DatabaseError as exc:
+            result["ok"] = False
+            result["error"] = str(exc)
+
+        return result
 
     def get_stats(self) -> TaskIndexStats:
         """Get index summary stats."""
