@@ -939,8 +939,10 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
             if notes_content:
                 reason = f"{reason}\n\n## {notes_artifact}\n\n{notes_content}"
 
-    # Check for rollback loops
-    if not state.should_allow_rollback(target_stage):
+    # Check for rollback loops (exempt REVIEW→DEV iteration since the
+    # whole point of the iteration loop is repeated back-and-forth)
+    is_review_iteration = from_stage == Stage.REVIEW and target_stage == Stage.DEV
+    if not is_review_iteration and not state.should_allow_rollback(target_stage):
         from galangal.logging import workflow_logger
 
         rollback_count = state.get_rollback_count(target_stage)
