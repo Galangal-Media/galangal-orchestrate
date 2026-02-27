@@ -366,7 +366,6 @@ class TestCodexOutputSchema:
         assert "enum" in decision_schema
         assert "APPROVE" in decision_schema["enum"]
         assert "REQUEST_CHANGES" in decision_schema["enum"]
-        assert "REQUEST_MINOR_CHANGES" in decision_schema["enum"]
 
     def test_qa_stage_schema(self):
         """Test that QA stage gets qa_report field and PASS/FAIL decisions."""

@@ -968,9 +968,17 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
         reason=reason,
     )
 
-    # Handle fast-track vs full rollback
-    if result.is_fast_track:
-        # Minor rollback: skip stages that already passed
+    # Review iteration: when REVIEW rolls back to DEV, enter direct DEV↔REVIEW
+    # loop by skipping all stages between DEV and REVIEW. The full validation
+    # pipeline runs once REVIEW approves.
+    if from_stage == Stage.REVIEW and target_stage == Stage.DEV:
+        state.review_iteration = True
+        dev_idx = STAGE_ORDER.index(Stage.DEV)
+        review_idx = STAGE_ORDER.index(Stage.REVIEW)
+        state.fast_track_skip = {s.value for s in STAGE_ORDER[dev_idx + 1 : review_idx]}
+        fast_track_skip_list = sorted(state.fast_track_skip)
+    elif result.is_fast_track:
+        # Minor rollback from other stages: skip stages that already passed
         state.setup_fast_track()
         fast_track_skip_list = sorted(state.fast_track_skip)
     else:

@@ -77,7 +77,7 @@ class ValidationResult:
         rollback_to: If validation failed, the stage to roll back to (e.g., "DEV").
         skipped: True if the stage was skipped due to skip_if conditions.
         is_fast_track: If True, this is a minor rollback that should skip
-            stages that already passed (REQUEST_MINOR_CHANGES).
+            stages that already passed.
     """
 
     success: bool

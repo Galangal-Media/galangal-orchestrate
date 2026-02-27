@@ -83,9 +83,9 @@ Create REVIEW_NOTES.md in the task's artifacts directory:
 [List any suggestions]
 
 ## Decision
-**Result:** APPROVE / REQUEST_CHANGES / REQUEST_MINOR_CHANGES
+**Result:** APPROVE / REQUEST_CHANGES
 
-[If REQUEST_CHANGES or REQUEST_MINOR_CHANGES, summarize what must be fixed]
+[If REQUEST_CHANGES, summarize what must be fixed]
 ```
 
 ## Process
@@ -109,36 +109,23 @@ Choose your decision based on these criteria:
 ### APPROVE
 Use when code quality is acceptable with no blocking issues.
 
-### REQUEST_MINOR_CHANGES (Preferred for small fixes)
-Use for issues that are **quick to fix and low-risk**. This triggers **fast-track mode** which skips TEST/QA/SECURITY stages and goes directly back to REVIEW after DEV fixes the issues.
+### REQUEST_CHANGES
+Use when there are issues that need fixing before the code can be merged. This sends the code back to DEV for fixes, then returns directly to REVIEW for re-check — no intermediate stages run during this iteration loop. Only once REVIEW approves will the full validation pipeline (TEST, QA, SECURITY, etc.) re-run to verify everything still passes.
 
-**Use REQUEST_MINOR_CHANGES for:**
-- Typos, spelling errors, grammar issues
-- Variable/function naming improvements
-- Missing or incorrect comments
-- Code formatting issues
-- Missing or incorrect translations/i18n strings
-- Small test fixes (wrong assertion value, missing mock, test typo)
-- Unused imports or dead code removal
+**Use REQUEST_CHANGES for any of these:**
+- Typos, spelling errors, naming improvements
+- Missing or incorrect comments/documentation
+- Code formatting or style issues
+- Unused imports or dead code
 - Missing type hints or incorrect types
-- Documentation updates or corrections
-- Log message improvements
-- Constant value corrections
-- Any fix that is **< 20 lines of changes** and **doesn't change program behavior**
-
-### REQUEST_CHANGES (Use sparingly)
-Use **only** for significant issues that affect functionality or require substantial rework. This triggers a **full re-run** through all validation stages (TEST, QA, SECURITY, REVIEW).
-
-**Use REQUEST_CHANGES only for:**
 - Logic bugs that affect program correctness
-- Design problems requiring architectural changes
+- Design problems requiring changes
 - Missing error handling for critical paths
 - Security vulnerabilities
-- Performance issues requiring algorithmic changes
+- Performance issues
 - Missing functionality from the spec
-- Changes that require new tests to be written
 
-**Important:** If in doubt between REQUEST_MINOR_CHANGES and REQUEST_CHANGES, prefer REQUEST_MINOR_CHANGES. The fast-track saves significant time and the REVIEW stage will catch any issues on the next pass.
+**Important:** REQUEST_CHANGES goes directly back to DEV without re-running TEST/QA/SECURITY stages. DEV and REVIEW iterate until you are satisfied. Once you APPROVE, the full validation pipeline runs automatically before a final review.
 
 ## Important Rules
 
@@ -150,15 +137,13 @@ Use **only** for significant issues that affect functionality or require substan
 - Distinguish between blockers and suggestions
 - Focus on maintainability and readability
 - APPROVE if changes are acceptable
-- **Prefer REQUEST_MINOR_CHANGES** for any fix that doesn't change program behavior
-- Use REQUEST_CHANGES **only** for significant issues affecting functionality or security
 
 ## Git Diff Strategy
 
 When reviewing code changes, use the appropriate git diff command based on context:
 
 - **First review**: Use `git diff {base_branch}...HEAD` to see all task changes
-- **On retry** (after REQUEST_CHANGES/REQUEST_MINOR_CHANGES): Use `git diff HEAD~1` to see just the fixes since last review
+- **On retry** (after REQUEST_CHANGES): Use `git diff HEAD~1` to see just the fixes since last review
 
 This helps you focus on what changed since your previous review, rather than re-reviewing everything.
 

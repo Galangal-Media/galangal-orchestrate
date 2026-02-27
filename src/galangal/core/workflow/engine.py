@@ -645,13 +645,29 @@ class WorkflowEngine:
             elif tui_app:
                 tui_app.add_activity("Skipping commit (commit_per_stage=False)", "ℹ️")
 
-        # Archive rollback after successful DEV
-        if current == Stage.DEV and tui_app:
+        # Archive rollback after successful DEV (but not during review iteration -
+        # keep ROLLBACK.md so REVIEW has accumulated context)
+        if current == Stage.DEV and tui_app and not self.state.review_iteration:
             archive_rollback_if_exists(self.state.task_name, tui_app)
             self.state.clear_passed_stages()
 
-        # Find next stage
-        next_stage = get_next_stage(current, self.state)
+        # Review iteration: when REVIEW approves during a DEV↔REVIEW loop,
+        # rewind to run the full validation pipeline before final REVIEW.
+        if current == Stage.REVIEW and self.state.review_iteration:
+            self.state.review_iteration = False
+            self.state.clear_fast_track()
+            self.state.clear_passed_stages()
+            # Archive rollback now that review iteration is complete
+            if tui_app:
+                archive_rollback_if_exists(self.state.task_name, tui_app)
+                tui_app.add_activity(
+                    "Review approved - running full validation pipeline", "🔄"
+                )
+            # Rewind to the stage after DEV (MIGRATION) for full validation
+            next_stage = get_next_stage(Stage.DEV, self.state)
+        else:
+            # Find next stage (normal flow)
+            next_stage = get_next_stage(current, self.state)
         skipped_stages = self._get_skipped_stages(current, next_stage)
 
         if next_stage:

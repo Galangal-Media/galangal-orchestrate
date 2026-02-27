@@ -318,13 +318,6 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         decision_outcomes=(
             ("APPROVE", True, "Review approved", None, False),
             ("REQUEST_CHANGES", False, "Review requested changes", "DEV", False),
-            (
-                "REQUEST_MINOR_CHANGES",
-                False,
-                "Review requested minor changes (fast-track)",
-                "DEV",
-                True,
-            ),
         ),
         default_validation="decision_or_markers",
         artifact_schema={
@@ -800,6 +793,7 @@ class ExecutionState:
     awaiting_approval: bool = False
     clarification_required: bool = False
     last_failure: str | None = None
+    review_iteration: bool = False
 
     def record_failure(self, error: str, max_length: int = 4000) -> None:
         """Record a failed attempt.
@@ -1117,7 +1111,7 @@ class FastTrackState:
     """Fast-track rollback state.
 
     Tracks which stages have passed to enable skipping them
-    on minor rollbacks (REQUEST_MINOR_CHANGES).
+    on rollbacks (e.g., review iteration or fast-track rollbacks).
     """
 
     passed_stages: set[str] = field(default_factory=set)
@@ -1249,6 +1243,7 @@ class WorkflowState:
         task_description: str,
         task_name: str,
         # Optional fields with defaults
+        review_iteration: bool = False,
         task_type: TaskType = TaskType.FEATURE,
         rollback_history: list[RollbackEvent] | None = None,
         qa_rounds: list[dict[str, Any]] | None = None,
@@ -1282,6 +1277,7 @@ class WorkflowState:
             awaiting_approval=awaiting_approval,
             clarification_required=clarification_required,
             last_failure=last_failure,
+            review_iteration=review_iteration,
         )
 
         # GitHub context sub-model
@@ -1408,6 +1404,14 @@ class WorkflowState:
     @last_failure.setter
     def last_failure(self, value: str | None) -> None:
         self._execution.last_failure = value
+
+    @property
+    def review_iteration(self) -> bool:
+        return self._execution.review_iteration
+
+    @review_iteration.setter
+    def review_iteration(self, value: bool) -> None:
+        self._execution.review_iteration = value
 
     # --- GitHubContext properties ---
     @property
@@ -1632,6 +1636,7 @@ class WorkflowState:
         d["awaiting_approval"] = self.awaiting_approval
         d["clarification_required"] = self.clarification_required
         d["last_failure"] = self.last_failure
+        d["review_iteration"] = self.review_iteration
 
         # GitHub context (flat)
         d["github_issue"] = self.github_issue
@@ -1708,6 +1713,7 @@ class WorkflowState:
             awaiting_approval=d.get("awaiting_approval", False),
             clarification_required=d.get("clarification_required", False),
             last_failure=d.get("last_failure"),
+            review_iteration=d.get("review_iteration", False),
             # Task metadata
             started_at=d.get("started_at", datetime.now(timezone.utc).isoformat()),
             task_description=d.get("task_description", ""),

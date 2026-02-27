@@ -105,7 +105,7 @@ class StageResult(Result):
             rollback_to: Stage to roll back to.
             output: Optional detailed output.
             is_fast_track: If True, this is a minor rollback that should
-                skip stages that already passed (REQUEST_MINOR_CHANGES).
+                skip stages that already passed.
         """
         return cls(
             success=False,

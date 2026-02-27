@@ -22,7 +22,7 @@ You MUST respond with a JSON object containing these fields:
 ```json
 {
   "review_notes": "Full review findings in markdown format",
-  "decision": "APPROVE or REQUEST_CHANGES or REQUEST_MINOR_CHANGES",
+  "decision": "APPROVE or REQUEST_CHANGES",
   "issues": [
     {
       "severity": "critical|major|minor|suggestion",
@@ -43,12 +43,10 @@ You MUST respond with a JSON object containing these fields:
 
 - **decision** (required): Must be exactly one of:
   - `"APPROVE"` - Code quality is acceptable, no blocking issues
-  - `"REQUEST_MINOR_CHANGES"` - Only minor issues (typos, naming, comments, formatting)
-    - Use when fixes are trivial and don't affect functionality
-    - Triggers fast-track re-review (skips TEST/QA stages)
-  - `"REQUEST_CHANGES"` - Significant issues (logic bugs, design problems)
-    - Use for issues that could affect functionality or maintainability
-    - Triggers full re-run through all validation stages
+  - `"REQUEST_CHANGES"` - Issues that need fixing before the code can be merged.
+    This sends code directly back to DEV for fixes, then returns to REVIEW.
+    No intermediate stages (TEST/QA/SECURITY) run during this iteration loop.
+    Once REVIEW approves, the full validation pipeline re-runs automatically.
 
 - **issues** (optional): Array of specific issues found. Each issue has:
   - `severity`: One of `critical`, `major`, `minor`, or `suggestion`
@@ -58,8 +56,7 @@ You MUST respond with a JSON object containing these fields:
 
 ### Decision Logic
 
-- If all issues are `minor` or `suggestion` severity → use `REQUEST_MINOR_CHANGES`
-- If any issues are `critical` or `major` severity → use `REQUEST_CHANGES`
+- If any issues need fixing → use `REQUEST_CHANGES`
 - If no blocking issues → use `APPROVE`
 
 ## Review Process
@@ -95,5 +92,4 @@ Consider these areas:
 - Distinguish between blockers (critical/major) and suggestions
 - Focus on maintainability and readability
 - APPROVE if changes are acceptable with minor suggestions
-- Use REQUEST_MINOR_CHANGES for trivial fixes only
-- Use REQUEST_CHANGES for significant issues that must be fixed before merge
+- Use REQUEST_CHANGES for any issues that must be fixed before merge
