@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Input, OptionList, Static, TextArea
+from textual.widgets import Button, Input, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
 
@@ -210,11 +210,17 @@ class UserQuestionsModal(ModalScreen[list[str] | None]):
         with Vertical(id="user-questions-dialog"):
             yield Static("Enter your questions (one per line):", id="user-questions-label")
             yield TextArea("", id="user-questions-field")
-            yield Static("Ctrl+S to submit, Esc to cancel", id="user-questions-hint")
+            with Horizontal(id="user-questions-footer"):
+                yield Static("Ctrl+S to submit, Esc to cancel", id="user-questions-hint")
+                yield Button("Submit", id="user-questions-submit", variant="success")
 
     def on_mount(self) -> None:
         field = self.query_one("#user-questions-field", TextArea)
         self.set_focus(field)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "user-questions-submit":
+            self.action_submit()
 
     def action_submit(self) -> None:
         field = self.query_one("#user-questions-field", TextArea)
@@ -250,13 +256,19 @@ class MultilineInputModal(ModalScreen[str | None]):
         with Vertical(id="multiline-input-dialog"):
             yield Static(self._label, id="multiline-input-label")
             yield TextArea(self._default, id="multiline-input-field")
-            yield Static("Ctrl+S to submit, Esc to cancel", id="multiline-input-hint")
+            with Horizontal(id="multiline-input-footer"):
+                yield Static("Ctrl+S to submit, Esc to cancel", id="multiline-input-hint")
+                yield Button("Submit", id="multiline-input-submit", variant="success")
 
     def on_mount(self) -> None:
         field = self.query_one("#multiline-input-field", TextArea)
         self.set_focus(field)
         # Move cursor to end of text
         field.move_cursor(field.document.end)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "multiline-input-submit":
+            self.action_submit()
 
     def action_submit(self) -> None:
         field = self.query_one("#multiline-input-field", TextArea)

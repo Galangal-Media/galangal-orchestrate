@@ -156,9 +156,20 @@ GitHubIssueSelectModal {
     border: solid #504945;
 }
 
+#user-questions-footer {
+    height: auto;
+    margin-top: 1;
+    align: center middle;
+}
+
 #user-questions-hint {
     color: #7c6f64;
-    margin-top: 1;
+    width: 1fr;
+    content-align-vertical: middle;
+}
+
+#user-questions-submit {
+    min-width: 12;
 }
 
 /* ============================================
@@ -192,9 +203,20 @@ GitHubIssueSelectModal {
     border: solid #504945;
 }
 
+#multiline-input-footer {
+    height: auto;
+    margin-top: 1;
+    align: center middle;
+}
+
 #multiline-input-hint {
     color: #7c6f64;
-    margin-top: 1;
+    width: 1fr;
+    content-align-vertical: middle;
+}
+
+#multiline-input-submit {
+    min-width: 12;
 }
 
 /* ============================================

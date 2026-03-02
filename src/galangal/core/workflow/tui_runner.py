@@ -1072,7 +1072,7 @@ async def _generate_discovery_questions(
     result = await asyncio.to_thread(
         backend.invoke,
         prompt=prompt,
-        timeout=300,  # 5 minutes for question generation
+        timeout=600,  # 10 minutes for question generation
         max_turns=10,
         ui=ui,
         pause_check=lambda: app._paused,
