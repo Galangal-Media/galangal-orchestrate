@@ -6,7 +6,9 @@ so Claude Code can view them during workflow execution.
 """
 
 import hashlib
+import ipaddress
 import re
+import socket
 import subprocess
 import urllib.request
 from pathlib import Path
@@ -258,6 +260,54 @@ def _download_with_gh(url: str, output_path: Path) -> bool:
         return False
 
 
+def _is_safe_remote_url(url: str) -> bool:
+    """Return True only for http(s) URLs that resolve to public IP addresses.
+
+    Image URLs come from untrusted issue bodies. Without this guard, a crafted
+    URL like ``http://169.254.169.254/...`` (cloud metadata) or an internal host
+    would be fetched by ``_download_direct`` and its bytes surfaced to the AI -
+    a server-side request forgery vector. We require an http(s) scheme and reject
+    any host that resolves to a private/loopback/link-local/reserved address.
+
+    Note: a determined attacker could still DNS-rebind between this check and the
+    actual fetch; this blocks the obvious metadata/internal-host vectors.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+
+    if parsed.scheme not in ("http", "https"):
+        return False
+
+    host = parsed.hostname
+    if not host:
+        return False
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, UnicodeError, OSError):
+        return False
+
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            return False
+
+    return True
+
+
 def _download_direct(url: str, output_path: Path) -> None:
     """
     Download a URL directly without authentication.
@@ -269,6 +319,9 @@ def _download_direct(url: str, output_path: Path) -> None:
     Raises:
         Exception on download failure
     """
+    if not _is_safe_remote_url(url):
+        raise ValueError(f"Refusing to download from unsafe or non-public URL: {url}")
+
     headers = {"User-Agent": "Mozilla/5.0 (compatible; galangal-orchestrate/1.0)"}
     request = urllib.request.Request(url, headers=headers)
 

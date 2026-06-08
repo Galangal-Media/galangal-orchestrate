@@ -5,7 +5,7 @@ Claude CLI backend implementation.
 from __future__ import annotations
 
 import json
-import subprocess
+import shlex
 from typing import TYPE_CHECKING, Any
 
 from galangal.ai.base import AIBackend, PauseCheck
@@ -316,20 +316,18 @@ class ClaudeBackend(AIBackend):
                 # Use config command or default
                 command = self._config.command if self._config else self.DEFAULT_COMMAND
                 model = self._config.model if self._config else None
-                model_flag = f" --model {model}" if model else ""
+                model_flag = f" --model {shlex.quote(model)}" if model else ""
 
                 # Pipe file content to claude via stdin (simple text output mode)
-                shell_cmd = f"cat '{prompt_file}' | {command} --output-format text{model_flag}"
-                result = subprocess.run(
-                    shell_cmd,
-                    shell=True,
-                    cwd=get_project_root(),
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
+                shell_cmd = (
+                    f"cat {shlex.quote(prompt_file)} | "
+                    f"{shlex.quote(command)} --output-format text{model_flag}"
                 )
-                if result.returncode == 0 and result.stdout.strip():
-                    return result.stdout.strip()
-        except (subprocess.TimeoutExpired, Exception):
+                returncode, stdout = self._run_shell_capture(
+                    shell_cmd, get_project_root(), timeout
+                )
+                if returncode == 0 and stdout.strip():
+                    return stdout.strip()
+        except Exception:
             pass
         return ""

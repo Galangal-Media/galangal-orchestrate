@@ -109,11 +109,9 @@ class TestGeminiGenerateText:
         """generate_text should run in non-interactive mode."""
         backend = GeminiBackend()
 
-        mock_completed = MagicMock()
-        mock_completed.returncode = 0
-        mock_completed.stdout = "hello"
-
-        with patch("galangal.ai.gemini.subprocess.run", return_value=mock_completed) as mock_run:
+        with patch.object(
+            GeminiBackend, "_run_shell_capture", return_value=(0, "hello")
+        ) as mock_run:
             text = backend.generate_text("prompt")
 
         assert text == "hello"

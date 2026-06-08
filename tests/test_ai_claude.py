@@ -248,16 +248,14 @@ class TestClaudeBackendTempFilePrompt:
         """Test that generate_text() uses temp file and pipes to claude."""
         backend = ClaudeBackend()
 
-        with patch("galangal.ai.claude.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="Generated text")
+        with patch.object(ClaudeBackend, "_run_shell_capture") as mock_run:
+            mock_run.return_value = (0, "Generated text")
             backend.generate_text("my prompt")
 
-        call_args = mock_run.call_args
-        cmd = call_args[0][0]
+        cmd = mock_run.call_args[0][0]
         assert "cat " in cmd
         assert "| claude" in cmd
         assert "my prompt" not in cmd
-        assert call_args[1].get("shell") is True
 
     def test_generate_text_handles_large_prompt(self):
         """Test that generate_text() can handle prompts exceeding 128KB."""
@@ -265,12 +263,11 @@ class TestClaudeBackendTempFilePrompt:
 
         large_prompt = "y" * 150_000  # ~150KB
 
-        with patch("galangal.ai.claude.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="Generated text")
+        with patch.object(ClaudeBackend, "_run_shell_capture") as mock_run:
+            mock_run.return_value = (0, "Generated text")
             result = backend.generate_text(large_prompt)
 
-        call_args = mock_run.call_args
-        cmd = call_args[0][0]
+        cmd = mock_run.call_args[0][0]
         assert large_prompt not in cmd
         assert result == "Generated text"
 

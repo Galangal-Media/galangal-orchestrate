@@ -109,6 +109,61 @@ class AIBackend(ABC):
         return f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
 
     @staticmethod
+    def _output_tail(output: str, lines: int = 20) -> str:
+        """Return the last ``lines`` lines of output, lowercased.
+
+        Terminal status/error messages (max turns, rate limits) appear at the
+        end of a run; scanning only the tail avoids misclassifying a task whose
+        own mid-transcript prose happens to mention those phrases.
+        """
+        return "\n".join(output.splitlines()[-lines:]).lower()
+
+    @staticmethod
+    def _run_shell_capture(shell_cmd: str, cwd: str | None, timeout: int) -> tuple[int, str]:
+        """Run a shell pipeline in its own process group, capturing stdout.
+
+        Used by the lightweight ``generate_text`` helpers. ``subprocess.run`` with
+        a timeout only SIGKILLs the direct ``/bin/sh`` child, leaving the AI CLI
+        grandchild (and its API connection) orphaned; running the pipeline in a
+        new session lets us kill the whole group on timeout.
+
+        Returns (returncode, stdout); (-1, "") on timeout or spawn failure.
+        """
+        import os
+        import signal
+        import subprocess
+
+        try:
+            proc = subprocess.Popen(
+                shell_cmd,
+                shell=True,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+        except OSError:
+            return -1, ""
+
+        try:
+            stdout, _ = proc.communicate(timeout=timeout)
+            return (proc.returncode if proc.returncode is not None else -1), (stdout or "")
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+            try:
+                proc.communicate(timeout=5)
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+            return -1, ""
+
+    @staticmethod
     def _notify_hub_output(line: str) -> None:
         """Stream a line to hub for remote monitoring. Non-critical."""
         try:

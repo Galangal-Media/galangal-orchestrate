@@ -1806,8 +1806,26 @@ def save_state(state: WorkflowState) -> None:
     task_dir = get_task_dir(state.task_name)
     task_dir.mkdir(parents=True, exist_ok=True)
     state_file = task_dir / "state.json"
-    with open(state_file, "w") as f:
-        json.dump(state.to_dict(), f, indent=2)
+
+    # Write atomically: dump to a temp file in the same directory and rename
+    # over the canonical file. A crash/interrupt mid-write then leaves the
+    # previous (valid) state.json intact rather than a truncated file.
+    import os
+    import tempfile
+
+    fd, tmp_path = tempfile.mkstemp(dir=task_dir, prefix=".state.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(state.to_dict(), f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, state_file)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
     # Best-effort task index update (non-canonical sidecar store).
     try:

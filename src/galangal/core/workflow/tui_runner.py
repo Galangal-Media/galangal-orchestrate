@@ -914,6 +914,10 @@ async def _check_staleness_on_resume(
                 )
                 state.stage = Stage.from_str(earliest_stale)
                 state.reset_attempts()
+                # Clear the fast-track skip set so the rewound stages actually
+                # re-run. Otherwise get_next_stage() would skip stale stages that
+                # are still marked as previously-passed, defeating the cascade.
+                state.clear_fast_track()
                 save_state(state)
 
         else:

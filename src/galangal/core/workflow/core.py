@@ -309,10 +309,27 @@ def _execute_test_gate(
     Returns:
         StageResult indicating success or failure with rollback to DEV.
     """
+    import os
+    import signal
     import subprocess
     import threading
     from collections import deque
     from queue import Empty, Full, Queue
+
+    def _kill_proc_group(p: subprocess.Popen) -> None:
+        """Kill the whole process group so shell pipelines and grandchildren die.
+
+        ``proc.kill()`` only signals the direct child (``/bin/sh -c ...``); test
+        runners that spawn their own subprocesses would otherwise survive, keep
+        the stdout pipe open, and hang the reader thread on EOF.
+        """
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                p.kill()
+            except OSError:
+                pass
 
     from galangal.config.loader import get_project_root
     from galangal.logging import workflow_logger
@@ -384,8 +401,11 @@ def _execute_test_gate(
             line_type="meta",
         )
 
+        proc: subprocess.Popen | None = None
         try:
-            # Start process with stdout/stderr combined and piped
+            # Start process with stdout/stderr combined and piped.
+            # start_new_session=True puts the shell pipeline in its own process
+            # group so it can be killed as a unit on timeout.
             proc = subprocess.Popen(
                 test.command,
                 shell=True,
@@ -394,6 +414,7 @@ def _execute_test_gate(
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,  # Line buffered
+                start_new_session=True,
             )
 
             # Stream output in background thread
@@ -419,7 +440,7 @@ def _execute_test_gate(
 
                 # Check timeout
                 if time.time() - start_time > test.timeout:
-                    proc.kill()
+                    _kill_proc_group(proc)
                     timed_out = True
                     break
 
@@ -437,13 +458,28 @@ def _execute_test_gate(
                 try:
                     proc.wait(timeout=5)  # Ensure process fully terminated
                 except subprocess.TimeoutExpired:
-                    proc.kill()
+                    _kill_proc_group(proc)
                     proc.wait()
                 exit_code = proc.returncode if proc.returncode is not None else -1
 
         except Exception as e:
             output_tail.append(f"Error running command: {e}")
             exit_code = -1
+        finally:
+            # Close the pipe so a still-blocked reader thread gets EOF, and reap
+            # the process so a killed/abandoned pipeline never lingers as a zombie.
+            if proc is not None:
+                if proc.stdout is not None:
+                    try:
+                        proc.stdout.close()
+                    except OSError:
+                        pass
+                if proc.poll() is None:
+                    _kill_proc_group(proc)
+                try:
+                    proc.wait(timeout=5)
+                except (subprocess.TimeoutExpired, OSError):
+                    pass
 
         # Process results - include bounded tail for artifact
         output = "".join(output_tail)

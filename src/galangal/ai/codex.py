@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import os
 import shlex
-import subprocess
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -373,7 +372,11 @@ class CodexBackend(AIBackend):
 
                 output = result.output
 
-                if "max turns" in output.lower() or "reached max" in output.lower():
+                # Scan only the output tail: a terminal "reached max turns"
+                # message appears at the end, whereas the same phrase mid-output
+                # (e.g. a task discussing turn limits) must not trip this.
+                output_tail = self._output_tail(output)
+                if "max turns" in output_tail or "reached max" in output_tail:
                     if ui:
                         ui.add_activity("Max turns reached", "❌")
                         ui.finish(success=False)
@@ -452,22 +455,20 @@ class CodexBackend(AIBackend):
             ):
                 # Use config command or default
                 command = self._config.command if self._config else self.DEFAULT_COMMAND
-                shell_cmd = f"cat '{prompt_file}' | {command} exec -o '{output_file}'"
-
-                result = subprocess.run(
-                    shell_cmd,
-                    shell=True,
-                    cwd=get_project_root(),
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
+                shell_cmd = (
+                    f"cat {shlex.quote(prompt_file)} | "
+                    f"{shlex.quote(command)} exec -o {shlex.quote(output_file)}"
                 )
 
-                if result.returncode == 0 and os.path.exists(output_file):
+                returncode, _ = self._run_shell_capture(
+                    shell_cmd, get_project_root(), timeout
+                )
+
+                if returncode == 0 and os.path.getsize(output_file) > 0:
                     with open(output_file, encoding="utf-8") as f:
                         return f.read().strip()
 
-        except (subprocess.TimeoutExpired, Exception):
+        except Exception:
             pass
 
         return ""

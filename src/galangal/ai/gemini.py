@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import shlex
-import subprocess
 from typing import TYPE_CHECKING
 
 from galangal.ai.base import AIBackend, PauseCheck
@@ -141,8 +140,11 @@ class GeminiBackend(AIBackend):
                 # Process completed - analyze output
                 full_output = result.output
 
-                # Check for common error conditions
-                if "quota" in full_output.lower() or "rate limit" in full_output.lower():
+                # Check for common error conditions. Scan only the output tail so
+                # a task whose own output mentions quota/rate limits mid-transcript
+                # is not misclassified as a rate-limit failure.
+                output_tail = self._output_tail(full_output)
+                if "quota" in output_tail or "rate limit" in output_tail:
                     if ui:
                         ui.add_activity("Rate limited", "🚦")
                     error_ctx = analyze_error(
@@ -303,18 +305,13 @@ class GeminiBackend(AIBackend):
                     f"cat {shlex.quote(prompt_file)} | "
                     f"{shlex.quote(command)} --prompt '' --output-format text"
                 )
-                result = subprocess.run(
-                    shell_cmd,
-                    shell=True,
-                    cwd=get_project_root(),
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
+                returncode, stdout = self._run_shell_capture(
+                    shell_cmd, get_project_root(), timeout
                 )
-                if result.returncode == 0 and result.stdout.strip():
-                    return result.stdout.strip()
+                if returncode == 0 and stdout.strip():
+                    return stdout.strip()
 
-        except (subprocess.TimeoutExpired, Exception) as e:
+        except Exception as e:
             logger.debug("gemini_generate_text_error", error=str(e))
 
         return ""

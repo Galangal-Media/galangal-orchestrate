@@ -3,6 +3,7 @@ Config-driven validation runner.
 """
 
 import fnmatch
+import re
 import subprocess
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -18,6 +19,41 @@ from galangal.core.artifacts import (
     write_skip_artifact,
 )
 from galangal.core.utils import now_iso, truncate_text
+
+_DECISION_LABEL_RE = re.compile(
+    r"^\s*[#>*\-\s]*(?:STATUS|DECISION|VERDICT|RESULT|OUTCOME)\b[^:]*:\s*(.+)$"
+)
+
+
+def _marker_present(content: str, marker: str | None) -> bool:
+    """Return True if ``marker`` appears as a decision, not just somewhere in prose.
+
+    A marker counts only when it stands alone on a line (optionally decorated as
+    a heading/bold/list item, e.g. ``## APPROVE`` or ``**APPROVE**``) or follows a
+    decision label (``Status: APPROVE``, ``Verdict: REQUEST_CHANGES — ...``). This
+    avoids false positives from quoted requirements or prose like
+    "this does not yet PASS" / "needs APPROVED sign-off".
+    """
+    if not marker:
+        return False
+
+    marker_up = marker.upper()
+    word_re = re.compile(rf"\b{re.escape(marker_up)}\b")
+
+    for raw in content.splitlines():
+        line = raw.upper().strip()
+        if not line:
+            continue
+        # Standalone marker (after stripping common markdown decoration).
+        stripped = line.strip(" \t#*`>-_:.").strip()
+        if stripped == marker_up:
+            return True
+        # Decision label line, e.g. "Status: APPROVE".
+        label_match = _DECISION_LABEL_RE.match(line)
+        if label_match and word_re.search(label_match.group(1)):
+            return True
+
+    return False
 
 
 def read_decision_file(stage: str, task_name: str) -> str | None:
@@ -1110,12 +1146,15 @@ class ValidationRunner:
                 rollback_to="DEV",
             )
 
-        content_upper = content.upper()
+        pass_found = _marker_present(content, stage_config.pass_marker)
+        fail_found = _marker_present(content, stage_config.fail_marker)
 
-        if stage_config.pass_marker and stage_config.pass_marker in content_upper:
+        # Both markers present is ambiguous - don't let pass silently win over
+        # fail. Fall through to the user-decision path below.
+        if pass_found and not fail_found:
             return ValidationResult(True, f"{artifact_name}: approved")
 
-        if stage_config.fail_marker and stage_config.fail_marker in content_upper:
+        if fail_found and not pass_found:
             return ValidationResult(
                 False,
                 f"{artifact_name}: changes requested",

@@ -93,16 +93,23 @@ def squash_to_base(base_sha: str, commit_msg: str, cwd: Path | None = None) -> b
     if code != 0:
         return False
 
+    # HEAD already at base means there are no commits on top to squash.
+    pre_head = get_current_head(cwd)
+    if pre_head is not None and pre_head == base_sha:
+        return False
+
     # Soft reset to base (keeps working tree and index intact)
     code, _, err = run_command(["git", "reset", "--soft", base_sha], cwd=cwd)
     if code != 0:
         return False
 
-    # Check if there's anything to commit after reset
+    # After resetting onto base, the cumulative diff should be staged. An empty
+    # index here is anomalous (wrong base_sha, or net-zero commits): report
+    # failure rather than a misleading "success" that leaves HEAD at base with
+    # the work uncommitted. The caller is expected to fall back to a manual commit.
     code, staged_out, _ = run_command(["git", "diff", "--cached", "--name-only"], cwd=cwd)
     if code != 0 or not staged_out.strip():
-        # Nothing to commit - this shouldn't happen normally
-        return True
+        return False
 
     # Create the squashed commit
     code, _, err = run_command(["git", "commit", "-m", commit_msg], cwd=cwd)
