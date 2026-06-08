@@ -39,7 +39,7 @@ def cmd_reset(args: argparse.Namespace) -> int:
         )
         if confirm != "y":
             print_info("Reset cancelled.")
-            return 1
+            return 0  # User declined - a cancellation, not an error
 
     shutil.rmtree(task_dir)
     try:

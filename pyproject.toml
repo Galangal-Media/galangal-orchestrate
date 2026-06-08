@@ -33,12 +33,16 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.0.0",
     "structlog>=24.0.0",
-    "sentence-transformers>=2.2.0",
-    "sqlite-vss>=0.1.2",
     "websockets>=12.0",
 ]
 
 [project.optional-dependencies]
+# Semantic mistake tracking (pulls in sentence-transformers + torch, ~hundreds of
+# MB). Optional so the base install stays lean; `galangal doctor` points here.
+full = [
+    "sentence-transformers>=2.2.0",
+    "sqlite-vss>=0.1.2",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",

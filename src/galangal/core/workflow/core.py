@@ -122,11 +122,12 @@ def _write_artifacts_from_readonly_output(
         task_name: Task name for artifact paths
         tui_app: TUI app for activity logging
     """
-    import json
+    from galangal.core.utils import extract_json_object
 
-    try:
-        data = json.loads(output)
-    except json.JSONDecodeError:
+    # Tolerant parse: read-only backends sometimes wrap JSON in prose or code
+    # fences; a strict json.loads would discard the whole stage result.
+    data = extract_json_object(output)
+    if data is None:
         tui_app.add_activity("Warning: Backend output is not valid JSON", "⚠️")
         return
 

@@ -133,12 +133,86 @@ def create_task(
     return True, f"Created task: {task_name}"
 
 
+# Maps the --type CLI choices (names and 1..6) to TaskType.from_str inputs.
+_TYPE_CHOICE_MAP = {
+    "1": "feature",
+    "2": "bugfix",
+    "3": "refactor",
+    "4": "chore",
+    "5": "docs",
+    "6": "hotfix",
+    "feature": "feature",
+    "bugfix": "bugfix",
+    "refactor": "refactor",
+    "chore": "chore",
+    "docs": "docs",
+    "hotfix": "hotfix",
+}
+
+
+def _resolve_type_arg(args: argparse.Namespace) -> TaskType | None:
+    """Resolve the --type CLI argument to a TaskType, or None if not provided."""
+    raw = getattr(args, "type", None)
+    if not raw:
+        return None
+    return TaskType.from_str(_TYPE_CHOICE_MAP.get(raw.lower(), raw))
+
+
+def _run_headless_start(args: argparse.Namespace) -> int:
+    """Create and run a task without the interactive TUI (for CI/scripts)."""
+    import asyncio
+
+    from galangal.core.workflow.headless_runner import run_workflow_headless
+    from galangal.ui.console import print_error, print_info
+
+    description = " ".join(args.description) if args.description else ""
+    if not description:
+        print_error("--headless requires a task description.")
+        return 1
+    if getattr(args, "issue", None):
+        print_error(
+            "--headless does not support --issue yet. Use 'galangal github run' "
+            "for issue-driven headless runs."
+        )
+        return 1
+
+    task_type = _resolve_type_arg(args) or TaskType.FEATURE
+    task_name = args.name or generate_unique_task_name(description[:50])
+
+    print_info(f"Creating task '{task_name}' (type: {task_type.value})...")
+    success, msg = create_task(task_name=task_name, description=description, task_type=task_type)
+    if not success:
+        print_error(msg)
+        return 1
+    print_info(msg)
+
+    state = load_state(task_name)
+    if not state:
+        print_error("Failed to load task state.")
+        return 1
+
+    if getattr(args, "skip_discovery", False):
+        state._skip_discovery = True
+
+    try:
+        result = asyncio.run(run_workflow_headless(state))
+    except KeyboardInterrupt:
+        print_info("Interrupted.")
+        return 130
+    print_info(f"Workflow finished: {result}")
+    return 0 if result == "done" else 1
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     """Start a new task."""
     from galangal.config.loader import require_initialized
 
     if not require_initialized():
         return 1
+
+    # Non-interactive path for CI/scripts (no TUI).
+    if getattr(args, "headless", False):
+        return _run_headless_start(args)
 
     # Check for newer version on PyPI
     from galangal.core.version_check import check_and_prompt_update
@@ -158,7 +232,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     app = WorkflowTUIApp("New Task", "SETUP", hidden_stages=frozenset())
 
     task_info = {
-        "type": None,
+        "type": _resolve_type_arg(args),  # honor --type; None falls back to the picker
         "description": description,
         "name": task_name,
         "github_issue": from_issue,

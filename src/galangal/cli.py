@@ -181,6 +181,12 @@ def main() -> int:
     start_parser.add_argument(
         "--issue", "-i", type=int, help="Create task from GitHub issue number"
     )
+    start_parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run without the interactive TUI (for CI/scripts). Requires a "
+        "description; defaults --type to feature if not given.",
+    )
     start_parser.set_defaults(func=_cmd_start)
 
     # list

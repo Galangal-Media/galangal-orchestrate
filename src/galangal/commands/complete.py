@@ -448,5 +448,14 @@ def cmd_complete(args: argparse.Namespace) -> int:
         console.print("Run 'resume' to continue the workflow.")
         return 1
 
-    success, _ = finalize_task(active, state, force=args.force)
-    return 0 if success else 1
+    success, pr_url = finalize_task(active, state, force=args.force)
+    if not success:
+        return 1
+    if not pr_url:
+        # Task was finalized (moved + committed) but the PR was not created.
+        # Distinct exit code so CI/scripts can tell this from a clean success.
+        print_warning(
+            "Task finalized, but the pull request was not created - create it manually."
+        )
+        return 2
+    return 0

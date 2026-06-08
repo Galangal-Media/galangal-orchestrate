@@ -2,10 +2,12 @@
 Common utility functions to avoid code duplication.
 """
 
+import json
 import os
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 # Debug log file path (lazily initialized)
 _debug_file: Path | None = None
@@ -114,3 +116,74 @@ def truncate_text(
     if len(text) <= max_length:
         return text
     return text[:max_length] + suffix
+
+
+def extract_json_object(text: str) -> dict[str, Any] | None:
+    """Best-effort extraction of a single JSON object from model/CLI output.
+
+    AI CLIs often wrap JSON in prose, ```json fences, or trailing log lines, so a
+    bare ``json.loads`` of stdout frequently fails and discards an otherwise-valid
+    result. This tries, in order:
+
+      1. ``json.loads`` of the whole (stripped) text,
+      2. the contents of a ```json ... ``` (or bare ``` ... ```) fence,
+      3. the outermost balanced ``{ ... }`` span.
+
+    Returns the parsed dict, or None if no JSON object could be recovered.
+    """
+    if not text:
+        return None
+
+    stripped = text.strip()
+
+    def _try(candidate: str) -> dict[str, Any] | None:
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    # 1. Whole text.
+    result = _try(stripped)
+    if result is not None:
+        return result
+
+    # 2. Fenced code block (```json ... ``` or ``` ... ```).
+    if "```" in stripped:
+        fence_start = stripped.find("```")
+        after = stripped[fence_start + 3 :]
+        newline = after.find("\n")
+        if newline != -1:
+            after = after[newline + 1 :]  # drop the optional language tag line
+        fence_end = after.find("```")
+        if fence_end != -1:
+            result = _try(after[:fence_end].strip())
+            if result is not None:
+                return result
+
+    # 3. Outermost balanced object: from the first '{' to its matching '}'.
+    start = stripped.find("{")
+    if start != -1:
+        depth = 0
+        in_string = False
+        escaped = False
+        for i in range(start, len(stripped)):
+            ch = stripped[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return _try(stripped[start : i + 1])
+
+    return None

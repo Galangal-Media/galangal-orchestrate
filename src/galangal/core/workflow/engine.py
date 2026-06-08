@@ -498,9 +498,11 @@ class WorkflowEngine:
             "APPROVE" or "REQUEST_CHANGES". On failure, returns
             ("APPROVE", "") for graceful degradation.
         """
-        import json
-
-        from galangal.ai import get_backend_with_fallback, is_backend_available, prepare_backend_for_stage
+        from galangal.ai import (
+            get_backend_with_fallback,
+            is_backend_available,
+            prepare_backend_for_stage,
+        )
         from galangal.prompts.builder import PromptBuilder
         from galangal.ui.tui import TUIAdapter
 
@@ -572,19 +574,20 @@ class WorkflowEngine:
 
         output = result.output or ""
 
-        # Parse the structured JSON review output
-        decision = "APPROVE"
+        # Parse the structured JSON review output (tolerant of prose / code fences).
+        from galangal.core.utils import extract_json_object
+
+        decision: str | None = None
         review_notes = output
         issues: list[dict[str, str]] = []
 
-        try:
-            data = json.loads(output)
-            if isinstance(data, dict) and "decision" in data:
-                decision = str(data["decision"]).upper()
-                review_notes = str(data.get("review_notes", output))
-                issues = data.get("issues", [])
-        except (json.JSONDecodeError, TypeError):
-            # Fallback: scan for DECISION: line in markdown output
+        data = extract_json_object(output)
+        if isinstance(data, dict) and "decision" in data:
+            decision = str(data["decision"]).upper()
+            review_notes = str(data.get("review_notes", output))
+            issues = data.get("issues", []) or []
+        else:
+            # Fallback: scan for a DECISION: line in markdown output
             for line in output.split("\n"):
                 stripped = line.strip()
                 if stripped.upper().startswith("# DECISION:") or stripped.upper().startswith(
@@ -593,9 +596,17 @@ class WorkflowEngine:
                     decision = stripped.split(":", 1)[1].strip().upper()
                     break
 
-        # Normalize decision
+        # Fail CLOSED: the reviewer ran successfully but we couldn't read a valid
+        # verdict. Don't let an unparseable/garbled review silently rubber-stamp
+        # the stage - treat it as REQUEST_CHANGES so a human or retry looks at it.
         if decision not in ("APPROVE", "REQUEST_CHANGES"):
-            decision = "APPROVE"
+            tui_app.add_activity(
+                "Peer review output could not be parsed - treating as REQUEST_CHANGES",
+                "⚠",
+            )
+            decision = "REQUEST_CHANGES"
+            if not review_notes.strip():
+                review_notes = "Reviewer output could not be parsed into a decision."
 
         try:
             from galangal.core.task_index import TaskIndex

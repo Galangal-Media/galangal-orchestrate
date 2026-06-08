@@ -203,6 +203,55 @@ class TestExecutePeerReview:
         assert decision == "APPROVE"
         assert notes == ""
 
+    def test_unparseable_successful_output_fails_closed(self, tmp_path):
+        """A reviewer that ran but emitted garbage must NOT rubber-stamp (APPROVE)."""
+        engine = self._make_engine()
+        tui_app = MagicMock()
+
+        mock_result = StageResult.create_success(
+            "Review complete",
+            output="I looked at it and it seems mostly fine, no JSON here.",
+        )
+        mock_backend = MagicMock()
+        mock_backend.invoke.return_value = mock_result
+        mock_backend.read_only = True
+        mock_backend.name = "codex"
+
+        with (
+            patch("galangal.ai.is_backend_available", return_value=True),
+            patch("galangal.ai.get_backend_with_fallback", return_value=mock_backend),
+            patch("galangal.core.artifacts.write_artifact"),
+            patch("galangal.core.state.get_task_dir", return_value=tmp_path),
+        ):
+            decision, _ = engine.execute_peer_review(tui_app)
+
+        assert decision == "REQUEST_CHANGES"
+
+    def test_decision_in_code_fence_is_parsed(self, tmp_path):
+        """Decision wrapped in a ```json fence is still recovered (tolerant parse)."""
+        engine = self._make_engine()
+        tui_app = MagicMock()
+
+        mock_result = StageResult.create_success(
+            "Review complete",
+            output='```json\n{"decision": "APPROVE", "review_notes": "LGTM"}\n```',
+        )
+        mock_backend = MagicMock()
+        mock_backend.invoke.return_value = mock_result
+        mock_backend.read_only = True
+        mock_backend.name = "codex"
+
+        with (
+            patch("galangal.ai.is_backend_available", return_value=True),
+            patch("galangal.ai.get_backend_with_fallback", return_value=mock_backend),
+            patch("galangal.core.artifacts.write_artifact"),
+            patch("galangal.core.state.get_task_dir", return_value=tmp_path),
+        ):
+            decision, notes = engine.execute_peer_review(tui_app)
+
+        assert decision == "APPROVE"
+        assert "LGTM" in notes
+
     def test_backend_invocation_failure(self, tmp_path):
         """Gracefully returns APPROVE when backend invocation fails."""
         engine = self._make_engine()
