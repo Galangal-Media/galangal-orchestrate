@@ -802,3 +802,84 @@ class TestReviewIterationCheckin:
             )
 
         assert "REVIEW_DEV" not in review_iterations
+
+
+# =============================================================================
+# Stage-failure "provide guidance & retry"
+# =============================================================================
+
+
+class TestStageFailureGuidance:
+    """Tests for the guidance_retry option on MAX_RETRIES / ROLLBACK_BLOCKED."""
+
+    @pytest.mark.asyncio
+    async def test_apply_guidance_retry_sets_last_failure(self):
+        from galangal.core.workflow.tui_runner import _apply_guidance_retry
+
+        state = make_state(stage=Stage.DEV)
+        app = MagicMock()
+        app.multiline_input_async = AsyncMock(return_value="Prefer composition")
+
+        with patch("galangal.core.workflow.tui_runner.save_state"):
+            applied = await _apply_guidance_retry(app, state, "boom error")
+
+        assert applied is True
+        assert "Prefer composition" in state.last_failure
+        assert "boom error" in state.last_failure
+
+    @pytest.mark.asyncio
+    async def test_apply_guidance_retry_blank_returns_false(self):
+        from galangal.core.workflow.tui_runner import _apply_guidance_retry
+
+        state = make_state(stage=Stage.DEV)
+        app = MagicMock()
+        app.multiline_input_async = AsyncMock(return_value="   ")
+
+        applied = await _apply_guidance_retry(app, state, "boom")
+
+        assert applied is False
+        assert state.last_failure is None
+
+    @pytest.mark.asyncio
+    async def test_max_retries_guidance_retry_continues(self):
+        from galangal.core.workflow.tui_runner import _handle_workflow_event
+
+        state = make_state(stage=Stage.DEV)
+        engine = MagicMock()
+        engine.state = state
+        app = MagicMock()
+        app.prompt_async = AsyncMock(return_value="guidance_retry")
+        app.multiline_input_async = AsyncMock(return_value="Use a queue")
+
+        evt = event(EventType.MAX_RETRIES_EXCEEDED, stage=Stage.DEV, message="kaboom")
+
+        with patch("galangal.core.workflow.tui_runner.save_state"):
+            result = await _handle_workflow_event(app, engine, evt, GalangalConfig())
+
+        assert result == "continue"
+        assert "Use a queue" in state.last_failure
+
+    @pytest.mark.asyncio
+    async def test_rollback_blocked_guidance_retry_continues(self):
+        from galangal.core.workflow.tui_runner import _handle_workflow_event
+
+        state = make_state(stage=Stage.QA)
+        engine = MagicMock()
+        engine.state = state
+        app = MagicMock()
+        app.prompt_async = AsyncMock(return_value="guidance_retry")
+        app.multiline_input_async = AsyncMock(return_value="Check the null path")
+
+        evt = event(
+            EventType.ROLLBACK_BLOCKED,
+            stage=Stage.QA,
+            message="loop err",
+            block_reason="Too many rollbacks",
+            target_stage="DEV",
+        )
+
+        with patch("galangal.core.workflow.tui_runner.save_state"):
+            result = await _handle_workflow_event(app, engine, evt, GalangalConfig())
+
+        assert result == "continue"
+        assert "Check the null path" in state.last_failure

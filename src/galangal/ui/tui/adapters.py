@@ -74,8 +74,9 @@ PROMPT_OPTIONS: dict[PromptType, list[PromptOption]] = {
     ],
     PromptType.STAGE_FAILURE: [
         PromptOption("1", "Retry", "retry", "#b8bb26"),
-        PromptOption("2", "Fix in DEV", "fix_in_dev", "#fabd2f"),
-        PromptOption("3", "Quit", "quit", "#fb4934"),
+        PromptOption("2", "Provide guidance & retry", "guidance_retry", "#8ec07c"),
+        PromptOption("3", "Fix in DEV", "fix_in_dev", "#fabd2f"),
+        PromptOption("4", "Quit", "quit", "#fb4934"),
     ],
     PromptType.POST_COMPLETION: [
         PromptOption("1", "New Task", "new_task", "#b8bb26"),

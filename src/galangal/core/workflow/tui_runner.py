@@ -468,6 +468,12 @@ async def _handle_workflow_event(
             app.show_message("Retrying stage...", "info")
             save_state(state)
             return "continue"
+        elif choice == "guidance_retry":
+            # Retry the same stage with the user's guidance (or plain retry if blank).
+            if not await _apply_guidance_retry(app, state, event.message):
+                state.reset_attempts()
+                save_state(state)
+            return "continue"
         elif choice == "fix_in_dev":
             result_event = engine.handle_action(
                 action(ActionType.FIX_IN_DEV, error=event.message),
@@ -502,8 +508,8 @@ async def _handle_workflow_event(
             app.show_message("Retrying stage...", "info")
             save_state(state)
             return "continue"
-        elif choice == "fix_in_dev":
-            # Already handled in _handle_max_retries_exceeded
+        elif choice in ("fix_in_dev", "guidance_retry"):
+            # Already handled in _handle_max_retries_exceeded (state set + saved).
             return "continue"
         else:
             save_state(state)
@@ -1523,6 +1529,38 @@ Controls during execution:
     return await app.prompt_async(PromptType.STAGE_PREVIEW, preview)
 
 
+async def _apply_guidance_retry(
+    app: WorkflowTUIApp,
+    state: WorkflowState,
+    error_message: str,
+) -> bool:
+    """Collect free-text guidance and set up a same-stage retry with it.
+
+    The guidance is routed into the next attempt via ``last_failure`` (surfaced
+    in the prompt as "# Previous Failure"), flagged as authoritative, alongside a
+    trimmed copy of the original error. Attempts are reset so the guided retry
+    gets a fresh budget.
+
+    Returns True if guidance was applied (retry), False if the user left it blank.
+    """
+    guidance = await app.multiline_input_async(
+        "Add guidance for the retry of this stage (Ctrl+S to submit). "
+        "Leave blank to go back.",
+        "",
+    )
+    if not guidance or not guidance.strip():
+        return False
+    # reset_attempts() clears last_failure by default, so set it afterwards.
+    state.reset_attempts()
+    state.last_failure = (
+        f"User guidance (authoritative): {guidance.strip()[:1500]}\n\n"
+        f"Original error:\n{error_message[:1200]}"
+    )
+    save_state(state)
+    app.show_message("Retrying with your guidance...", "info")
+    return True
+
+
 async def _handle_max_retries_exceeded(
     app: WorkflowTUIApp,
     state: WorkflowState,
@@ -1550,6 +1588,12 @@ async def _handle_max_retries_exceeded(
 
     # Clear error panel when user makes a choice
     app.clear_error()
+
+    if choice == "guidance_retry":
+        # Retry the same stage with the user's guidance. Fall back to a plain
+        # retry if they leave the guidance blank.
+        if not await _apply_guidance_retry(app, state, error_message):
+            return "retry"
 
     if choice == "fix_in_dev":
         feedback = await app.multiline_input_async(
