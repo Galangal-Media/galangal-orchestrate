@@ -156,7 +156,11 @@ class HubClient:
             # Send registration message
             await self._send(MessageType.REGISTER, self.agent_info.to_dict())
 
-            # Start background tasks
+            # Cancel any stale background tasks from a previous connection before
+            # starting fresh ones (avoids accumulating duplicate loops on reconnect).
+            for task in (self._heartbeat_task, self._receive_task):
+                if task and not task.done():
+                    task.cancel()
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
             self._receive_task = asyncio.create_task(self._receive_loop())
 
@@ -414,8 +418,10 @@ class HubClient:
             }
             await self._websocket.send(json.dumps(message))
         except Exception:
-            # Connection lost, will reconnect
+            # Connection lost (possibly half-open: sends fail but recv blocks).
+            # Trigger reconnection here too rather than relying solely on recv.
             self._connected = False
+            self._ensure_reconnecting()
 
     async def _heartbeat_loop(self) -> None:
         """Send periodic heartbeats to hub."""
@@ -441,7 +447,7 @@ class HubClient:
             except Exception:
                 # Connection lost
                 self._connected = False
-                asyncio.create_task(self._reconnect())
+                self._ensure_reconnecting()
                 break
 
     async def _handle_message(self, data: dict[str, Any]) -> None:
@@ -456,12 +462,35 @@ class HubClient:
                 except Exception:
                     pass
 
+    def _ensure_reconnecting(self) -> None:
+        """Start the reconnect loop if it isn't already running.
+
+        Keeps a reference to the task (a bare ``create_task`` can be GC'd before it
+        runs, silently killing reconnection) and guards against spawning multiple
+        concurrent reconnect loops on repeated flaps.
+        """
+        if self._connected:
+            return
+        if self._reconnect_task and not self._reconnect_task.done():
+            return
+        try:
+            self._reconnect_task = asyncio.create_task(self._reconnect())
+        except RuntimeError:
+            # No running loop (e.g. during shutdown) - nothing to do.
+            pass
+
     async def _reconnect(self) -> None:
-        """Attempt to reconnect to hub."""
+        """Attempt to reconnect to hub with capped exponential backoff + jitter."""
+        import random
+
+        base = max(1, self.config.reconnect_interval)
+        attempt = 0
         while not self._connected:
-            await asyncio.sleep(self.config.reconnect_interval)
+            delay = min(base * (2**attempt), 60) + random.uniform(0, base)
+            await asyncio.sleep(delay)
+            attempt += 1
             if await self.connect():
-                # Resend last known state on reconnect
+                # Resend last known state so the dashboard reflects current status.
                 if self._last_state:
                     try:
                         await self._send(MessageType.STATE_UPDATE, self._last_state)

@@ -12,10 +12,8 @@ import collections
 import logging
 import os
 import shutil
-import signal
 import socket
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from galangal_hub.environments.models import (
@@ -102,7 +100,7 @@ class ProcessManager:
         else:
             raise ValueError(f"Unknown start mode: {env.start_mode}")
 
-        logger.info(f"Starting dev server for {env.name}: {' '.join(cmd)}")
+        logger.info(f"Starting dev server for {env.name}: {cmd[0]} (+{len(cmd) - 1} args)")
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -130,7 +128,7 @@ class ProcessManager:
         if env.stop_command:
             try:
                 merged_env = {**os.environ, **env.env_vars, **_vault_env_vars(env)}
-                logger.info(f"Running stop command for {env.name}: {env.stop_command}")
+                logger.info(f"Running stop command for {env.name}")
                 proc = await asyncio.create_subprocess_exec(
                     "sh", "-c", env.stop_command,
                     cwd=env.local_path,
@@ -185,7 +183,7 @@ class ProcessManager:
             "--hub-url", hub_internal_url,
         ]
 
-        logger.info(f"Starting agent for {env.name}: {' '.join(cmd)}")
+        logger.info(f"Starting agent for {env.name}: {cmd[0]} (+{len(cmd) - 1} args)")
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -228,7 +226,7 @@ class ProcessManager:
             env.local_path,
         ]
 
-        logger.info(f"Starting editor for {env.name} on port {port}: {' '.join(cmd)}")
+        logger.info(f"Starting editor for {env.name} on port {port}: {cmd[0]} (+{len(cmd) - 1} args)")
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,

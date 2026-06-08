@@ -35,12 +35,12 @@ from galangal_hub.environments.models import (
     CredentialProfile,
     CredentialProfileCreate,
     CredentialProfileUpdate,
+    EnvFileWrite,
     Environment,
     EnvironmentCreate,
     EnvironmentStatus,
     EnvironmentUpdate,
     EnvironmentWithAgent,
-    EnvFileWrite,
     GitStatus,
     Profile,
     ProfileCreate,
@@ -248,11 +248,21 @@ async def claude_account_terminal(websocket: WebSocket, account_id: str) -> None
     isolated config directory so the user can run ``claude auth login``,
     ``claude auth status``, etc. interactively via xterm.js.
     """
+    import fcntl
     import pty as pty_mod
     import select as select_mod
     import struct
-    import fcntl
     import termios
+
+    from galangal_hub.auth import verify_websocket_auth
+
+    # This forks an interactive login shell on the host - it MUST be authenticated
+    # before we accept the socket (API key for agents, session cookie for the UI).
+    if not await verify_websocket_auth(
+        dict(websocket.headers), dict(websocket.query_params), dict(websocket.cookies)
+    ):
+        await websocket.close(code=1008, reason="Authentication required")
+        return
 
     await websocket.accept()
 
@@ -558,7 +568,17 @@ async def create_environment(
         if not profile:
             raise HTTPException(status_code=400, detail="Credential profile not found")
 
-    # Allocate local path
+    # Allocate local path. The name becomes a directory under SOURCE_DIR (and is
+    # later rmtree'd on delete), so it must be a single safe path segment - reject
+    # separators / traversal so it can't escape SOURCE_DIR.
+    if (
+        not data.name
+        or "/" in data.name
+        or "\\" in data.name
+        or data.name in (".", "..")
+        or data.name != Path(data.name).name
+    ):
+        raise HTTPException(status_code=400, detail="Invalid environment name")
     local_path = str(Path(SOURCE_DIR) / data.name)
 
     env = await _storage().create_environment(data, local_path)
@@ -1315,9 +1335,9 @@ async def update_galangal_config(env_id: str, data: ConfigUpdateRequest) -> dict
 async def _notify_env_status(env_id: str, status: str) -> None:
     """Send environment status update to connected dashboards."""
     try:
-        from galangal_hub.server import _dashboard_connections
-
         import json
+
+        from galangal_hub.server import _dashboard_connections
 
         message = json.dumps({
             "type": "env_status",

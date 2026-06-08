@@ -8,9 +8,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Allowed remote URL schemes for clone. Excludes file:// and the ext:: transport
+# helper (which can execute commands) and local paths (which can exfiltrate files).
+_ALLOWED_URL_RE = re.compile(r"^(https?|git|ssh)://", re.IGNORECASE)
+# git's scp-like syntax: user@host:path
+_SCP_LIKE_RE = re.compile(r"^[\w.+-]+@[\w.-]+:")
+# A conservative branch/ref allowlist (no leading '-', no '..', no whitespace).
+_BRANCH_RE = re.compile(r"^[\w][\w./-]*$")
 
 
 class GitError(Exception):
@@ -21,13 +30,41 @@ class GitError(Exception):
         self.stderr = stderr
 
 
+def _validate_repo_url(url: str) -> str:
+    """Reject local/ext/option-injection URLs; allow only network git schemes."""
+    if not url or url.startswith("-"):
+        raise GitError(f"Invalid repository URL: {url!r}")
+    if _ALLOWED_URL_RE.match(url) or _SCP_LIKE_RE.match(url):
+        return url
+    raise GitError(
+        f"Refusing to clone {url!r}: only http(s)/git/ssh URLs are allowed "
+        "(file://, ext::, and local paths are blocked)."
+    )
+
+
+def _validate_branch(branch: str) -> str:
+    """Reject branch names that could be interpreted as git options or escapes."""
+    if not branch or not _BRANCH_RE.match(branch) or ".." in branch:
+        raise GitError(f"Invalid branch name: {branch!r}")
+    return branch
+
+
 async def _run_git(
     *args: str,
     cwd: str | Path | None = None,
     timeout: float = 300,
 ) -> str:
-    """Run a git command and return stdout."""
-    cmd = ["git"] + list(args)
+    """Run a git command and return stdout.
+
+    Dangerous transports are disabled globally (defense in depth): the ext::
+    helper can run arbitrary commands and file:// can read local files.
+    """
+    cmd = [
+        "git",
+        "-c", "protocol.ext.allow=never",
+        "-c", "protocol.file.allow=never",
+        *args,
+    ]
     logger.debug(f"Running: {' '.join(cmd)} in {cwd or '.'}")
 
     proc = await asyncio.create_subprocess_exec(
@@ -67,10 +104,14 @@ async def clone_repo(
 
     Returns the stdout output of the clone command.
     """
+    _validate_repo_url(repo_url)
+    _validate_branch(branch)
     args = ["clone"]
     if shallow:
         args.extend(["--depth", "1"])
-    args.extend(["--branch", branch, repo_url, str(local_path)])
+    # "--" separates options from positional args so a crafted URL/branch can't
+    # be reinterpreted as a git option.
+    args.extend(["--branch", branch, "--", repo_url, str(local_path)])
 
     return await _run_git(*args, timeout=600)
 
@@ -107,6 +148,7 @@ async def reset_to_remote(local_path: str | Path) -> str:
 
 async def checkout_branch(local_path: str | Path, branch: str) -> str:
     """Switch to a different branch."""
+    _validate_branch(branch)
     # Fetch first to ensure we have the branch
     await _run_git("fetch", "origin", branch, cwd=local_path)
     return await _run_git("checkout", branch, cwd=local_path)

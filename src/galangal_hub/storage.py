@@ -9,6 +9,7 @@ Stores:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,10 @@ class HubStorage:
     def __init__(self, db_path: Path | str = "hub.db"):
         self.db_path = Path(db_path)
         self._db: aiosqlite.Connection | None = None
+        # Serializes multi-statement writes so another coroutine's commit() on the
+        # shared connection can't land between this op's statements (the single
+        # shared aiosqlite connection commits ALL pending work, not just ours).
+        self._write_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Initialize the database and create tables."""
@@ -319,29 +324,30 @@ class HubStorage:
 
         now = datetime.now(timezone.utc).isoformat()
 
-        if replace:
-            await self._db.execute(
-                "DELETE FROM task_artifacts WHERE agent_id = ? AND task_name = ?",
-                (agent_id, task_name),
-            )
+        async with self._write_lock:
+            if replace:
+                await self._db.execute(
+                    "DELETE FROM task_artifacts WHERE agent_id = ? AND task_name = ?",
+                    (agent_id, task_name),
+                )
 
-        if artifacts:
-            rows = [
-                (agent_id, task_name, name, content, now)
-                for name, content in artifacts.items()
-            ]
-            await self._db.executemany(
-                """
-                INSERT INTO task_artifacts (agent_id, task_name, name, content, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(agent_id, task_name, name) DO UPDATE SET
-                    content = excluded.content,
-                    updated_at = excluded.updated_at
-                """,
-                rows,
-            )
+            if artifacts:
+                rows = [
+                    (agent_id, task_name, name, content, now)
+                    for name, content in artifacts.items()
+                ]
+                await self._db.executemany(
+                    """
+                    INSERT INTO task_artifacts (agent_id, task_name, name, content, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(agent_id, task_name, name) DO UPDATE SET
+                        content = excluded.content,
+                        updated_at = excluded.updated_at
+                    """,
+                    rows,
+                )
 
-        await self._db.commit()
+            await self._db.commit()
 
     async def get_task_artifacts(self, *, agent_id: str, task_name: str) -> dict[str, str]:
         """Get persisted artifacts for an agent/task pair."""

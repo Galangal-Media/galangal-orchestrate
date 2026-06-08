@@ -4,6 +4,46 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.52.0 — Hub security hardening
+
+**Security release for the Galangal Hub.** A default-config hub was an
+unauthenticated, internet-exposed control plane with remote-code-execution paths.
+
+> ⚠️ **Behavior change:** `galangal-hub serve` now binds `127.0.0.1` by default and
+> **refuses to bind a non-loopback interface unless authentication is configured**
+> (`HUB_API_KEY` and/or `HUB_USERNAME`+`HUB_PASSWORD`), or you set
+> `HUB_ALLOW_INSECURE=1` (only behind a trusted proxy/firewall/Tailscale).
+
+Critical:
+- **API auth is now actually enforced.** Every `/api` router (actions, tasks,
+  agents, environments) requires auth — accepting an API key (agents) or a session
+  cookie (dashboard). Previously the auth helpers existed but were never wired up.
+- **The interactive terminal WebSocket** (`/ws/claude-accounts/{id}/terminal`, which
+  forks a host shell) now authenticates before accepting.
+- **Session tokens are HMAC-signed with an expiry** and verified; the old check
+  accepted any 64-char string. Secret is stable via `HUB_SECRET_KEY`/`HUB_SESSION_SECRET`.
+- **The dashboard WebSocket** now authenticates (session cookie / key) before accept.
+
+High:
+- All secret comparisons use `hmac.compare_digest`; the query-param API-key fallback
+  (which leaks into logs) was removed; dashboard passwords use salted scrypt.
+- Git clone/checkout validate the URL (block `file://`/`ext::`/local paths → SSRF /
+  file exfiltration) and branch name (block option injection), with `--` separators
+  and `protocol.ext/file` disabled.
+- The auto-generated credential key is written `0600` with a warning; arbitrary
+  `HUB_SECRET_KEY` is stretched with scrypt instead of a single SHA-256.
+
+Medium:
+- WebSocket message-size and dashboard-connection caps; the dashboard connection list
+  is now lock-guarded; the prompt-context broadcast no longer assumes a dict.
+- Secret-bearing process commands are no longer logged in full; credential redaction
+  never shows a prefix and only reveals the last 4 chars of long values.
+- Multi-statement artifact writes in hub storage are serialized with a lock.
+- The hub client keeps a reference to its reconnect task (was GC-able), uses capped
+  exponential backoff + jitter, cancels stale loops on reconnect, and reconnects on
+  send failure (not just receive).
+- Environment names are validated to a safe path segment (no traversal into `rmtree`).
+
 ## 0.51.0
 
 Artifact and git data-integrity hardening (follow-up to the disk↔DB fix in 0.50):

@@ -12,7 +12,6 @@ import hashlib
 import json
 import logging
 import os
-import secrets
 from pathlib import Path
 
 from cryptography.fernet import Fernet
@@ -30,7 +29,10 @@ def _get_fernet() -> Fernet:
 
     key = os.environ.get("HUB_SECRET_KEY")
     if not key:
-        # Auto-generate and persist alongside the database in /data/
+        # Auto-generate and persist alongside the database. This is a fallback:
+        # the key sits next to the ciphertext, so at-rest encryption only protects
+        # against casual access. Set HUB_SECRET_KEY (kept outside the data dir /
+        # in a secrets manager) for real protection.
         db_path = os.environ.get("HUB_DB_PATH", "/data/hub.db")
         data_dir = Path(db_path).parent
         secret_path = data_dir / ".hub_secret"
@@ -39,13 +41,25 @@ def _get_fernet() -> Fernet:
         else:
             key = Fernet.generate_key().decode()
             secret_path.parent.mkdir(parents=True, exist_ok=True)
+            # Write 0600 so other users on the host can't read the key.
+            secret_path.touch(mode=0o600, exist_ok=True)
             secret_path.write_text(key)
-            logger.info(f"Generated new encryption key at {secret_path}")
+            try:
+                secret_path.chmod(0o600)
+            except OSError:
+                pass
+            logger.warning(
+                "HUB_SECRET_KEY not set; generated a key at %s (stored next to the "
+                "database). Set HUB_SECRET_KEY for real at-rest protection.",
+                secret_path,
+            )
     else:
-        # If the key isn't valid Fernet format, derive one from it
+        # If the key isn't valid Fernet format, derive one from the arbitrary
+        # secret with a slow KDF (scrypt) rather than a single SHA-256 round.
         if len(key) != 44 or not key.endswith("="):
-            # Derive a valid Fernet key from the arbitrary secret
-            derived = hashlib.sha256(key.encode()).digest()
+            derived = hashlib.scrypt(
+                key.encode(), salt=b"galangal-hub-credkey-v1", n=16384, r=8, p=1, dklen=32
+            )
             key = base64.urlsafe_b64encode(derived).decode()
 
     _fernet = Fernet(key.encode() if isinstance(key, str) else key)
@@ -70,12 +84,9 @@ def redact_credentials(credentials: dict[str, str]) -> dict[str, str]:
     """Return a copy of credentials with values redacted for display."""
     redacted = {}
     for k, v in credentials.items():
-        if len(v) > 8:
-            redacted[k] = v[:4] + "..." + v[-4:]
-        elif len(v) > 3:
-            redacted[k] = v[:2] + "..." + v[-1:]
-        else:
-            redacted[k] = "***"
+        # Only ever reveal the last 4 chars, and only for values long enough that
+        # those 4 chars are a small fraction of the secret. Never show a prefix.
+        redacted[k] = ("..." + v[-4:]) if len(v) >= 12 else "***"
     return redacted
 
 

@@ -9,6 +9,7 @@ Provides:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -58,51 +59,67 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await storage.close()
 
 
-# Dashboard WebSocket connections for live updates
+# Limits to bound resource use from clients.
+MAX_WS_MESSAGE_BYTES = 1_000_000  # 1 MB per inbound frame
+MAX_DASHBOARD_CONNECTIONS = 100
+
+# Dashboard WebSocket connections for live updates, guarded by a lock so concurrent
+# coroutines (broadcasts + connect/disconnect) don't mutate the list mid-iteration.
 _dashboard_connections: list[WebSocket] = []
+_dashboard_lock = asyncio.Lock()
 
 
-async def notify_dashboards() -> None:
-    """Send refresh notification to all connected dashboards."""
-    disconnected = []
-    for ws in _dashboard_connections:
-        try:
-            await ws.send_text('{"type": "refresh"}')
-        except Exception:
-            disconnected.append(ws)
+async def _add_dashboard_connection(ws: WebSocket) -> bool:
+    async with _dashboard_lock:
+        if len(_dashboard_connections) >= MAX_DASHBOARD_CONNECTIONS:
+            return False
+        _dashboard_connections.append(ws)
+        return True
 
-    # Clean up disconnected
-    for ws in disconnected:
+
+async def _remove_dashboard_connection(ws: WebSocket) -> None:
+    async with _dashboard_lock:
         if ws in _dashboard_connections:
             _dashboard_connections.remove(ws)
 
 
-async def notify_dashboards_output(agent_id: str, line: str, line_type: str) -> None:
-    """Send output line to all connected dashboards for live streaming."""
-    message = json.dumps({
-        "type": "output",
-        "agent_id": agent_id,
-        "line": line,
-        "line_type": line_type,
-    })
-
+async def _broadcast_to_dashboards(message: str) -> None:
+    """Send a message to every dashboard, dropping any that fail (lock-safe)."""
+    async with _dashboard_lock:
+        targets = list(_dashboard_connections)
     disconnected = []
-    for ws in _dashboard_connections:
+    for ws in targets:
         try:
             await ws.send_text(message)
         except Exception:
             disconnected.append(ws)
+    if disconnected:
+        async with _dashboard_lock:
+            for ws in disconnected:
+                if ws in _dashboard_connections:
+                    _dashboard_connections.remove(ws)
 
-    # Clean up disconnected
-    for ws in disconnected:
-        if ws in _dashboard_connections:
-            _dashboard_connections.remove(ws)
+
+async def notify_dashboards() -> None:
+    """Send refresh notification to all connected dashboards."""
+    await _broadcast_to_dashboards('{"type": "refresh"}')
+
+
+async def notify_dashboards_output(agent_id: str, line: str, line_type: str) -> None:
+    """Send output line to all connected dashboards for live streaming."""
+    await _broadcast_to_dashboards(json.dumps({
+        "type": "output",
+        "agent_id": agent_id,
+        "line": line,
+        "line_type": line_type,
+    }))
 
 
 async def notify_dashboards_prompt(agent_id: str, agent_name: str, prompt: PromptData | None) -> None:
     """Send prompt notification to all connected dashboards."""
     if prompt:
-        # Include full prompt data for the modal to use
+        # context may be any JSON value from the agent - don't assume dict.
+        context = prompt.context if isinstance(prompt.context, dict) else {}
         prompt_dict = {
             "prompt_type": prompt.prompt_type,
             "message": prompt.message,
@@ -118,7 +135,7 @@ async def notify_dashboards_prompt(agent_id: str, agent_name: str, prompt: Promp
             "type": "prompt",
             "agent_id": agent_id,
             "agent_name": agent_name,
-            "task_name": prompt.context.get("task_name", "_"),
+            "task_name": context.get("task_name", "_"),
             "prompt": prompt_dict,
             # Keep these for backwards compatibility with toast
             "message": prompt.message[:200],
@@ -130,39 +147,42 @@ async def notify_dashboards_prompt(agent_id: str, agent_name: str, prompt: Promp
             "agent_id": agent_id,
         })
 
-    disconnected = []
-    for ws in _dashboard_connections:
-        try:
-            await ws.send_text(message)
-        except Exception:
-            disconnected.append(ws)
-
-    # Clean up disconnected
-    for ws in disconnected:
-        if ws in _dashboard_connections:
-            _dashboard_connections.remove(ws)
+    await _broadcast_to_dashboards(message)
 
 
 async def dashboard_websocket(websocket: WebSocket) -> None:
     """
     WebSocket endpoint for dashboard live updates.
 
-    This endpoint does NOT require API key authentication - it's for
-    browser dashboards that use session cookies for auth.
+    Authenticated via the session cookie (browser) or API key, the same as the
+    REST API. Streams live agent output/state, so it must not be open to all.
     """
+    if not await verify_websocket_auth(
+        dict(websocket.headers), dict(websocket.query_params), dict(websocket.cookies)
+    ):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        logger.warning("Dashboard WebSocket rejected: not authenticated")
+        return
+
     await websocket.accept()
-    _dashboard_connections.append(websocket)
+    if not await _add_dashboard_connection(websocket):
+        await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
+        logger.warning("Dashboard WebSocket rejected: connection cap reached")
+        return
     logger.info("Dashboard WebSocket connected")
 
     try:
         while True:
-            # Keep connection alive, wait for messages (or disconnect)
-            await websocket.receive_text()
+            # Keep connection alive, wait for messages (or disconnect). Cap frame
+            # size to avoid an unbounded-memory DoS from a misbehaving client.
+            msg = await websocket.receive_text()
+            if len(msg) > MAX_WS_MESSAGE_BYTES:
+                await websocket.close(code=status.WS_1009_MESSAGE_TOO_BIG)
+                break
     except WebSocketDisconnect:
         pass
     finally:
-        if websocket in _dashboard_connections:
-            _dashboard_connections.remove(websocket)
+        await _remove_dashboard_connection(websocket)
         logger.info("Dashboard WebSocket disconnected")
 
 
@@ -181,7 +201,7 @@ async def agent_websocket(websocket: WebSocket) -> None:
     # Verify authentication before accepting connection
     headers = dict(websocket.headers)
     query_params = dict(websocket.query_params)
-    if not await verify_websocket_auth(headers, query_params):
+    if not await verify_websocket_auth(headers, query_params, dict(websocket.cookies)):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         logger.warning("WebSocket connection rejected: invalid or missing API key")
         return
@@ -195,6 +215,9 @@ async def agent_websocket(websocket: WebSocket) -> None:
     try:
         while True:
             data = await websocket.receive_text()
+            if len(data) > MAX_WS_MESSAGE_BYTES:
+                await websocket.close(code=status.WS_1009_MESSAGE_TOO_BIG)
+                break
 
             # Parse JSON with error handling
             try:
@@ -497,17 +520,22 @@ def create_app(
         lifespan=lifespan,
     )
 
-    # Register API routes
-    from galangal_hub.api import actions, agents, tasks
+    # Register API routes. Every /api router requires auth (API key for agents,
+    # session cookie for the dashboard SPA); open only when no auth is configured.
+    from fastapi import Depends
 
-    app.include_router(agents.router)
-    app.include_router(tasks.router)
-    app.include_router(actions.router)
+    from galangal_hub.api import actions, agents, tasks
+    from galangal_hub.auth import require_api_or_session_auth
+
+    api_auth = [Depends(require_api_or_session_auth)]
+    app.include_router(agents.router, dependencies=api_auth)
+    app.include_router(tasks.router, dependencies=api_auth)
+    app.include_router(actions.router, dependencies=api_auth)
 
     # Environment routes
     from galangal_hub.environments.routes import router as env_router
 
-    app.include_router(env_router)
+    app.include_router(env_router, dependencies=api_auth)
 
     # Mount React SPA
     from galangal_hub.spa import get_spa_router, mount_spa_static

@@ -6,7 +6,7 @@ Usage:
     galangal-hub init [--force]
 
 Environment Variables:
-    HUB_HOST        Host to bind to (default: 0.0.0.0)
+    HUB_HOST        Host to bind to (default: 127.0.0.1)
     HUB_PORT        Port to listen on (default: 8080)
     HUB_DB_PATH     SQLite database path (default: /data/hub.db)
     HUB_API_KEY     API key for agent authentication (optional)
@@ -30,7 +30,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print("Error: uvicorn not installed. Install with: pip install galangal-orchestrate[hub]")
         return 1
 
-    from galangal_hub.auth import set_api_key, set_dashboard_credentials
+    from galangal_hub.auth import (
+        is_any_auth_enabled,
+        set_api_key,
+        set_dashboard_credentials,
+        set_session_secret,
+    )
     from galangal_hub.server import create_app
 
     # Read configuration from environment variables (with CLI args as fallback)
@@ -40,6 +45,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     api_key = os.environ.get("HUB_API_KEY")
     username = os.environ.get("HUB_USERNAME")
     password = os.environ.get("HUB_PASSWORD")
+
+    # Stable session-signing secret so dashboard logins survive restarts.
+    set_session_secret(os.environ.get("HUB_SECRET_KEY") or os.environ.get("HUB_SESSION_SECRET"))
 
     # Set API key for agent authentication
     if api_key:
@@ -54,6 +62,19 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print(f"Dashboard authentication enabled (username: {username})")
     else:
         print("Dashboard authentication disabled (set HUB_USERNAME and HUB_PASSWORD to enable)")
+
+    # Refuse to expose an unauthenticated hub on a non-loopback interface: its API
+    # can provision environments that run arbitrary commands on this host, so an
+    # open bind is effectively remote code execution. Operators who front the hub
+    # with a trusted proxy/firewall/Tailscale can override with HUB_ALLOW_INSECURE=1.
+    loopback = host in {"127.0.0.1", "localhost", "::1"}
+    if not loopback and not is_any_auth_enabled() and os.environ.get("HUB_ALLOW_INSECURE") != "1":
+        print(f"Error: refusing to bind {host} with no authentication configured.")
+        print("  The hub API can run commands on this host; an open bind is unsafe.")
+        print("  Fix one of: bind 127.0.0.1 (default), set HUB_API_KEY, set")
+        print("  HUB_USERNAME + HUB_PASSWORD, or set HUB_ALLOW_INSECURE=1 to override")
+        print("  (only behind a trusted proxy / firewall / Tailscale).")
+        return 1
 
     # Create app with configuration
     app = create_app(db_path=db_path)
@@ -90,7 +111,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 # Galangal Hub Configuration
 
 # Server settings
-host: "0.0.0.0"
+host: "127.0.0.1"  # use 0.0.0.0 only with auth configured
 port: 8080
 
 # Database
@@ -137,8 +158,8 @@ def create_parser() -> argparse.ArgumentParser:
     )
     serve_parser.add_argument(
         "--host",
-        default="0.0.0.0",
-        help="Host to bind to (default: 0.0.0.0)",
+        default="127.0.0.1",
+        help="Host to bind to (default: 127.0.0.1; 0.0.0.0 requires auth)",
     )
     serve_parser.add_argument(
         "--db",

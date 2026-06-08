@@ -2,110 +2,172 @@
 Authentication for Galangal Hub.
 
 Supports:
-- API key authentication (for agents)
-- Username/password authentication (for dashboard)
-- Tailscale authentication (checking peer identity)
+- API key authentication (for agents and API clients)
+- Username/password authentication (for the dashboard, via signed session cookies)
+- Tailscale authentication (trusting peer identity injected by Tailscale)
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
+import time
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-# Optional API key for agent authentication
+# Optional API key for agent/API authentication
 _api_key: str | None = None
 
-# Dashboard credentials
+# Dashboard credentials (password stored as "salt$scrypt-hash")
 _username: str | None = None
 _password_hash: str | None = None
 
-# Session secret for signing cookies
+# Secret used to sign session cookies. Random per-process by default; set a stable
+# value (HUB_SECRET_KEY / HUB_SESSION_SECRET) to keep sessions valid across restarts.
 _session_secret: str = secrets.token_hex(32)
+
+# Session lifetime
+SESSION_TTL_SECONDS = 7 * 24 * 3600
 
 security = HTTPBearer(auto_error=False)
 
-# Session cookie name
 SESSION_COOKIE = "galangal_session"
 
 
+# ---------------------------------------------------------------------------
+# Password hashing (salted scrypt; stdlib, no extra deps)
+# ---------------------------------------------------------------------------
+
+
+def _scrypt(password: str, salt: bytes) -> str:
+    derived = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1, dklen=32)
+    return derived.hex()
+
+
 def _hash_password(password: str) -> str:
-    """Hash a password using SHA-256."""
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hash a password with a random salt. Returns 'salt_hex$hash_hex'."""
+    salt = secrets.token_bytes(16)
+    return f"{salt.hex()}${_scrypt(password, salt)}"
+
+
+def _verify_password(password: str, stored: str) -> bool:
+    """Constant-time verify a password against a stored 'salt$hash'."""
+    try:
+        salt_hex, expected = stored.split("$", 1)
+        salt = bytes.fromhex(salt_hex)
+    except (ValueError, TypeError):
+        return False
+    return hmac.compare_digest(_scrypt(password, salt), expected)
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 
 
 def set_api_key(key: str | None) -> None:
-    """Set the API key for agent authentication."""
     global _api_key
-    _api_key = key
+    _api_key = key or None
 
 
 def get_api_key() -> str | None:
-    """Get the configured API key."""
     return _api_key
 
 
+def is_api_auth_enabled() -> bool:
+    return _api_key is not None
+
+
+def set_session_secret(secret: str | None) -> None:
+    """Set a stable session-signing secret (so cookies survive restarts)."""
+    global _session_secret
+    if secret:
+        _session_secret = secret
+
+
 def set_dashboard_credentials(username: str | None, password: str | None) -> None:
-    """Set the dashboard username and password."""
     global _username, _password_hash
-    _username = username
-    if password:
-        _password_hash = _hash_password(password)
-    else:
-        _password_hash = None
+    _username = username or None
+    _password_hash = _hash_password(password) if (username and password) else None
 
 
 def is_dashboard_auth_enabled() -> bool:
-    """Check if dashboard authentication is enabled."""
     return _username is not None and _password_hash is not None
 
 
+def is_any_auth_enabled() -> bool:
+    return is_api_auth_enabled() or is_dashboard_auth_enabled()
+
+
 def verify_dashboard_credentials(username: str, password: str) -> bool:
-    """Verify dashboard username and password."""
+    """Verify dashboard username/password (constant-time)."""
     if not _username or not _password_hash:
-        return True  # No auth configured
-    return username == _username and _hash_password(password) == _password_hash
+        return False
+    user_ok = hmac.compare_digest(username, _username)
+    pass_ok = _verify_password(password, _password_hash)
+    return user_ok and pass_ok
+
+
+# ---------------------------------------------------------------------------
+# Signed session tokens
+# ---------------------------------------------------------------------------
+
+
+def _sign(msg: str) -> str:
+    return hmac.new(_session_secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
 
 def create_session_token() -> str:
-    """Create a new session token."""
-    return hashlib.sha256(f"{_session_secret}:{secrets.token_hex(16)}".encode()).hexdigest()
+    """Create an HMAC-signed session token with an expiry: 'expiry.nonce.sig'."""
+    expiry = int(time.time()) + SESSION_TTL_SECONDS
+    msg = f"{expiry}.{secrets.token_hex(16)}"
+    return f"{msg}.{_sign(msg)}"
 
 
 def verify_session_token(token: str | None) -> bool:
-    """Verify a session token is valid."""
+    """Verify a session token's signature and expiry (constant-time)."""
     if not token:
         return False
-    # For simplicity, we just check if token exists and is non-empty
-    # The token is signed by being generated with the secret
-    return len(token) == 64  # SHA-256 hex length
+    try:
+        msg, sig = token.rsplit(".", 1)
+        expiry_str, _nonce = msg.split(".", 1)
+        expiry = int(expiry_str)
+    except (ValueError, AttributeError):
+        return False
+    if not hmac.compare_digest(sig, _sign(msg)):
+        return False
+    return time.time() < expiry
 
 
-async def require_dashboard_auth(request: Request) -> bool:
-    """
-    Dependency that requires dashboard authentication.
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
 
-    Redirects to login if not authenticated.
-    """
-    # If auth not enabled, allow all
-    if not is_dashboard_auth_enabled():
+
+def _api_key_matches(request: Request, credentials: HTTPAuthorizationCredentials | None) -> bool:
+    if not _api_key:
+        return False
+    if credentials and hmac.compare_digest(credentials.credentials, _api_key):
         return True
-
-    # Check session cookie
-    session_token = request.cookies.get(SESSION_COOKIE)
-    if session_token and verify_session_token(session_token):
+    x_api_key = request.headers.get("x-api-key")
+    if x_api_key and hmac.compare_digest(x_api_key, _api_key):
         return True
-
-    # Not authenticated - this will be caught by the route handler
     return False
 
 
+async def require_dashboard_auth(request: Request) -> bool:
+    """Dependency: require a valid dashboard session (when dashboard auth is on)."""
+    if not is_dashboard_auth_enabled():
+        return True
+    token = request.cookies.get(SESSION_COOKIE)
+    return bool(token and verify_session_token(token))
+
+
 def get_login_redirect() -> RedirectResponse:
-    """Get a redirect response to the login page."""
     return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
 
@@ -113,28 +175,13 @@ async def verify_api_key(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
 ) -> bool:
-    """
-    Verify the API key from the request.
-
-    Returns True if:
-    - No API key is configured (authentication disabled)
-    - Valid API key is provided in Authorization header
-    - Request is from Tailscale network (when enabled)
-    """
-    # If no API key configured, allow all
+    """Dependency for API-key routes (agents/API clients). 401 on failure."""
     if not _api_key:
         return True
-
-    # Check Authorization header
-    if credentials and credentials.credentials == _api_key:
+    if _api_key_matches(request, credentials):
         return True
-
-    # Check Tailscale headers (if behind Tailscale)
-    tailscale_user = request.headers.get("Tailscale-User-Login")
-    if tailscale_user:
-        # Tailscale authentication - user is authenticated via Tailscale
+    if request.headers.get("Tailscale-User-Login"):
         return True
-
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or missing API key",
@@ -142,43 +189,56 @@ async def verify_api_key(
     )
 
 
+async def require_api_or_session_auth(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+) -> bool:
+    """Dependency for /api routes used by BOTH agents (API key) and the dashboard
+    SPA (session cookie). Allows either; 401 if neither and auth is configured."""
+    # Fully open only when no auth of any kind is configured.
+    if not is_any_auth_enabled():
+        return True
+    if _api_key_matches(request, credentials):
+        return True
+    if is_dashboard_auth_enabled():
+        token = request.cookies.get(SESSION_COOKIE)
+        if token and verify_session_token(token):
+            return True
+    if request.headers.get("Tailscale-User-Login"):
+        return True
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 async def verify_websocket_auth(
     websocket_headers: dict[str, str],
     query_params: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
 ) -> bool:
-    """
-    Verify authentication for WebSocket connections.
+    """Verify auth for a WebSocket. Accepts API key (header) or a session cookie.
 
-    Args:
-        websocket_headers: Headers from the WebSocket connection.
-        query_params: Query parameters from the WebSocket URL.
-
-    Returns:
-        True if authenticated, False otherwise.
+    The query-parameter API-key fallback was removed: query strings leak into
+    access logs and browser history.
     """
-    # If no API key configured, allow all
-    if not _api_key:
+    if not is_any_auth_enabled():
         return True
 
-    # Check Authorization header (standard)
-    auth_header = websocket_headers.get("authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-        if token == _api_key:
+    if _api_key:
+        auth_header = websocket_headers.get("authorization", "")
+        if auth_header.startswith("Bearer ") and hmac.compare_digest(auth_header[7:], _api_key):
+            return True
+        x_api_key = websocket_headers.get("x-api-key", "")
+        if x_api_key and hmac.compare_digest(x_api_key, _api_key):
             return True
 
-    # Check X-API-Key header (alternative, less likely to be stripped by proxies)
-    x_api_key = websocket_headers.get("x-api-key", "")
-    if x_api_key == _api_key:
-        return True
-
-    # Check query parameter (fallback for proxies that strip headers)
-    if query_params:
-        query_key = query_params.get("api_key", "")
-        if query_key == _api_key:
+    if is_dashboard_auth_enabled() and cookies:
+        token = cookies.get(SESSION_COOKIE)
+        if token and verify_session_token(token):
             return True
 
-    # Check Tailscale headers
     if websocket_headers.get("tailscale-user-login"):
         return True
 
