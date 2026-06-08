@@ -4,6 +4,31 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.51.0
+
+Artifact and git data-integrity hardening (follow-up to the disk↔DB fix in 0.50):
+
+- **Name-reuse bleed:** deleting a task now clears its artifacts (`is_present=0`),
+  so a new task reusing the name no longer inherits the old task's SPEC/PLAN.
+- **Deleted-artifact resurrection:** `record_artifact_delete` now always removes
+  the on-disk copy, so the next ingest can't flip a "deleted" artifact back to present.
+- **Done-task divergence:** ingest and rehydrate now resolve the task dir the same
+  way as mirroring (done dir takes precedence), so re-entering a finalized task
+  doesn't diverge.
+- **Encoding:** all artifact reads/writes in the task index are UTF-8 with
+  `errors="replace"`; a non-UTF-8 file no longer aborts the whole post-stage ingest.
+- **Squash safety:** `squash_to_base` now verifies the base is an ancestor of HEAD
+  before the soft reset (a stale base after a rebase/branch-switch would otherwise
+  collapse unrelated commits), and `_squash_stage_commits` actually falls back to a
+  plain commit instead of leaving work uncommitted.
+- **Finalize:** a failed commit/squash now aborts and restores the task (even in
+  TUI/headless/force mode) instead of pushing and opening a PR against an
+  empty/wrong branch.
+- **Archive restore:** path-traversal-safe tar extraction and a guard against
+  clobbering an existing task in `done/`.
+- **WIP commits:** per-stage commit tracking is deduped by stage, so REVIEW→DEV
+  iterations no longer pile up duplicate entries.
+
 ## 0.50.0
 
 - **Artifact rehydration (disk↔DB consistency):** before each stage runs, the

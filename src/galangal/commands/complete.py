@@ -269,7 +269,23 @@ Stages: {', '.join(stages)}"""
     success = squash_to_base(state.base_commit_sha, commit_msg, cwd=None)
     if success:
         return True, f"Squashed {len(stages)} stage commits"
-    return False, "Squash failed - try manual commit"
+
+    # Squash couldn't run (e.g. base_sha is no longer an ancestor after a rebase,
+    # or the task started off a different branch). The work is NOT lost - it's
+    # still in the per-stage WIP commits. Capture any uncommitted changes too,
+    # then accept the branch as-is so we never strip work or report a false
+    # failure. Only fail if the branch genuinely has nothing on top of base.
+    from galangal.core.git_utils import get_current_head, has_changes_to_commit
+
+    if has_changes_to_commit():
+        code, _, _ = run_command(["git", "add", "-A"])
+        if code == 0:
+            run_command(["git", "commit", "-m", commit_msg])
+
+    head = get_current_head()
+    if head and head != state.base_commit_sha:
+        return True, "Could not squash (base diverged); kept stage commits + pending changes"
+    return False, "Squash failed and no commits found on top of base - commit manually"
 
 
 def commit_changes(
@@ -393,22 +409,27 @@ def finalize_task(
         report(msg, "success")
     else:
         report(msg, "warning")
+        # Commit/squash failed: there is nothing valid on top of base, so pushing
+        # a branch and opening a PR would be empty/wrong. Abort and restore the
+        # task. In interactive mode the user may explicitly override; in TUI/
+        # headless (callback) or force mode we abort rather than silently
+        # proceeding to push/PR/checkout.
+        proceed = False
         if not force and not progress_callback:
-            # Only prompt in non-TUI mode
-            confirm = Prompt.ask("Continue anyway? [y/N]", default="n").strip().lower()
-            if confirm != "y":
-                shutil.move(str(dest), str(task_dir))
-                from galangal.core.tasks import set_active_task
+            proceed = Prompt.ask("Continue anyway? [y/N]", default="n").strip().lower() == "y"
+        if not proceed:
+            shutil.move(str(dest), str(task_dir))
+            from galangal.core.tasks import set_active_task
 
-                set_active_task(task_name)
-                try:
-                    from galangal.core.task_index import TaskIndex
+            set_active_task(task_name)
+            try:
+                from galangal.core.task_index import TaskIndex
 
-                    TaskIndex().mark_task_status(task_name=task_name, status="active", location=task_dir)
-                except Exception:
-                    pass
-                report("Aborted. Task restored to original location.", "warning")
-                return False, "Aborted by user"
+                TaskIndex().mark_task_status(task_name=task_name, status="active", location=task_dir)
+            except Exception:
+                pass
+            report("Aborted: commit/squash failed; task restored to original location.", "warning")
+            return False, "Commit/squash failed"
 
     # 3. Create PR
     report("Creating pull request...")

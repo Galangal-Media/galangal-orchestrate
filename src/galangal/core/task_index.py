@@ -224,12 +224,21 @@ class TaskIndex:
         """Return whether this artifact should also exist as a task file."""
         return name in MIRRORED_ARTIFACT_FILES
 
-    def _resolve_mirror_path(self, task_name: str, name: str) -> Path:
-        """Resolve preferred mirror path for an artifact."""
+    def _resolve_task_dir(self, task_name: str) -> Path:
+        """Resolve the task's working directory (the done dir takes precedence).
+
+        A done/finalized task lives under ``get_done_dir()/<task>``; only fall back
+        to the active ``get_tasks_dir()/<task>`` when there's no done dir. Ingest
+        and rehydrate must use this so a re-entered done task doesn't diverge.
+        """
         done_dir = get_done_dir() / task_name
         if done_dir.exists():
-            return done_dir / name
-        return (get_tasks_dir() / task_name) / name
+            return done_dir
+        return get_tasks_dir() / task_name
+
+    def _resolve_mirror_path(self, task_name: str, name: str) -> Path:
+        """Resolve preferred mirror path for an artifact."""
+        return self._resolve_task_dir(task_name) / name
 
     def _write_mirror_artifact_file(self, *, task_name: str, name: str, content: str) -> bool:
         """Write mirrored artifact content to filesystem."""
@@ -238,7 +247,7 @@ class TaskIndex:
         path = self._resolve_mirror_path(task_name, name)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content)
+            path.write_text(content, encoding="utf-8")
             return True
         except OSError:
             return False
@@ -332,7 +341,7 @@ class TaskIndex:
             return {}
 
         try:
-            return json.loads(state_path.read_text())
+            return json.loads(state_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return {}
 
@@ -383,7 +392,7 @@ class TaskIndex:
         archive_index = get_tasks_dir() / ".archive" / "index.json"
         if archive_index.exists():
             try:
-                data = json.loads(archive_index.read_text())
+                data = json.loads(archive_index.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
                     for task_name, meta in data.items():
                         if not isinstance(meta, dict):
@@ -538,7 +547,7 @@ class TaskIndex:
             return False
 
         try:
-            content = path.read_text()
+            content = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return False
 
@@ -569,7 +578,7 @@ class TaskIndex:
                     continue
 
                 try:
-                    content = path.read_text()
+                    content = path.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     continue
 
@@ -642,7 +651,7 @@ class TaskIndex:
         Only writes files that are missing or whose content differs (no churn).
         Returns the number of files written. Best-effort; never raises.
         """
-        task_dir = get_tasks_dir() / task_name
+        task_dir = self._resolve_task_dir(task_name)
         written = 0
         try:
             with self._connect() as conn:
@@ -661,9 +670,9 @@ class TaskIndex:
                         continue
                     path = task_dir / name
                     try:
-                        if path.exists() and path.read_text() == content:
+                        if path.exists() and path.read_text(encoding="utf-8", errors="replace") == content:
                             continue
-                        path.write_text(str(content))
+                        path.write_text(str(content), encoding="utf-8")
                         written += 1
                     except OSError:
                         continue
@@ -681,7 +690,7 @@ class TaskIndex:
         Returns:
             Number of artifacts ingested.
         """
-        task_dir = get_tasks_dir() / task_name
+        task_dir = self._resolve_task_dir(task_name)
         if not task_dir.is_dir():
             return 0
 
@@ -695,7 +704,7 @@ class TaskIndex:
                     continue
 
                 try:
-                    content = path.read_text()
+                    content = path.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     continue
 
@@ -773,7 +782,7 @@ class TaskIndex:
                         if not row:
                             continue
                         try:
-                            keep_path.write_text(str(row["content"]))
+                            keep_path.write_text(str(row["content"]), encoding="utf-8")
                             restored += 1
                         except OSError:
                             pass
@@ -875,8 +884,11 @@ class TaskIndex:
             )
             conn.commit()
 
-        if self._is_mirrored_artifact(name):
-            self._delete_legacy_artifact_file(task_name, name)
+        # Always remove any on-disk copy, not just mirrored files. Otherwise a
+        # non-mirrored file the agent wrote (but that wasn't ingested yet) survives
+        # on disk and the next ingest flips its DB row back to present - silently
+        # resurrecting a "deleted" artifact.
+        self._delete_legacy_artifact_file(task_name, name)
 
     def artifact_exists(self, *, task_name: str, name: str) -> bool:
         """Return whether artifact exists (DB canonical, with legacy import fallback)."""
@@ -1104,6 +1116,14 @@ class TaskIndex:
                 """,
                 (normalized, loc, now, completed_value, task_name),
             )
+            # Deleting a task must also clear its artifacts. Otherwise the rows
+            # keep is_present=1, and because upserts are keyed on task_name, a NEW
+            # task that reuses the deleted name inherits the old task's artifacts.
+            if normalized == "deleted":
+                conn.execute(
+                    "UPDATE artifacts SET is_present = 0, updated_at = ? WHERE task_name = ?",
+                    (now, task_name),
+                )
             conn.commit()
 
     def mark_task_deleted(self, *, task_name: str) -> None:

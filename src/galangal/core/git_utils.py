@@ -108,6 +108,14 @@ def squash_to_base(base_sha: str, commit_msg: str, cwd: Path | None = None) -> b
     if code != 0:
         return False
 
+    # base_sha must be an ancestor of HEAD. Otherwise (stale base after a rebase,
+    # or the task was started off a different branch) a soft reset to it would
+    # collapse unrelated commits into this squash. Bail so the caller falls back
+    # to a plain commit rather than corrupting history.
+    code, _, _ = run_command(["git", "merge-base", "--is-ancestor", base_sha, "HEAD"], cwd=cwd)
+    if code != 0:
+        return False
+
     # HEAD already at base means there are no commits on top to squash.
     pre_head = get_current_head(cwd)
     if pre_head is not None and pre_head == base_sha:

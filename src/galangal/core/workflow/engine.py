@@ -763,9 +763,14 @@ class WorkflowEngine:
         )
 
         if sha:
-            # Track the commit in state
+            # Track the commit in state. Replace any prior commit for this stage
+            # (REVIEW->DEV iterations re-run DEV) so the list reflects the latest
+            # commit per stage instead of growing unboundedly with duplicates.
             if self.state.stage_commits is None:
                 self.state.stage_commits = []
+            self.state.stage_commits = [
+                c for c in self.state.stage_commits if c.get("stage") != stage.value
+            ]
             self.state.stage_commits.append({"stage": stage.value, "sha": sha})
             save_state(self.state)
 

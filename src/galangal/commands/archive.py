@@ -343,6 +343,31 @@ def cmd_archive_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _is_within(base: Path, target: Path) -> bool:
+    """True if target resolves inside base (path-traversal guard)."""
+    try:
+        target.resolve().relative_to(base.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _safe_extractall(tar: tarfile.TarFile, dest: Path) -> None:
+    """Extract a tar, rejecting members that would escape ``dest``.
+
+    Guards against path-traversal ('../') and symlink/hardlink escapes without
+    relying on the 3.12-only ``filter=`` parameter (the package targets 3.10+).
+    """
+    for member in tar.getmembers():
+        if not _is_within(dest, dest / member.name):
+            raise tarfile.TarError(f"Unsafe path in archive: {member.name}")
+        if (member.issym() or member.islnk()) and not _is_within(
+            dest, (dest / member.name).parent / member.linkname
+        ):
+            raise tarfile.TarError(f"Unsafe link in archive: {member.name}")
+    tar.extractall(dest)
+
+
 def cmd_archive_restore(args: argparse.Namespace) -> int:
     """Restore an archived task."""
     if not require_initialized():
@@ -356,11 +381,20 @@ def cmd_archive_restore(args: argparse.Namespace) -> int:
     compressed_path = archive_dir / f"{task_name}.tar.gz"
     uncompressed_path = archive_dir / task_name
 
+    # Refuse to clobber an existing task in done/ (move/extract would fail or merge).
+    if (done_dir / task_name).exists():
+        print_error(
+            f"A task named '{task_name}' already exists in done/. "
+            "Rename or remove it before restoring."
+        )
+        return 1
+
     if compressed_path.exists():
-        # Extract compressed archive
+        # Extract compressed archive (path-traversal safe)
         try:
+            done_dir.mkdir(parents=True, exist_ok=True)
             with tarfile.open(compressed_path, "r:gz") as tar:
-                tar.extractall(done_dir)
+                _safe_extractall(tar, done_dir)
             compressed_path.unlink()
             print_success(f"Restored: {task_name}")
         except (tarfile.TarError, OSError) as e:
@@ -369,6 +403,7 @@ def cmd_archive_restore(args: argparse.Namespace) -> int:
     elif uncompressed_path.exists():
         # Move uncompressed directory
         try:
+            done_dir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(uncompressed_path), str(done_dir / task_name))
             print_success(f"Restored: {task_name}")
         except OSError as e:
