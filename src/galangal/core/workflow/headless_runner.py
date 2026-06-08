@@ -145,6 +145,8 @@ async def run_workflow_headless(
     config = get_config()
     engine = WorkflowEngine(state, config)
     app = HeadlessApp()
+    # Per-stage peer-review auto-accept loop counters (persist across iterations).
+    peer_review_loops: dict[str, int] = {}
 
     notify_output(f"Starting workflow for task: {state.task_name}", "activity")
     notify_output(f"Current stage: {state.stage.value}", "activity")
@@ -181,7 +183,9 @@ async def run_workflow_headless(
             notify_state_saved(state)
 
             # Handle the event
-            result = await _handle_event_headless(app, engine, workflow_event, config)
+            result = await _handle_event_headless(
+                app, engine, workflow_event, config, peer_review_loops
+            )
             if result == "break":
                 break
             # "continue" → loop again
@@ -205,6 +209,7 @@ async def _handle_event_headless(
     engine: WorkflowEngine,
     event: WorkflowEvent,
     config: GalangalConfig,
+    peer_review_loops: dict[str, int] | None = None,
 ) -> str:
     """
     Handle a workflow event in headless mode.
@@ -239,12 +244,9 @@ async def _handle_event_headless(
         return _handle_advance_headless(app, engine, advance_event)
 
     if event.type == EventType.PEER_REVIEW_REQUIRED:
-        # Skip peer review in headless mode, treat as completed
-        notify_output("Skipping peer review in headless mode", "activity")
-        advance_event = engine.handle_action(
-            action(ActionType.CONTINUE), tui_app=app
+        return await _handle_peer_review_headless(
+            app, engine, config, peer_review_loops if peer_review_loops is not None else {}
         )
-        return _handle_advance_headless(app, engine, advance_event)
 
     if event.type == EventType.APPROVAL_REQUIRED:
         artifact_name = event.data.get("artifact_name", "APPROVAL.md")
@@ -392,6 +394,58 @@ def _handle_advance_headless(
         return "continue"
 
     return "continue"
+
+
+async def _handle_peer_review_headless(
+    app: HeadlessApp,
+    engine: WorkflowEngine,
+    config: GalangalConfig,
+    peer_review_loops: dict[str, int],
+) -> str:
+    """Run peer review in headless mode.
+
+    There is no interactive user, so only the auto-accept path is available:
+    on REQUEST_CHANGES the stage re-runs with the reviewer's feedback, up to
+    ``max_auto_loops`` times. If the reviewer still disagrees after that (or
+    auto-accept is disabled), the workflow proceeds with the stage as-is rather
+    than deadlocking. If the reviewer backend is unavailable, ``execute_peer_review``
+    degrades to APPROVE and the workflow continues normally.
+    """
+    from galangal.hub.hooks import notify_output
+
+    stage = engine.state.stage
+    pr_config = config.peer_review
+
+    notify_output(f"Peer review: reviewing {stage.value}...", "activity")
+    decision, notes = await asyncio.to_thread(engine.execute_peer_review, app)
+
+    if decision == "APPROVE":
+        notify_output("Peer review: APPROVED", "activity")
+        peer_review_loops.pop(stage.value, None)
+        advance_event = engine.handle_action(action(ActionType.CONTINUE), tui_app=app)
+        return _handle_advance_headless(app, engine, advance_event)
+
+    # REQUEST_CHANGES
+    loop_count = peer_review_loops.get(stage.value, 0)
+    if pr_config.auto_accept and loop_count < pr_config.max_auto_loops:
+        peer_review_loops[stage.value] = loop_count + 1
+        notify_output(
+            f"Peer review: REQUEST_CHANGES - re-running {stage.value} with feedback "
+            f"(loop {loop_count + 1}/{pr_config.max_auto_loops})",
+            "activity",
+        )
+        engine.accept_peer_review_feedback(notes)
+        return "continue"  # re-run the same stage with the feedback queued
+
+    # Auto-accept exhausted or disabled, and there is no user to consult.
+    notify_output(
+        f"Peer review unresolved for {stage.value} after {loop_count} loop(s); "
+        "proceeding (headless: no user to consult)",
+        "activity",
+    )
+    peer_review_loops.pop(stage.value, None)
+    advance_event = engine.handle_action(action(ActionType.CONTINUE), tui_app=app)
+    return _handle_advance_headless(app, engine, advance_event)
 
 
 async def _wait_for_hub_approval(

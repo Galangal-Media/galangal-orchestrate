@@ -4,6 +4,15 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.57.0 — Headless peer review
+
+- **Peer review now runs in headless mode** (previously skipped entirely). With no
+  interactive user, only the auto-accept path is available: on `REQUEST_CHANGES`
+  the stage re-runs with the reviewer's feedback up to `max_auto_loops` times, then
+  the workflow proceeds with the stage as-is rather than deadlocking. If the reviewer
+  backend is unavailable it degrades to APPROVE (as before). Enabled by the engine
+  consolidation in 0.56 (`accept_peer_review_feedback`).
+
 ## 0.56.0 — Peer-review state mutation moved onto the engine
 
 Follow-up to the resolver consolidation. The peer-review "accept feedback and
