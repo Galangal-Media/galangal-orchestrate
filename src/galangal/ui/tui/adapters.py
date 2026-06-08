@@ -109,8 +109,9 @@ PROMPT_OPTIONS: dict[PromptType, list[PromptOption]] = {
     PromptType.PEER_REVIEW_DECISION: [
         PromptOption("1", "Accept Primary Output", "accept_primary", "#b8bb26"),
         PromptOption("2", "Accept Reviewer (rollback)", "accept_reviewer", "#fb4934"),
-        PromptOption("3", "View Full Review", "view", "#83a598"),
-        PromptOption("4", "Quit", "quit", "#fabd2f"),
+        PromptOption("3", "Provide guidance & retry", "user_feedback", "#8ec07c"),
+        PromptOption("4", "View Full Review", "view", "#83a598"),
+        PromptOption("5", "Quit", "quit", "#fabd2f"),
     ],
 }
 

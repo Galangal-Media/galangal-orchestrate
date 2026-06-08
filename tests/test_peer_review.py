@@ -406,12 +406,18 @@ class TestPeerReviewPromptBuilding:
 class TestPeerReviewAutoAccept:
     """Tests for auto-accept behavior in _handle_peer_review."""
 
-    def _make_config(self, auto_accept=True, max_auto_loops=5):
+    def _make_config(self, auto_accept=True, max_auto_loops=5, ask_user_after_loops=None):
+        # Default the early-ask threshold to the hard cap so existing tests keep
+        # exercising the "auto-accept until max_auto_loops" path unless a test
+        # explicitly opts into the earlier ask.
+        if ask_user_after_loops is None:
+            ask_user_after_loops = max_auto_loops
         return GalangalConfig(
             peer_review=PeerReviewConfig(
                 enabled=True,
                 auto_accept=auto_accept,
                 max_auto_loops=max_auto_loops,
+                ask_user_after_loops=ask_user_after_loops,
             ),
         )
 
@@ -541,6 +547,70 @@ class TestPeerReviewAutoAccept:
 
         assert result == "continue"
         assert "PM" not in peer_review_loops
+
+    @pytest.mark.asyncio
+    async def test_early_ask_prompts_before_max_loops(self):
+        """The user is asked at ask_user_after_loops, before max_auto_loops."""
+        from galangal.core.workflow.tui_runner import _handle_peer_review
+
+        config = self._make_config(
+            auto_accept=True, max_auto_loops=5, ask_user_after_loops=2
+        )
+        state = make_state(stage=Stage.PM)
+        engine = MagicMock()
+        engine.state = state
+        app = MagicMock()
+        app.prompt_async = AsyncMock(return_value="accept_primary")
+        # Already auto-looped twice -> next disagreement should ask, not auto-accept.
+        peer_review_loops: dict[str, int] = {"PM": 2}
+
+        mock_to_thread = AsyncMock(return_value=("REQUEST_CHANGES", "Still unclear"))
+
+        with (
+            patch("galangal.core.workflow.tui_runner.asyncio.to_thread", mock_to_thread),
+            patch("galangal.core.artifacts.read_artifact", return_value="spec content"),
+            patch("galangal.core.workflow.tui_runner.save_state"),
+        ):
+            result = await _handle_peer_review(app, engine, config, peer_review_loops)
+
+        assert result == "continue"
+        app.prompt_async.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_user_feedback_appends_guidance_to_rollback(self):
+        """Choosing 'Provide guidance' appends the user's text to the retry context."""
+        from galangal.core.workflow.tui_runner import _handle_peer_review
+
+        config = self._make_config(
+            auto_accept=True, max_auto_loops=5, ask_user_after_loops=0
+        )
+        state = make_state(stage=Stage.PM)
+        engine = MagicMock()
+        engine.state = state
+        app = MagicMock()
+        app.prompt_async = AsyncMock(return_value="user_feedback")
+        app.multiline_input_async = AsyncMock(return_value="Use Postgres, not MySQL")
+        peer_review_loops: dict[str, int] = {"PM": 0}
+
+        mock_to_thread = AsyncMock(
+            return_value=("REQUEST_CHANGES", "DB choice is ambiguous")
+        )
+
+        with (
+            patch("galangal.core.workflow.tui_runner.asyncio.to_thread", mock_to_thread),
+            patch("galangal.core.artifacts.read_artifact", return_value="spec content"),
+            patch("galangal.core.artifacts.archive_artifact"),
+            patch("galangal.core.workflow.tui_runner.save_state"),
+        ):
+            result = await _handle_peer_review(app, engine, config, peer_review_loops)
+
+        assert result == "rollback"
+        # Loop budget reset so the guided retry gets a fresh start.
+        assert "PM" not in peer_review_loops
+        # Both the reviewer notes and the user's guidance reach the next run.
+        assert "DB choice is ambiguous" in state.last_failure
+        assert "Use Postgres, not MySQL" in state.last_failure
+        app.multiline_input_async.assert_called_once()
 
 
 # =============================================================================

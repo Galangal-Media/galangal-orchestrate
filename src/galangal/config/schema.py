@@ -443,9 +443,17 @@ class PeerReviewConfig(BaseModel):
         default=True,
         description="Auto-accept reviewer feedback and re-run the stage without prompting",
     )
+    ask_user_after_loops: int = Field(
+        default=2,
+        description=(
+            "Surface the disagreement to the user (with a summary) after this many "
+            "auto-accept loops without resolution, instead of silently grinding to "
+            "max_auto_loops. 0 = ask on the first disagreement. Capped by max_auto_loops."
+        ),
+    )
     max_auto_loops: int = Field(
         default=5,
-        description="Max auto-accept loops before asking user for advice",
+        description="Hard cap on auto-accept loops before the user is asked for advice",
     )
 
 

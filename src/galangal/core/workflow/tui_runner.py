@@ -658,8 +658,15 @@ def _accept_reviewer_feedback(
     state: WorkflowState,
     stage: Stage,
     review_notes: str,
+    user_guidance: str | None = None,
 ) -> str:
     """Archive peer review artifact and set up rollback for reviewer feedback.
+
+    If ``user_guidance`` is provided, it is appended alongside the reviewer notes
+    and flagged as higher-priority, so the stage re-runs with the user's
+    clarification in addition to the reviewer's objections. Reviewer notes and
+    user guidance each get their own length budget so guidance is never truncated
+    away by a long review.
 
     Returns "rollback" for the caller to act on.
     """
@@ -667,7 +674,14 @@ def _accept_reviewer_feedback(
 
     artifact_name = f"{stage.value}_PEER_REVIEW.md"
     archive_artifact(artifact_name, f"{stage.value}_PEER_REVIEW_PREV.md", state.task_name)
-    state.last_failure = f"Peer review feedback: {review_notes[:1500]}"
+
+    feedback = f"Peer review feedback: {review_notes[:1500]}"
+    if user_guidance and user_guidance.strip():
+        feedback += (
+            "\n\nUser guidance (authoritative - prefer this where it conflicts with "
+            f"the reviewer): {user_guidance.strip()[:1500]}"
+        )
+    state.last_failure = feedback
     state.reset_attempts(clear_failure=False)
     save_state(state)
     return "rollback"
@@ -723,11 +737,17 @@ async def _handle_peer_review(
     # Track loop count
     loop_count = peer_review_loops.get(stage.value, 0)
 
-    # Auto-accept: roll back automatically unless we've hit the loop limit
-    if pr_config.auto_accept and loop_count < pr_config.max_auto_loops:
+    # The user is surfaced the disagreement after `ask_user_after_loops` auto
+    # loops (early off-ramp), but never later than the `max_auto_loops` hard cap.
+    # ask_user_after_loops <= 0 means "ask on the first disagreement".
+    ask_threshold = max(0, pr_config.ask_user_after_loops)
+    ask_threshold = min(ask_threshold, pr_config.max_auto_loops)
+
+    # Auto-accept: roll back automatically until we reach the ask threshold.
+    if pr_config.auto_accept and loop_count < ask_threshold:
         peer_review_loops[stage.value] = loop_count + 1
         app.add_activity(
-            f"Auto-accepting reviewer feedback (loop {loop_count + 1}/{pr_config.max_auto_loops})",
+            f"Auto-accepting reviewer feedback (loop {loop_count + 1}/{ask_threshold})",
             "🔄",
         )
         app.show_message(
@@ -735,12 +755,22 @@ async def _handle_peer_review(
         )
         return _accept_reviewer_feedback(state, stage, review_notes)
 
-    # Hit loop limit or auto_accept disabled - ask the user
-    if pr_config.auto_accept and loop_count >= pr_config.max_auto_loops:
-        app.add_activity(
-            f"Peer review loop limit reached ({pr_config.max_auto_loops} attempts), asking for advice",
-            "⚠",
-        )
+    # Reached the ask threshold (or auto_accept disabled) - bring in the user.
+    if pr_config.auto_accept and loop_count >= ask_threshold:
+        if loop_count >= pr_config.max_auto_loops:
+            app.add_activity(
+                f"Peer review loop limit reached ({pr_config.max_auto_loops} attempts), "
+                "asking for advice",
+                "⚠",
+            )
+        elif loop_count == 0:
+            app.add_activity("Peer reviewer disagrees, asking for your input", "⚠")
+        else:
+            app.add_activity(
+                f"Peer reviewer still disagrees after {loop_count} auto attempt(s), "
+                "asking for your input",
+                "⚠",
+            )
 
     # Get the primary artifact for comparison
     stage_artifacts = {"PM": "SPEC.md", "DESIGN": "DESIGN.md"}
@@ -757,9 +787,10 @@ async def _handle_peer_review(
         review_preview += "..."
 
     loop_info = ""
-    if pr_config.auto_accept and loop_count >= pr_config.max_auto_loops:
+    if pr_config.auto_accept and loop_count > 0:
         loop_info = (
-            f"\n⚠ Auto-accept has looped {loop_count} times without resolution.\n"
+            f"\n⚠ Auto-accept has looped {loop_count} time(s) without the reviewer "
+            "and the stage converging.\n"
         )
 
     comparison_msg = (
@@ -792,6 +823,24 @@ async def _handle_peer_review(
             app.add_activity("User accepted reviewer feedback, rolling back", "🔄")
             app.show_message(f"Rolling back {stage.value} with reviewer feedback", "warning")
             return _accept_reviewer_feedback(state, stage, review_notes)
+
+        if choice == "user_feedback":
+            guidance = await app.multiline_input_async(
+                "Add guidance to resolve the disagreement. It is appended to the "
+                "reviewer's notes (and takes priority) for the re-run. Leave blank to "
+                "go back.",
+                default="",
+            )
+            if not guidance or not guidance.strip():
+                # Cancelled / empty - return to the decision prompt.
+                continue
+            app.add_activity("User provided guidance, rolling back with it", "🔄")
+            app.show_message(f"Rolling back {stage.value} with your guidance", "warning")
+            # Reset the auto-loop budget so the guided retry gets a fresh start.
+            peer_review_loops.pop(stage.value, None)
+            return _accept_reviewer_feedback(
+                state, stage, review_notes, user_guidance=guidance
+            )
 
         # quit
         app._workflow_result = "paused"
