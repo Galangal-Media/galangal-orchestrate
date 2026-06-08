@@ -59,12 +59,23 @@ class ManagedProcess:
 class ProcessManager:
     """Singleton manager for dev server and agent processes."""
 
+    # Cap total concurrent managed processes to bound resource use.
+    MAX_PROCESSES = 50
+
     def __init__(self) -> None:
         self._processes: dict[str, ManagedProcess] = {}  # key: "{env_id}:{kind}"
         self._on_status_change: list[Any] = []
+        # Serializes start/stop so the "already running?" check-then-spawn is
+        # atomic across await points (two concurrent starts would otherwise both
+        # pass the check and orphan a duplicate process).
+        self._lock = asyncio.Lock()
 
     def _key(self, env_id: str, kind: str) -> str:
         return f"{env_id}:{kind}"
+
+    def _at_capacity(self) -> bool:
+        live = sum(1 for mp in self._processes.values() if mp.process.returncode is None)
+        return live >= self.MAX_PROCESSES
 
     def on_status_change(self, callback: Any) -> None:
         """Register a callback for environment status changes."""
@@ -81,40 +92,42 @@ class ProcessManager:
     async def start_dev_server(self, env: Environment) -> None:
         """Start a dev server process for an environment."""
         key = self._key(env.id, "dev_server")
-        if key in self._processes:
-            mp = self._processes[key]
-            if mp.process.returncode is None:
+        async with self._lock:
+            existing = self._processes.get(key)
+            if existing is not None and existing.process.returncode is None:
                 logger.warning(f"Dev server already running for {env.name}")
                 return
+            if self._at_capacity():
+                raise RuntimeError("Process limit reached; stop an environment first")
 
-        # Build environment variables (vault secrets injected via env vars)
-        merged_env = {**os.environ, **env.env_vars, **_vault_env_vars(env)}
+            # Build environment variables (vault secrets injected via env vars)
+            merged_env = {**os.environ, **env.env_vars, **_vault_env_vars(env)}
 
-        if env.start_mode == StartMode.DOCKER_COMPOSE:
-            compose_file = env.docker_compose_file or "docker-compose.yml"
-            cmd = ["docker", "compose", "-f", compose_file, "up"]
-        elif env.start_mode == StartMode.SHELL:
-            if not env.start_command:
-                raise ValueError(f"No start_command configured for environment {env.name}")
-            cmd = ["sh", "-c", env.start_command]
-        else:
-            raise ValueError(f"Unknown start mode: {env.start_mode}")
+            if env.start_mode == StartMode.DOCKER_COMPOSE:
+                compose_file = env.docker_compose_file or "docker-compose.yml"
+                cmd = ["docker", "compose", "-f", compose_file, "up"]
+            elif env.start_mode == StartMode.SHELL:
+                if not env.start_command:
+                    raise ValueError(f"No start_command configured for environment {env.name}")
+                cmd = ["sh", "-c", env.start_command]
+            else:
+                raise ValueError(f"Unknown start mode: {env.start_mode}")
 
-        logger.info(f"Starting dev server for {env.name}: {cmd[0]} (+{len(cmd) - 1} args)")
+            logger.info(f"Starting dev server for {env.name}: {cmd[0]} (+{len(cmd) - 1} args)")
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=env.local_path,
-            env=merged_env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=env.local_path,
+                env=merged_env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
 
-        mp = ManagedProcess(process=proc, env_id=env.id, kind="dev_server")
-        self._processes[key] = mp
+            mp = ManagedProcess(process=proc, env_id=env.id, kind="dev_server")
+            self._processes[key] = mp
 
-        # Start background log reader
-        mp._read_task = asyncio.create_task(self._read_output(mp))
+            # Start background log reader
+            mp._read_task = asyncio.create_task(self._read_output(mp))
 
     async def stop_dev_server(self, env: Environment) -> None:
         """Stop a dev server process.
@@ -164,38 +177,40 @@ class ProcessManager:
     ) -> None:
         """Start a local galangal agent for an environment."""
         key = self._key(env.id, "agent")
-        if key in self._processes:
-            mp = self._processes[key]
-            if mp.process.returncode is None:
+        async with self._lock:
+            existing = self._processes.get(key)
+            if existing is not None and existing.process.returncode is None:
                 logger.warning(f"Agent already running for {env.name}")
                 return
+            if self._at_capacity():
+                raise RuntimeError("Process limit reached; stop an environment first")
 
-        # Build environment with AI credentials + vault secrets
-        merged_env = {
-            **os.environ,
-            **env.env_vars,
-            **(agent_env_vars or {}),
-            **_vault_env_vars(env),
-        }
+            # Build environment with AI credentials + vault secrets
+            merged_env = {
+                **os.environ,
+                **env.env_vars,
+                **(agent_env_vars or {}),
+                **_vault_env_vars(env),
+            }
 
-        cmd = [
-            "python", "-m", "galangal", "run",
-            "--hub-url", hub_internal_url,
-        ]
+            cmd = [
+                "python", "-m", "galangal", "run",
+                "--hub-url", hub_internal_url,
+            ]
 
-        logger.info(f"Starting agent for {env.name}: {cmd[0]} (+{len(cmd) - 1} args)")
+            logger.info(f"Starting agent for {env.name}: {cmd[0]} (+{len(cmd) - 1} args)")
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=env.local_path,
-            env=merged_env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=env.local_path,
+                env=merged_env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
 
-        mp = ManagedProcess(process=proc, env_id=env.id, kind="agent")
-        self._processes[key] = mp
-        mp._read_task = asyncio.create_task(self._read_output(mp))
+            mp = ManagedProcess(process=proc, env_id=env.id, kind="agent")
+            self._processes[key] = mp
+            mp._read_task = asyncio.create_task(self._read_output(mp))
 
     @staticmethod
     def is_editor_available() -> bool:
@@ -250,15 +265,13 @@ class ProcessManager:
         del self._processes[key]
 
     def _allocate_editor_port(self) -> int:
-        """Find a free port starting from base 13370."""
-        base_port = 13370
-        # Collect ports already in use by editors
-        used_ports: set[int] = set()
-        for key, mp in self._processes.items():
-            if key.endswith(":editor") and mp.process.returncode is None:
-                # Extract port from the process args if possible
-                pass
+        """Find a free port starting from base 13370.
 
+        Best-effort: binds to probe availability then releases, so there is a
+        small race before code-server binds the same port. The caller surfaces a
+        clear error if the editor then fails to bind.
+        """
+        base_port = 13370
         for port in range(base_port, base_port + 100):
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

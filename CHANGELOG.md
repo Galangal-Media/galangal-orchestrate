@@ -4,6 +4,18 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.53.0 — Hub hardening (round 2)
+
+- **Agent-identity protection:** the connection manager no longer lets a
+  registration silently displace a *live* connection under the same `agent_id`
+  (a key-holder can't hijack another agent's control channel, and two
+  mis-configured agents can't clobber each other). A dead/stale connection is
+  still taken over, so legitimate reconnects work. The server rejects the
+  duplicate registration with a clear error.
+- **Process manager:** start operations are serialized with a lock (the
+  check-then-spawn was racy and could orphan duplicate processes), a concurrent
+  process cap bounds resource use, and dead port-allocation code was removed.
+
 ## 0.52.0 — Hub security hardening
 
 **Security release for the Galangal Hub.** A default-config hub was an

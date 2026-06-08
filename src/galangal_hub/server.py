@@ -258,7 +258,16 @@ async def agent_websocket(websocket: WebSocket) -> None:
                 agent_id = info.agent_id
                 registered_agent_id = info.agent_id
 
-                await manager.connect(agent_id, websocket, info)
+                if not await manager.connect(agent_id, websocket, info):
+                    # Another live connection already owns this agent_id.
+                    await websocket.send_text(
+                        json.dumps({
+                            "type": "error",
+                            "message": f"agent_id '{agent_id}' is already connected",
+                        })
+                    )
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                    return
                 await storage.upsert_agent(info)
 
                 # Link agent to environment by matching project_path to local_path

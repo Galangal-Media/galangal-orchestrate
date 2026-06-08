@@ -54,15 +54,40 @@ class ConnectionManager:
             self._lock = asyncio.Lock()
         return self._lock
 
-    async def connect(self, agent_id: str, websocket: WebSocket, info: AgentInfo) -> None:
+    async def _probe_alive(self, agent: ConnectedAgent) -> bool:
+        """Best-effort liveness check on an existing connection via a no-op ping.
+
+        The client ignores unknown message types, so this is harmless. Returns
+        False if the send fails (socket is dead and can be taken over).
+        """
+        try:
+            await agent.websocket.send_text('{"type": "ping"}')
+            return True
+        except Exception:
+            return False
+
+    async def connect(self, agent_id: str, websocket: WebSocket, info: AgentInfo) -> bool:
         """
         Register a new agent connection.
 
-        Args:
-            agent_id: Unique agent identifier.
-            websocket: The WebSocket connection.
-            info: Agent information.
+        Refuses to displace a *live* connection already registered under the same
+        ``agent_id`` (prevents one key-holder from hijacking another agent's control
+        channel, and stops two mis-configured agents from clobbering each other). A
+        dead/stale connection is taken over so legitimate reconnects still work.
+
+        Returns:
+            True if the connection was registered, False if a live agent already
+            owns this ``agent_id``.
         """
+        async with self._get_lock():
+            existing = self._agents.get(agent_id)
+        if existing is not None and existing.websocket is not websocket:
+            if await self._probe_alive(existing):
+                logger.warning(
+                    "Rejected registration for agent_id %s: already connected", agent_id
+                )
+                return False
+
         async with self._get_lock():
             self._agents[agent_id] = ConnectedAgent(
                 websocket=websocket,
@@ -70,6 +95,7 @@ class ConnectionManager:
                 connected=True,
             )
         await self._notify_change()
+        return True
 
     async def disconnect(self, agent_id: str) -> None:
         """
