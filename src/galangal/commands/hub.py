@@ -74,7 +74,7 @@ def cmd_hub_test(args: argparse.Namespace) -> int:
         console.print("Add hub.enabled: true to .galangal/config.yaml")
         return 1
 
-    console.print(f"[bold]Testing connection to hub[/bold]")
+    console.print("[bold]Testing connection to hub[/bold]")
     console.print(f"URL: {hub_config.url}")
     console.print()
 
@@ -115,13 +115,13 @@ def cmd_hub_test(args: argparse.Namespace) -> int:
     try:
         sock = socket.create_connection((host, port), timeout=10)
         sock.close()
-        console.print(f"[green]✓[/green] TCP connection successful")
-    except socket.timeout:
-        console.print(f"[red]✗ TCP connection timed out[/red]")
+        console.print("[green]✓[/green] TCP connection successful")
+    except TimeoutError:
+        console.print("[red]✗ TCP connection timed out[/red]")
         console.print(f"  Check firewall rules and that hub is running on port {port}")
         return 1
     except ConnectionRefusedError:
-        console.print(f"[red]✗ TCP connection refused[/red]")
+        console.print("[red]✗ TCP connection refused[/red]")
         console.print(f"  Hub server may not be running on {host}:{port}")
         return 1
     except OSError as e:

@@ -4,6 +4,22 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.49.0
+
+- **doctor:** now checks the CLI for the *active* backend(s) (default + per-stage),
+  not just hardcoded `claude` — a gemini/codex profile no longer passes while its
+  binary is missing.
+- **init --quick:** truly non-interactive — defaults the project name to the
+  directory name when there's no TTY (for CI/automation) instead of prompting.
+- **Config errors:** invalid `config.yaml` now reports field-by-field issues
+  instead of dumping the raw pydantic error.
+- **Mistake tracking:** the table is now pruned (stale single-occurrence entries
+  age out; a hard cap bounds total rows).
+- **Tests:** added CLI parser/dispatch tests (`test_cli.py`) via an extracted
+  `build_parser()`, and made the `status` command tests hermetic.
+- **Docs:** documented the full config/CLI surface and added this changelog
+  (see also the `docs/guide/` updates).
+
 ## 0.48.0
 
 - **Prompt efficiency:** per-attempt content (attempt number, previous failure)

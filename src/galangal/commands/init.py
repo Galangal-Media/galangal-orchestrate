@@ -125,9 +125,15 @@ def _run_wizard_update(project_root, galangal_dir, existing_config: dict) -> int
 
 def _run_quick_init(project_root, galangal_dir) -> int:
     """Run quick initialization without wizard (original behavior)."""
-    # Get project name
+    import sys
+
+    # Get project name. --quick is meant for CI/automation, so don't block on a
+    # prompt when there's no interactive terminal - default to the directory name.
     default_name = project_root.name
-    project_name = Prompt.ask("Project name", default=default_name)
+    if sys.stdin.isatty():
+        project_name = Prompt.ask("Project name", default=default_name)
+    else:
+        project_name = default_name
 
     # Create .galangal directory
     galangal_dir.mkdir(exist_ok=True)

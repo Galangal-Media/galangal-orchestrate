@@ -6,10 +6,9 @@ import argparse
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 from galangal import __version__
-from galangal.config.loader import get_project_root, is_initialized
+from galangal.config.loader import is_initialized
 from galangal.ui.console import console
 
 
@@ -104,6 +103,38 @@ def check_active_model() -> tuple[bool | None, str]:
     return True, base
 
 
+def check_active_backend_cli() -> tuple[bool | None, str]:
+    """Check the CLI for the configured backend(s), not just hardcoded claude.
+
+    A project on a gemini/codex profile would otherwise pass doctor while its
+    actual backend binary is missing from PATH.
+    """
+    if not is_initialized():
+        return None, "Not initialized"
+
+    try:
+        from galangal.config.loader import load_config, reset_caches
+
+        reset_caches()
+        config = load_config()
+    except Exception as e:
+        return False, f"Could not read config: {e}"
+
+    # Resolve every backend referenced by the active routing (default + per-stage).
+    names = {config.ai.default, *config.ai.stage_backends.values()}
+    results: list[str] = []
+    all_ok = True
+    for name in sorted(names):
+        backend = config.ai.backends.get(name)
+        command = backend.command if backend else name
+        found = shutil.which(command) is not None
+        results.append(f"{name} ({command}): {'found' if found else 'MISSING'}")
+        if not found:
+            all_ok = False
+
+    return all_ok, "; ".join(results)
+
+
 def check_git_installed() -> tuple[bool, str]:
     """Check git is installed."""
     path = shutil.which("git")
@@ -153,8 +184,7 @@ def check_config_valid() -> tuple[bool | None, str]:
         return None, "Not initialized (run 'galangal init')"
 
     try:
-        from galangal.config.loader import load_config
-        from galangal.config.loader import reset_caches
+        from galangal.config.loader import load_config, reset_caches
 
         reset_caches()  # Ensure fresh load
         config = load_config()
@@ -186,7 +216,7 @@ def check_tasks_dir() -> tuple[bool | None, str]:
             parent = tasks_dir.parent
             if parent.exists():
                 return True, f"Will be created ({tasks_dir.name}/)"
-            return False, f"Parent directory doesn't exist"
+            return False, "Parent directory doesn't exist"
     except Exception as e:
         return False, str(e)
 
@@ -330,6 +360,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         ("GitHub CLI", check_github_cli),
         ("Config file", check_config_valid),
         ("Active model", check_active_model),
+        ("Active backend CLI", check_active_backend_cli),
         ("Codex backend mode", check_codex_backend_mode),
         ("Gemini backend mode", check_gemini_backend_mode),
         ("Tasks directory", check_tasks_dir),

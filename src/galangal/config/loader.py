@@ -97,7 +97,12 @@ def load_config(project_root: Path | None = None) -> GalangalConfig:
         _config = GalangalConfig.model_validate(data)
         return _config
     except PydanticValidationError as e:
-        raise ConfigError(f"Invalid configuration in {config_path}: {e}") from e
+        # Format field-by-field instead of dumping the raw pydantic repr.
+        lines = [f"Invalid configuration in {config_path}:"]
+        for err in e.errors():
+            loc = ".".join(str(p) for p in err.get("loc", ())) or "(root)"
+            lines.append(f"  - {loc}: {err.get('msg', 'invalid')}")
+        raise ConfigError("\n".join(lines)) from e
 
 
 def get_config() -> GalangalConfig:

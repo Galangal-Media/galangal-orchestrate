@@ -65,3 +65,54 @@ class TestLogMistakeFileWiring:
 
         _, kwargs = fake_tracker.log.call_args
         assert kwargs["files"] == ["given.py"]
+
+
+class TestPruning:
+    def _tracker(self, tmp_path):
+        import galangal.mistakes as m
+
+        t = m.MistakeTracker(db_path=tmp_path / "mistakes.db")
+        _ = t.conn  # init tables
+        return t
+
+    def _insert(self, t, desc, occ, ts):
+        t.conn.execute(
+            "INSERT INTO mistakes (description,feedback,stage,file_patterns,occurrence_count,"
+            "last_task,last_timestamp,example_tasks,embedding) VALUES (?,?,?,?,?,?,?,?,?)",
+            [desc, "f", "DEV", "[]", occ, "task", ts, "[]", None],
+        )
+
+    def test_prune_drops_stale_rare_keeps_frequent_and_fresh(self, tmp_path):
+        import time
+
+        import galangal.mistakes as m
+
+        t = self._tracker(tmp_path)
+        now = int(time.time())
+        old = now - (m.PRUNE_AGE_DAYS + 10) * 86400
+        self._insert(t, "stale-rare", 1, old)
+        self._insert(t, "old-frequent", 9, old)
+        self._insert(t, "fresh", 1, now)
+        t.conn.commit()
+
+        t._prune()
+
+        rows = {r[0] for r in t.conn.execute("SELECT description FROM mistakes").fetchall()}
+        assert "stale-rare" not in rows
+        assert {"old-frequent", "fresh"} <= rows
+
+    def test_prune_enforces_hard_cap(self, tmp_path):
+        import time
+
+        import galangal.mistakes as m
+
+        t = self._tracker(tmp_path)
+        now = int(time.time())
+        for i in range(m.MAX_MISTAKES + 25):
+            self._insert(t, f"m{i}", 5, now)  # all fresh+frequent (no stale path)
+        t.conn.commit()
+
+        t._prune()
+
+        total = t.conn.execute("SELECT COUNT(*) FROM mistakes").fetchone()[0]
+        assert total == m.MAX_MISTAKES

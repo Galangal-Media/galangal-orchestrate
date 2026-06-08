@@ -36,6 +36,11 @@ MAX_PROMPT_WARNINGS = 5
 # long-fixed high-count mistake doesn't permanently outrank a fresh recurring one.
 RECENCY_HALF_LIFE_DAYS = 30.0
 
+# Pruning: keep the table bounded. Old, rarely-seen mistakes age out; a hard cap
+# bounds total rows regardless.
+PRUNE_AGE_DAYS = 180
+MAX_MISTAKES = 1000
+
 # Process-wide singleton so the embedding model loads once, not per call.
 _tracker: MistakeTracker | None = None
 
@@ -329,7 +334,52 @@ class MistakeTracker:
             )
 
         self.conn.commit()
+        self._prune()
         return mistake_id or 0
+
+    def _prune(self) -> None:
+        """Keep the mistakes table bounded.
+
+        Drops stale, rarely-seen entries (older than ``PRUNE_AGE_DAYS`` with a
+        single occurrence), then enforces a hard ``MAX_MISTAKES`` cap by removing
+        the lowest recency-decayed-score rows. Best-effort; never raises.
+        """
+        try:
+            cutoff = int(time.time()) - PRUNE_AGE_DAYS * 86400
+            stale = [
+                row["id"]
+                for row in self.conn.execute(
+                    "SELECT id FROM mistakes WHERE last_timestamp < ? AND occurrence_count <= 1",
+                    [cutoff],
+                ).fetchall()
+            ]
+
+            total = self.conn.execute("SELECT COUNT(*) FROM mistakes").fetchone()[0]
+            over_cap: list[int] = []
+            if total - len(stale) > MAX_MISTAKES:
+                # Rank survivors by recency-decayed score and drop the weakest.
+                survivors = [
+                    self._row_to_mistake(r)
+                    for r in self.conn.execute("SELECT * FROM mistakes").fetchall()
+                    if r["id"] not in set(stale)
+                ]
+                survivors.sort(key=self._relevance_score)
+                excess = (total - len(stale)) - MAX_MISTAKES
+                over_cap = [m.id for m in survivors[:excess]]
+
+            to_delete = stale + over_cap
+            if not to_delete:
+                return
+            placeholders = ",".join("?" * len(to_delete))
+            self.conn.execute(f"DELETE FROM mistakes WHERE id IN ({placeholders})", to_delete)
+            if self.vss_available:
+                self.conn.execute(
+                    f"DELETE FROM mistakes_vss WHERE rowid IN ({placeholders})", to_delete
+                )
+            self.conn.commit()
+        except Exception:
+            # Pruning is housekeeping; never let it break a log() call.
+            pass
 
     def _find_similar(
         self,

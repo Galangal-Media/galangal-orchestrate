@@ -67,11 +67,12 @@ class TestCmdStatus:
 
         args = argparse.Namespace()
 
-        with patch("galangal.commands.status.get_active_task", return_value=None):
-            with patch("galangal.commands.status.print_info") as mock_info:
-                result = cmd_status(args)
-                assert result == 0
-                mock_info.assert_called_once()
+        with patch("galangal.config.loader.require_initialized", return_value=True):
+            with patch("galangal.commands.status.get_active_task", return_value=None):
+                with patch("galangal.commands.status.print_info") as mock_info:
+                    result = cmd_status(args)
+                    assert result == 0
+                    mock_info.assert_called_once()
 
     def test_status_state_load_failure(self):
         """Test status when state cannot be loaded."""
@@ -79,12 +80,13 @@ class TestCmdStatus:
 
         args = argparse.Namespace()
 
-        with patch("galangal.commands.status.get_active_task", return_value="test-task"):
-            with patch("galangal.core.state.load_state", return_value=None):
-                with patch("galangal.commands.status.print_error") as mock_error:
-                    result = cmd_status(args)
-                    assert result == 1
-                    mock_error.assert_called_once()
+        with patch("galangal.config.loader.require_initialized", return_value=True):
+            with patch("galangal.commands.status.get_active_task", return_value="test-task"):
+                with patch("galangal.core.state.load_state", return_value=None):
+                    with patch("galangal.commands.status.print_error") as mock_error:
+                        result = cmd_status(args)
+                        assert result == 1
+                        mock_error.assert_called_once()
 
     def test_status_displays_task_info(self):
         """Test status displays task information."""
@@ -93,16 +95,17 @@ class TestCmdStatus:
         args = argparse.Namespace()
         state = make_state(task_name="test-task", stage=Stage.DEV)
 
-        with patch("galangal.commands.status.get_active_task", return_value="test-task"):
-            with patch("galangal.core.state.load_state", return_value=state):
-                with patch("galangal.commands.status.artifact_exists", return_value=False):
-                    with patch("galangal.commands.status.display_status") as mock_display:
-                        result = cmd_status(args)
-                        assert result == 0
-                        mock_display.assert_called_once()
-                        call_kwargs = mock_display.call_args.kwargs
-                        assert call_kwargs["task_name"] == "test-task"
-                        assert call_kwargs["stage"] == Stage.DEV
+        with patch("galangal.config.loader.require_initialized", return_value=True):
+            with patch("galangal.commands.status.get_active_task", return_value="test-task"):
+                with patch("galangal.core.state.load_state", return_value=state):
+                    with patch("galangal.commands.status.artifact_exists", return_value=False):
+                        with patch("galangal.commands.status.display_status") as mock_display:
+                            result = cmd_status(args)
+                            assert result == 0
+                            mock_display.assert_called_once()
+                            call_kwargs = mock_display.call_args.kwargs
+                            assert call_kwargs["task_name"] == "test-task"
+                            assert call_kwargs["stage"] == Stage.DEV
 
 
 class TestCmdSkipTo:

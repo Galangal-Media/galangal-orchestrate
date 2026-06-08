@@ -103,7 +103,8 @@ Tip: Press Ctrl+C during execution to pause gracefully.
         """
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """Build the top-level argument parser. Extracted from main() for testability."""
     from galangal import __version__
 
     parser = argparse.ArgumentParser(
@@ -435,6 +436,11 @@ def main() -> int:
     hub_info.set_defaults(func=_cmd_hub_info)
     hub_parser.set_defaults(func=lambda args: hub_parser.print_help() or 0)
 
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
     args = parser.parse_args()
 
     # Enable debug mode if requested
