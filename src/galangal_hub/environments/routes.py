@@ -725,11 +725,11 @@ async def write_env_files(env_id: str, data: EnvFileWrite) -> dict:
         written.append(safe_name)
 
     # Also update DB record
-    from galangal_hub.environments.models import EnvironmentUpdate as EU
+    from galangal_hub.environments.models import EnvironmentUpdate
 
     current_files = dict(env.env_files)
     current_files.update(data.files)
-    await _storage().update_environment(env_id, EU(env_files=current_files))
+    await _storage().update_environment(env_id, EnvironmentUpdate(env_files=current_files))
 
     return {"status": "written", "files": written}
 
