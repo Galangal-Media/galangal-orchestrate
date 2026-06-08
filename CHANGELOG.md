@@ -4,6 +4,28 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.56.0 — Peer-review state mutation moved onto the engine
+
+Follow-up to the resolver consolidation. The peer-review "accept feedback and
+re-run the stage" logic was stranded as a state-mutating helper inside the *TUI*
+runner — invisible to the headless runner and untestable without the TUI.
+
+- **`WorkflowEngine.accept_peer_review_feedback(review_notes, user_guidance=None)`**
+  now owns archiving the review artifact to `{STAGE}_PEER_REVIEW_PREV.md` and
+  queuing the feedback (`last_failure`) for the stage re-run — the peer-review
+  counterpart to `plan_rollback_skips` (which the rollback path got in 0.55).
+  The TUI runner delegates to it; the stranded `_accept_reviewer_feedback` helper
+  is gone.
+- Note on the broader "unify the two review concepts" idea: peer review and the
+  REVIEW stage are intentionally *different* mechanisms — peer review re-runs the
+  **same** producing stage with an independent second opinion, while REVIEW rolls
+  back to an **earlier** stage. They are deliberately not merged; this change just
+  removes the duplicated/stranded state logic and makes it testable. (Peer review is
+  still skipped in headless mode — a known gap, left as-is to avoid a blind
+  behavior change.)
+- Tests: existing auto-accept tests now assert the delegation; added direct engine
+  tests for `accept_peer_review_feedback`.
+
 ## 0.55.0 — Resolver consolidation + engine test harness
 
 Internal refactor (behavior-preserving) plus its safety net.

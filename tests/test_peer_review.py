@@ -486,20 +486,14 @@ class TestPeerReviewAutoAccept:
             return_value=("REQUEST_CHANGES", "Missing acceptance criteria")
         )
 
-        with (
-            patch("galangal.core.workflow.tui_runner.asyncio.to_thread", mock_to_thread),
-            patch("galangal.core.workflow.tui_runner.save_state"),
-            patch("galangal.core.artifacts.archive_artifact") as mock_archive,
-        ):
+        with patch("galangal.core.workflow.tui_runner.asyncio.to_thread", mock_to_thread):
             result = await _handle_peer_review(app, engine, config, peer_review_loops)
 
         assert result == "rollback"
         assert peer_review_loops["PM"] == 1
-        assert state.last_failure is not None
-        assert "Peer review feedback" in state.last_failure
-        mock_archive.assert_called_once_with(
-            "PM_PEER_REVIEW.md", "PM_PEER_REVIEW_PREV.md", state.task_name
-        )
+        # The state mutation (archive + feedback) is delegated to the engine method,
+        # covered directly in TestAcceptPeerReviewFeedback.
+        engine.accept_peer_review_feedback.assert_called_once_with("Missing acceptance criteria")
 
     @pytest.mark.asyncio
     async def test_auto_accept_increments_loop_counter(self):
@@ -648,18 +642,66 @@ class TestPeerReviewAutoAccept:
         with (
             patch("galangal.core.workflow.tui_runner.asyncio.to_thread", mock_to_thread),
             patch("galangal.core.artifacts.read_artifact", return_value="spec content"),
-            patch("galangal.core.artifacts.archive_artifact"),
-            patch("galangal.core.workflow.tui_runner.save_state"),
         ):
             result = await _handle_peer_review(app, engine, config, peer_review_loops)
 
         assert result == "rollback"
         # Loop budget reset so the guided retry gets a fresh start.
         assert "PM" not in peer_review_loops
-        # Both the reviewer notes and the user's guidance reach the next run.
-        assert "DB choice is ambiguous" in state.last_failure
-        assert "Use Postgres, not MySQL" in state.last_failure
+        # Reviewer notes + the user's guidance are forwarded to the engine for the re-run.
+        engine.accept_peer_review_feedback.assert_called_once_with(
+            "DB choice is ambiguous", user_guidance="Use Postgres, not MySQL"
+        )
         app.multiline_input_async.assert_called_once()
+
+
+# =============================================================================
+# Engine: accept_peer_review_feedback (the state mutation, moved out of the runner)
+# =============================================================================
+
+
+class TestAcceptPeerReviewFeedback:
+    """The engine method that archives the review artifact and queues feedback for
+    the stage re-run (previously the runner-local _accept_reviewer_feedback)."""
+
+    def _engine(self, tmp_path):
+        from galangal.core.state import TaskType, WorkflowState, save_state
+        from galangal.core.workflow.engine import WorkflowEngine
+
+        from tests.workflow_harness import init_project
+
+        init_project(tmp_path)
+        state = WorkflowState.new("a task", "t", TaskType.FEATURE)
+        state.stage = Stage.PM
+        save_state(state)
+        return WorkflowEngine(state, GalangalConfig())
+
+    def test_archives_artifact_and_records_feedback(self, tmp_path):
+        from galangal.core.artifacts import artifact_exists, read_artifact, write_artifact
+
+        eng = self._engine(tmp_path)
+        write_artifact("PM_PEER_REVIEW.md", "# Decision: REQUEST_CHANGES", eng.state.task_name)
+
+        eng.accept_peer_review_feedback("fix the spec")
+
+        assert artifact_exists("PM_PEER_REVIEW_PREV.md", eng.state.task_name)
+        assert "REQUEST_CHANGES" in (
+            read_artifact("PM_PEER_REVIEW_PREV.md", eng.state.task_name) or ""
+        )
+        assert "Peer review feedback" in eng.state.last_failure
+        assert "fix the spec" in eng.state.last_failure
+
+    def test_user_guidance_is_appended_as_authoritative(self, tmp_path):
+        from galangal.core.artifacts import write_artifact
+
+        eng = self._engine(tmp_path)
+        write_artifact("PM_PEER_REVIEW.md", "# Decision: REQUEST_CHANGES", eng.state.task_name)
+
+        eng.accept_peer_review_feedback("reviewer says X", user_guidance="actually do Y")
+
+        assert "reviewer says X" in eng.state.last_failure
+        assert "User guidance (authoritative" in eng.state.last_failure
+        assert "actually do Y" in eng.state.last_failure
 
 
 # =============================================================================

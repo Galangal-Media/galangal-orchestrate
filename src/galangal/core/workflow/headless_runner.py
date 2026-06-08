@@ -19,7 +19,6 @@ from typing import Any
 from galangal.config.loader import get_config
 from galangal.config.schema import GalangalConfig
 from galangal.core.state import Stage, WorkflowState, save_state
-from galangal.core.workflow.core import archive_rollback_if_exists
 from galangal.core.workflow.engine import (
     ActionType,
     EventType,
@@ -137,10 +136,7 @@ async def run_workflow_headless(
         Result string: "done", "paused", or "error".
     """
     from galangal.hub.hooks import (
-        notify_approval_needed,
         notify_output,
-        notify_stage_complete,
-        notify_stage_fail,
         notify_stage_start,
         notify_state_saved,
         notify_task_complete,
@@ -221,8 +217,6 @@ async def _handle_event_headless(
     """
     from galangal.hub.hooks import (
         notify_output,
-        notify_prompt,
-        notify_prompt_cleared,
         notify_stage_complete,
         notify_stage_fail,
     )

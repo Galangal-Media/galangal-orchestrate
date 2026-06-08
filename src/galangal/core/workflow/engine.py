@@ -637,6 +637,35 @@ class WorkflowEngine:
 
         return (decision, review_notes)
 
+    def accept_peer_review_feedback(
+        self, review_notes: str, user_guidance: str | None = None
+    ) -> None:
+        """Queue peer-review feedback so the producing stage re-runs with it.
+
+        Unlike a rollback (which moves to an *earlier* stage via
+        ``plan_rollback_skips``), peer review re-runs the *same* stage: the stage's
+        review artifact is archived to ``{STAGE}_PEER_REVIEW_PREV.md`` (surfaced in
+        the next prompt) and the feedback is recorded as ``last_failure``. Optional
+        ``user_guidance`` is appended as the authoritative steer.
+        """
+        from galangal.core.artifacts import archive_artifact
+
+        stage = self.state.stage
+        archive_artifact(
+            f"{stage.value}_PEER_REVIEW.md",
+            f"{stage.value}_PEER_REVIEW_PREV.md",
+            self.state.task_name,
+        )
+        feedback = f"Peer review feedback: {review_notes[:1500]}"
+        if user_guidance and user_guidance.strip():
+            feedback += (
+                "\n\nUser guidance (authoritative - prefer this where it conflicts "
+                f"with the reviewer): {user_guidance.strip()[:1500]}"
+            )
+        self.state.last_failure = feedback
+        self.state.reset_attempts(clear_failure=False)
+        save_state(self.state)
+
     def _advance_to_next_stage(self, tui_app: WorkflowTUIApp | None = None) -> WorkflowEvent:
         """Advance to the next stage after success."""
         current = self.state.stage

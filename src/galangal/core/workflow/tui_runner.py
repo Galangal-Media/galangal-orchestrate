@@ -685,39 +685,6 @@ async def _handle_user_interrupts(app: WorkflowTUIApp, engine: WorkflowEngine) -
 # =============================================================================
 
 
-def _accept_reviewer_feedback(
-    state: WorkflowState,
-    stage: Stage,
-    review_notes: str,
-    user_guidance: str | None = None,
-) -> str:
-    """Archive peer review artifact and set up rollback for reviewer feedback.
-
-    If ``user_guidance`` is provided, it is appended alongside the reviewer notes
-    and flagged as higher-priority, so the stage re-runs with the user's
-    clarification in addition to the reviewer's objections. Reviewer notes and
-    user guidance each get their own length budget so guidance is never truncated
-    away by a long review.
-
-    Returns "rollback" for the caller to act on.
-    """
-    from galangal.core.artifacts import archive_artifact
-
-    artifact_name = f"{stage.value}_PEER_REVIEW.md"
-    archive_artifact(artifact_name, f"{stage.value}_PEER_REVIEW_PREV.md", state.task_name)
-
-    feedback = f"Peer review feedback: {review_notes[:1500]}"
-    if user_guidance and user_guidance.strip():
-        feedback += (
-            "\n\nUser guidance (authoritative - prefer this where it conflicts with "
-            f"the reviewer): {user_guidance.strip()[:1500]}"
-        )
-    state.last_failure = feedback
-    state.reset_attempts(clear_failure=False)
-    save_state(state)
-    return "rollback"
-
-
 async def _handle_review_iteration_checkin(
     app: WorkflowTUIApp,
     engine: WorkflowEngine,
@@ -852,7 +819,8 @@ async def _handle_peer_review(
         app.show_message(
             f"Rolling back {stage.value} with reviewer feedback", "warning"
         )
-        return _accept_reviewer_feedback(state, stage, review_notes)
+        engine.accept_peer_review_feedback(review_notes)
+        return "rollback"
 
     # Reached the ask threshold (or auto_accept disabled) - bring in the user.
     if pr_config.auto_accept and loop_count >= ask_threshold:
@@ -921,7 +889,8 @@ async def _handle_peer_review(
         if choice == "accept_reviewer":
             app.add_activity("User accepted reviewer feedback, rolling back", "🔄")
             app.show_message(f"Rolling back {stage.value} with reviewer feedback", "warning")
-            return _accept_reviewer_feedback(state, stage, review_notes)
+            engine.accept_peer_review_feedback(review_notes)
+            return "rollback"
 
         if choice == "user_feedback":
             guidance = await app.multiline_input_async(
@@ -937,9 +906,8 @@ async def _handle_peer_review(
             app.show_message(f"Rolling back {stage.value} with your guidance", "warning")
             # Reset the auto-loop budget so the guided retry gets a fresh start.
             peer_review_loops.pop(stage.value, None)
-            return _accept_reviewer_feedback(
-                state, stage, review_notes, user_guidance=guidance
-            )
+            engine.accept_peer_review_feedback(review_notes, user_guidance=guidance)
+            return "rollback"
 
         # quit
         app._workflow_result = "paused"
