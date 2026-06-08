@@ -1634,6 +1634,53 @@ class WorkflowState:
         """Check if a stage should be skipped due to fast-track."""
         return self._fast_track.should_fast_track_skip(stage)
 
+    def plan_rollback_skips(
+        self, from_stage: Stage, target_stage: Stage, *, is_fast_track: bool
+    ) -> list[str]:
+        """Decide which stages to skip on the way back up after a rollback, and
+        set the fast-track / review-iteration state accordingly.
+
+        Single source of truth for rollback skip planning (the mirror of
+        ``get_next_stage`` for the advance path). Three strategies:
+
+        - **REVIEW→DEV** — enter the direct DEV↔REVIEW iteration loop: skip the
+          stages between DEV and REVIEW, but keep TEST_GATE so a regression from a
+          review fix is caught immediately rather than only after final approval.
+        - **minor (fast-track) rollback** — skip every already-passed stage.
+        - **full rollback** — re-run everything except stages marked
+          ``preserve_on_rollback`` (e.g. TEST).
+
+        Returns the sorted list of skipped stage values (for logging).
+        """
+        if from_stage == Stage.REVIEW and target_stage == Stage.DEV:
+            self.review_iteration = True
+            dev_idx = STAGE_ORDER.index(Stage.DEV)
+            review_idx = STAGE_ORDER.index(Stage.REVIEW)
+            loop_skip = set(STAGE_ORDER[dev_idx + 1 : review_idx])
+            loop_skip.discard(Stage.TEST_GATE)  # mechanical regression check stays in the loop
+            self.fast_track_skip = {s.value for s in loop_skip}
+        elif is_fast_track:
+            # Minor rollback: skip stages that already passed.
+            self.setup_fast_track()
+        else:
+            # Full rollback: re-run all stages but preserve marked ones (e.g. TEST).
+            self.clear_fast_track()
+            self.clear_passed_stages(preserve_marked=True)
+            if self.passed_stages:
+                self.fast_track_skip = self.passed_stages.copy()
+        return sorted(self.fast_track_skip)
+
+    def complete_review_iteration(self) -> None:
+        """Exit the DEV↔REVIEW iteration loop (REVIEW approved).
+
+        Clears the iteration flag and fast-track/passed-stage tracking so the full
+        validation pipeline re-runs before the final REVIEW. Counterpart to the
+        REVIEW→DEV branch of ``plan_rollback_skips``.
+        """
+        self.review_iteration = False
+        self.clear_fast_track()
+        self.clear_passed_stages()
+
     # =========================================================================
     # Serialization (flat JSON format for backward compatibility)
     # =========================================================================

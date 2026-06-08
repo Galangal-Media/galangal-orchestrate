@@ -62,6 +62,28 @@ def test_docs_task_minimal_path(tmp_path):
     assert "DOCS" in trace
 
 
+def test_minor_fast_track_rollback_skips_passed_stages(tmp_path):
+    # A fast-track rollback from SECURITY->DEV skips all already-passed stages on
+    # the way back up (DEV -> SECURITY directly; TEST and QA are not re-run).
+    trace, terminal = simulate(
+        tmp_path, Policy({"SECURITY": [rollback("DEV", fast_track=True)]})
+    )
+    assert terminal == "WORKFLOW_COMPLETE"
+    sec = trace.index("SECURITY")
+    assert trace[sec:sec + 3] == ["SECURITY", "DEV", "SECURITY"]
+    assert trace.count("QA") == 1  # QA not re-run on the fast-track path
+
+
+def test_full_rollback_preserves_test_but_reruns_qa(tmp_path):
+    # A full (non-fast-track) rollback from SECURITY->DEV clears passed stages but
+    # preserves TEST (preserve_on_rollback), so DEV -> QA -> SECURITY (TEST skipped).
+    trace, terminal = simulate(tmp_path, Policy({"SECURITY": [rollback("DEV")]}))
+    assert terminal == "WORKFLOW_COMPLETE"
+    sec = trace.index("SECURITY")
+    assert trace[sec:sec + 4] == ["SECURITY", "DEV", "QA", "SECURITY"]
+    assert trace.count("TEST") == 1  # TEST preserved, not re-run
+
+
 def test_qa_repeated_rollback_eventually_blocks(tmp_path):
     # QA->DEV is a normal (non-exempt) rollback edge: repeated failures hit the
     # per-stage rollback cap and the engine blocks rather than looping forever.

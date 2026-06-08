@@ -1032,31 +1032,12 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
         reason=reason,
     )
 
-    # Review iteration: when REVIEW rolls back to DEV, enter a direct DEV↔REVIEW
-    # loop by skipping the stages between DEV and REVIEW. TEST_GATE is kept in the
-    # loop (when enabled) so a regression introduced by a review fix is caught
-    # immediately rather than only after REVIEW approves and the full pipeline
-    # re-runs. The full validation pipeline still runs once REVIEW approves.
-    if from_stage == Stage.REVIEW and target_stage == Stage.DEV:
-        state.review_iteration = True
-        dev_idx = STAGE_ORDER.index(Stage.DEV)
-        review_idx = STAGE_ORDER.index(Stage.REVIEW)
-        loop_skip = set(STAGE_ORDER[dev_idx + 1 : review_idx])
-        loop_skip.discard(Stage.TEST_GATE)  # mechanical regression check stays in the loop
-        state.fast_track_skip = {s.value for s in loop_skip}
-        fast_track_skip_list = sorted(state.fast_track_skip)
-    elif result.is_fast_track:
-        # Minor rollback from other stages: skip stages that already passed
-        state.setup_fast_track()
-        fast_track_skip_list = sorted(state.fast_track_skip)
-    else:
-        # Full rollback: re-run all stages (but preserve stages marked preserve_on_rollback)
-        state.clear_fast_track()
-        state.clear_passed_stages(preserve_marked=True)
-        # Skip preserved stages (e.g., TEST doesn't need re-running if tests already written)
-        if state.passed_stages:
-            state.fast_track_skip = state.passed_stages.copy()
-        fast_track_skip_list = sorted(state.fast_track_skip)
+    # Decide which stages to skip on the way back up (review-iteration loop,
+    # minor fast-track, or full rollback). Single source of truth lives on the
+    # state object, alongside the other fast-track helpers.
+    fast_track_skip_list = state.plan_rollback_skips(
+        from_stage, target_stage, is_fast_track=result.is_fast_track
+    )
 
     # Log rollback event with fast-track info
     from galangal.logging import workflow_logger

@@ -664,9 +664,7 @@ class WorkflowEngine:
         # Review iteration: when REVIEW approves during a DEV↔REVIEW loop,
         # rewind to run the full validation pipeline before final REVIEW.
         if current == Stage.REVIEW and self.state.review_iteration:
-            self.state.review_iteration = False
-            self.state.clear_fast_track()
-            self.state.clear_passed_stages()
+            self.state.complete_review_iteration()
             # Archive rollback now that review iteration is complete
             if tui_app:
                 archive_rollback_if_exists(self.state.task_name, tui_app)

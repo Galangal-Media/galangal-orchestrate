@@ -4,6 +4,24 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.55.0 — Resolver consolidation + engine test harness
+
+Internal refactor (behavior-preserving) plus its safety net.
+
+- **Rollback skip planning consolidated:** the three-branch fast-track logic
+  (REVIEW→DEV iteration loop / minor fast-track / full rollback) that was inlined
+  in `handle_rollback` now lives in one `WorkflowState.plan_rollback_skips()`
+  method, alongside the other fast-track helpers — the mirror of `get_next_stage`
+  for the rollback path. The review-iteration *exit* logic is likewise extracted to
+  `complete_review_iteration()`, so both sides of that state machine are named
+  methods on the state object rather than scattered flag mutations.
+- **AI-free engine simulation harness** (`tests/workflow_harness.py` +
+  `tests/test_workflow_engine_sim.py`, 10 scenarios): drives the real engine through
+  scripted per-stage outcomes by patching the single `_execute_stage` seam, pinning
+  stage advancement, all three rollback branches, REDESIGN routing, task-type fast
+  paths, and the rollback cap (and its REVIEW↔DEV exemption). This is the regression
+  net that made the consolidation safe — every stage trace is identical before/after.
+
 ## 0.54.0 — Workflow & prompt design improvements
 
 - **REVIEW prompt rewritten:** genericized (removed one project's AsyncPG/JSONB
