@@ -4,6 +4,8 @@ Artifact schema validation.
 
 from __future__ import annotations
 
+import re
+
 from galangal.schemas.loader import SchemaLoader, get_schema_loader
 from galangal.schemas.models import SchemaResult, SectionValidationResult
 
@@ -49,15 +51,19 @@ class ArtifactSchemaValidator:
         section_results: list[SectionValidationResult] = []
 
         for name, spec in sections.items():
-            # Check if section is present (case-insensitive, normalized)
+            # Check if section is present (case-insensitive, normalized, tolerant
+            # of numbering / decoration / extra words in the header).
             normalized_name = self._normalize(name)
-            present = normalized_name in parsed_sections
+            matched_key = next(
+                (key for key in parsed_sections if self._section_matches(normalized_name, key)),
+                None,
+            )
+            present = matched_key is not None
 
             # Check if section is empty
             empty = False
             if present:
-                section_content = parsed_sections[normalized_name]
-                empty = self._is_empty(section_content)
+                empty = self._is_empty(parsed_sections[matched_key])
 
             result = SectionValidationResult(
                 name=name,
@@ -90,19 +96,21 @@ class ArtifactSchemaValidator:
     def _parse_sections(self, content: str) -> dict[str, str]:
         """Parse markdown into section name -> content mapping.
 
-        Uses the same logic as lineage module for consistency.
+        Recognizes both ``#`` headers and standalone bold-label lines
+        (``**Acceptance Criteria**``) as section boundaries, since models
+        frequently use the latter.
         """
         sections: dict[str, str] = {}
         current = "preamble"
         current_lines: list[str] = []
 
         for line in content.split("\n"):
-            if line.startswith("#"):
+            header_text = self._header_text(line)
+            if header_text is not None:
                 # Save previous section
                 if current_lines:
                     sections[current] = "\n".join(current_lines)
                 # Start new section
-                header_text = line.lstrip("#").strip()
                 current = self._normalize(header_text)
                 current_lines = []
             else:
@@ -114,9 +122,54 @@ class ArtifactSchemaValidator:
 
         return sections
 
+    def _header_text(self, line: str) -> str | None:
+        """Return the header text if the line is a section header, else None.
+
+        A header is a ``#``-prefixed line, or a standalone fully-bold line.
+        """
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            return stripped.lstrip("#").strip()
+        # Standalone bold label, e.g. "**Acceptance Criteria**" / "__Risks__"
+        for marker in ("**", "__"):
+            if (
+                stripped.startswith(marker)
+                and stripped.endswith(marker)
+                and len(stripped) > 2 * len(marker)
+                and marker not in stripped[len(marker) : -len(marker)]
+            ):
+                return stripped[len(marker) : -len(marker)].strip()
+        return None
+
     def _normalize(self, name: str) -> str:
-        """Normalize section name for matching."""
-        return name.lower().strip().replace(" ", "-")
+        """Normalize a section name for matching.
+
+        Lowercases, strips leading list numbering (``1.`` / ``2)``) and markdown
+        emphasis, and collapses any run of non-alphanumeric characters to a single
+        hyphen so headers like ``## 1. Acceptance Criteria:`` and
+        ``**Acceptance Criteria (v2)**`` normalize toward ``acceptance-criteria``.
+        """
+        s = name.strip().lower()
+        s = re.sub(r"^[\s\-*_#>]*\d+[.)]\s*", "", s)  # leading "1." / "2)"
+        s = s.strip("*_` ")
+        s = re.sub(r"[^a-z0-9]+", "-", s)
+        return s.strip("-")
+
+    def _section_matches(self, target: str, key: str) -> bool:
+        """Whether a parsed header ``key`` satisfies required section ``target``.
+
+        Matches if equal, or if the target's hyphen tokens appear as a contiguous
+        run within the key's tokens (so ``acceptance-criteria`` matches
+        ``acceptance-criteria-v2`` and a numbering-stripped ``acceptance-criteria``).
+        """
+        if not target:
+            return False
+        if target == key:
+            return True
+        t = target.split("-")
+        k = key.split("-")
+        n = len(t)
+        return any(k[i : i + n] == t for i in range(len(k) - n + 1))
 
     def _is_empty(self, content: str) -> bool:
         """Check if section content is effectively empty.
@@ -129,8 +182,6 @@ class ArtifactSchemaValidator:
             return True
 
         # Check for only HTML comments
-        import re
-
         no_comments = re.sub(r"<!--.*?-->", "", stripped, flags=re.DOTALL)
         if not no_comments.strip():
             return True

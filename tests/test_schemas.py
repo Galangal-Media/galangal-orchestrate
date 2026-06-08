@@ -338,6 +338,54 @@ Does Z instead.
         # Should pass with bug_fix sections
         assert result.valid is True
 
+    def test_validate_numbered_and_decorated_headers(self):
+        """Numbered / colon-suffixed headers satisfy required sections."""
+        validator = ArtifactSchemaValidator()
+
+        content = """# 1. Overview
+The thing.
+
+## 2. Requirements
+- r1
+
+## Acceptance Criteria:
+- [ ] a
+"""
+        result = validator.validate("SPEC.md", content, "feature")
+        assert result.valid is True, result.errors
+
+    def test_validate_bold_label_sections(self):
+        """Standalone bold labels count as section headers."""
+        validator = ArtifactSchemaValidator()
+
+        content = """**Overview**
+The thing.
+
+**Requirements**
+- r1
+
+**Acceptance Criteria**
+- [ ] a
+"""
+        result = validator.validate("SPEC.md", content, "feature")
+        assert result.valid is True, result.errors
+
+    def test_validate_header_with_extra_words(self):
+        """A required section matches a header with trailing qualifiers."""
+        validator = ArtifactSchemaValidator()
+
+        content = """# Overview
+x
+
+# Requirements (core)
+- r1
+
+# Acceptance Criteria (v2)
+- [ ] a
+"""
+        result = validator.validate("SPEC.md", content, "feature")
+        assert result.valid is True, result.errors
+
 
 class TestDefaultSchemas:
     """Tests for default schema definitions."""

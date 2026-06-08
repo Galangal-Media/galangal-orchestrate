@@ -288,6 +288,12 @@ class PromptBuilder:
         # Add relevant artifacts based on stage
         context_parts.extend(self._get_artifact_context(stage, task_name))
 
+        # Tell the model the required structure of the artifacts it must produce,
+        # so deterministic schema-validation failures don't cost a full retry.
+        schema_requirements = self._get_schema_requirements(stage, state)
+        if schema_requirements:
+            context_parts.append(schema_requirements)
+
         # Add mistake warnings if tracking is available
         mistake_warnings = self._get_mistake_warnings(stage, state)
         if mistake_warnings:
@@ -329,6 +335,49 @@ Only update documentation types marked as YES above.""")
         decision_suffix = f"\n\n---\n\n{decision_info}" if decision_info else ""
 
         return f"{context}\n\n---\n\n{base_prompt}{decision_suffix}"
+
+    def _get_schema_requirements(self, stage: Stage, state: WorkflowState) -> str:
+        """Describe the required structure of the artifacts this stage produces.
+
+        The schema system already knows which sections each artifact needs (with
+        per-task-type overrides); surfacing that up front means the model gets the
+        contract before it writes, rather than learning it only after a failed
+        validation costs a full retry round-trip.
+        """
+        produced = getattr(stage.metadata, "produces_artifacts", None) or []
+        if not produced:
+            return ""
+
+        from galangal.schemas.loader import get_schema_loader
+
+        loader = get_schema_loader()
+        task_type = state.task_type.value
+        blocks: list[str] = []
+
+        for artifact_name in produced:
+            schema = loader.get_schema(artifact_name)
+            if not schema:
+                continue
+            sections = schema.get_sections_for_task_type(task_type)
+            if not sections:
+                continue
+            lines = [f"## {artifact_name}"]
+            for name, spec in sections.items():
+                title = name.replace("-", " ").title()
+                tag = "required" if spec.required else "optional"
+                desc = f" — {spec.description}" if spec.description else ""
+                lines.append(f"- `# {title}` ({tag}){desc}")
+            blocks.append("\n".join(lines))
+
+        if not blocks:
+            return ""
+
+        return (
+            "\n# Required Artifact Structure\n"
+            "Produce each artifact below using these markdown `#` section headers "
+            "(use the exact header names). Required sections must be present and "
+            "non-empty:\n\n" + "\n\n".join(blocks)
+        )
 
     def _get_artifact_context(self, stage: Stage, task_name: str) -> list[str]:
         """
