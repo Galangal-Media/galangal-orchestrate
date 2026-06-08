@@ -621,11 +621,13 @@ Only update documentation types marked as YES above.""")
             Formatted warnings string, or empty string if none.
         """
         try:
-            from galangal.mistakes import MistakeTracker
+            from galangal.core.git_utils import get_changed_files
+            from galangal.mistakes import get_tracker
 
-            tracker = MistakeTracker()
+            tracker = get_tracker()
             return tracker.format_warnings_for_prompt(
                 stage=stage.value,
+                files=get_changed_files() or None,
                 task_description=state.task_description,
             )
         except ImportError:

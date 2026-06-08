@@ -18,6 +18,21 @@ def get_current_head(cwd: Path | None = None) -> str | None:
     return out.strip() if code == 0 and out.strip() else None
 
 
+def get_changed_files(cwd: Path | None = None) -> list[str]:
+    """Best-effort list of files changed in the working tree vs HEAD.
+
+    Used to attach file context to mistakes / mistake lookups. Returns an empty
+    list on any error so callers can treat it as "no file context".
+    """
+    try:
+        code, out, _ = run_command(["git", "diff", "--name-only", "HEAD"], cwd=cwd)
+        if code != 0:
+            return []
+        return [line.strip() for line in out.splitlines() if line.strip()]
+    except Exception:
+        return []
+
+
 def has_changes_to_commit(cwd: Path | None = None) -> bool:
     """Check if there are uncommitted changes.
 

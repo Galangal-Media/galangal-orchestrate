@@ -1055,6 +1055,7 @@ async def _check_staleness_on_resume(
             # If user confirms, roll back to earliest stale stage
             if cascade:
                 earliest_stale = cascade[0][0]
+                earliest_reasons = cascade[0][1]
                 current_stage = state.stage.value
                 app.add_activity(
                     f"Rolling back from {current_stage} to {earliest_stale} due to staleness",
@@ -1066,6 +1067,13 @@ async def _check_staleness_on_resume(
                 # re-run. Otherwise get_next_stage() would skip stale stages that
                 # are still marked as previously-passed, defeating the cascade.
                 state.clear_fast_track()
+                # Feed the section-level change reasons into the re-run so the
+                # stage knows WHAT changed upstream instead of redoing work blind.
+                if earliest_reasons:
+                    state.last_failure = (
+                        "Upstream changes invalidated this stage - focus your "
+                        "re-work on what changed:\n- " + "\n- ".join(earliest_reasons)
+                    )
                 save_state(state)
 
         else:

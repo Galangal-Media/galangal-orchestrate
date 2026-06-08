@@ -196,15 +196,13 @@ class LineageTracker:
     def _normalize(self, name: str) -> str:
         """Normalize a section name for consistent matching.
 
-        Converts to lowercase, replaces spaces with hyphens, strips whitespace.
-
-        Args:
-            name: Section name to normalize.
-
-        Returns:
-            Normalized section name.
+        Uses the shared normalizer so decorated/numbered headers (e.g.
+        ``## 1. File Changes``) map to the same key the dependency specs use
+        (``file-changes``); otherwise staleness detection silently fails open.
         """
-        return name.lower().strip().replace(" ", "-")
+        from galangal.core.utils import normalize_section_name
+
+        return normalize_section_name(name)
 
     def _hash(self, content: str) -> str:
         """Hash content with whitespace normalization.

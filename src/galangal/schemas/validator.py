@@ -142,18 +142,10 @@ class ArtifactSchemaValidator:
         return None
 
     def _normalize(self, name: str) -> str:
-        """Normalize a section name for matching.
+        """Normalize a section name for matching (shared with the lineage tracker)."""
+        from galangal.core.utils import normalize_section_name
 
-        Lowercases, strips leading list numbering (``1.`` / ``2)``) and markdown
-        emphasis, and collapses any run of non-alphanumeric characters to a single
-        hyphen so headers like ``## 1. Acceptance Criteria:`` and
-        ``**Acceptance Criteria (v2)**`` normalize toward ``acceptance-criteria``.
-        """
-        s = name.strip().lower()
-        s = re.sub(r"^[\s\-*_#>]*\d+[.)]\s*", "", s)  # leading "1." / "2)"
-        s = s.strip("*_` ")
-        s = re.sub(r"[^a-z0-9]+", "-", s)
-        return s.strip("-")
+        return normalize_section_name(name)
 
     def _section_matches(self, target: str, key: str) -> bool:
         """Whether a parsed header ``key`` satisfies required section ``target``.

@@ -16,10 +16,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from galangal.config.loader import get_project_root
+from galangal.logging import get_logger
 
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 
+logger = get_logger(__name__)
 
 # Embedding dimension for all-MiniLM-L6-v2 model
 EMBEDDING_DIM = 384
@@ -30,12 +32,28 @@ DEDUP_THRESHOLD = 0.3
 # Maximum mistakes to include in prompt warnings
 MAX_PROMPT_WARNINGS = 5
 
+# Half-life (days) for recency decay of a mistake's effective weight, so a
+# long-fixed high-count mistake doesn't permanently outrank a fresh recurring one.
+RECENCY_HALF_LIFE_DAYS = 30.0
+
+# Process-wide singleton so the embedding model loads once, not per call.
+_tracker: MistakeTracker | None = None
+
+
+def get_tracker() -> MistakeTracker:
+    """Return a process-wide MistakeTracker (caches the SQLite conn + model)."""
+    global _tracker
+    if _tracker is None:
+        _tracker = MistakeTracker()
+    return _tracker
+
 
 def log_mistake(
     text: str,
     stage: str,
     task_name: str,
     default_description: str = "Validation failure",
+    files: list[str] | None = None,
 ) -> None:
     """Log a mistake for future learning. Fails silently if unavailable.
 
@@ -44,9 +62,16 @@ def log_mistake(
         stage: Stage where the mistake occurred.
         task_name: Task name for context.
         default_description: Fallback description if text is empty.
+        files: Files involved in the mistake (enables file-pattern matching).
     """
     try:
-        tracker = MistakeTracker()
+        if files is None:
+            # Best-effort: attach the files currently touched so file-pattern
+            # matching has data to work with on future lookups.
+            from galangal.core.git_utils import get_changed_files
+
+            files = get_changed_files()
+        tracker = get_tracker()
         description = text.split(".")[0].strip() if text else default_description
         if len(description) > 100:
             description = description[:100] + "..."
@@ -55,6 +80,7 @@ def log_mistake(
             feedback=text or default_description,
             stage=stage,
             task=task_name,
+            files=files,
         )
     except ImportError:
         pass
@@ -122,6 +148,11 @@ class MistakeTracker:
                         self.conn.load_extension("vss0")
                     except sqlite3.OperationalError:
                         self._vss_available = False
+                        logger.info(
+                            "mistakes_vss_unavailable",
+                            detail="sqlite-vss extension not loadable; using in-Python "
+                            "cosine similarity fallback (slower on large mistake sets)",
+                        )
                         return False
                 self._vss_available = True
             except Exception:
@@ -311,24 +342,31 @@ class MistakeTracker:
         embedding_blob = self._serialize_embedding(embedding)
 
         if self.vss_available:
-            # Use VSS for efficient similarity search
-            query = """
-                SELECT m.*, v.distance
-                FROM mistakes m
-                JOIN (
-                    SELECT rowid, distance
-                    FROM mistakes_vss
-                    WHERE vss_search(embedding, ?)
-                    LIMIT ?
-                ) v ON m.id = v.rowid
-                WHERE v.distance < ?
+            # Use VSS for efficient similarity search. Build the query explicitly
+            # per branch and bind params positionally (the previous string-replace
+            # + index-juggling approach mis-bound the threshold/limit params).
+            inner = """
+                SELECT rowid, distance
+                FROM mistakes_vss
+                WHERE vss_search(embedding, ?)
+                LIMIT ?
             """
-            params: list = [embedding_blob, limit * 2, threshold]
-
             if stage:
-                query = query.replace("WHERE v.distance", "WHERE m.stage = ? AND v.distance")
-                params.insert(0, stage)
-                params[2] = limit * 2  # Adjust limit position
+                query = f"""
+                    SELECT m.*, v.distance
+                    FROM mistakes m
+                    JOIN ({inner}) v ON m.id = v.rowid
+                    WHERE m.stage = ? AND v.distance < ?
+                """
+                params: list = [embedding_blob, limit * 2, stage, threshold]
+            else:
+                query = f"""
+                    SELECT m.*, v.distance
+                    FROM mistakes m
+                    JOIN ({inner}) v ON m.id = v.rowid
+                    WHERE v.distance < ?
+                """
+                params = [embedding_blob, limit * 2, threshold]
 
             rows = self.conn.execute(query, params).fetchall()
         else:
@@ -436,10 +474,16 @@ class MistakeTracker:
                         mistakes.append(mistake)
                         seen_ids.add(mistake.id)
 
-        # Sort by occurrence count (most common first), then recency
-        mistakes.sort(key=lambda m: (-m.occurrence_count, -m.last_timestamp))
+        # Rank by a recency-decayed occurrence score so a long-fixed mistake with
+        # a high historical count doesn't permanently outrank a fresh recurring one.
+        mistakes.sort(key=self._relevance_score, reverse=True)
 
         return mistakes[:MAX_PROMPT_WARNINGS]
+
+    def _relevance_score(self, mistake: Mistake) -> float:
+        """Score a mistake by occurrence count decayed by how long ago it last occurred."""
+        decay = 0.5 ** (mistake.age_days / RECENCY_HALF_LIFE_DAYS)
+        return mistake.occurrence_count * decay
 
     def _matches_files(self, patterns: list[str], files: list[str]) -> bool:
         """Check if any file matches any pattern."""

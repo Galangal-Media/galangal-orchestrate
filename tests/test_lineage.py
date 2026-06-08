@@ -146,7 +146,17 @@ class TestNormalization:
         tracker = LineageTracker(config)
 
         assert tracker._normalize("Implementation Details") == "implementation-details"
-        assert tracker._normalize("Multiple   Spaces") == "multiple---spaces"
+        # Runs of separators collapse to a single hyphen (improved normalization).
+        assert tracker._normalize("Multiple   Spaces") == "multiple-spaces"
+
+    def test_normalize_strips_numbering_and_decoration(self):
+        """Numbered / decorated headers normalize to the same key as plain ones."""
+        config = LineageConfig(enabled=True)
+        tracker = LineageTracker(config)
+
+        assert tracker._normalize("## 1. File Changes:") == "file-changes"
+        assert tracker._normalize("**Acceptance Criteria**") == "acceptance-criteria"
+        assert tracker._normalize("Requirements (core)") == "requirements-core"
 
     def test_normalize_strips_whitespace(self):
         """Test normalization strips leading/trailing whitespace."""

@@ -118,6 +118,27 @@ def truncate_text(
     return text[:max_length] + suffix
 
 
+def normalize_section_name(name: str) -> str:
+    """Normalize a markdown section name for consistent matching.
+
+    Lowercases, strips leading list numbering (``1.`` / ``2)``) and markdown
+    emphasis, and collapses any run of non-alphanumeric characters to a single
+    hyphen, so headers like ``## 1. Acceptance Criteria:`` and
+    ``**Acceptance Criteria (v2)**`` both normalize toward ``acceptance-criteria``.
+
+    Shared by the schema validator and lineage tracker so section identity is
+    computed identically on both sides (otherwise staleness detection silently
+    fails open on decorated headers).
+    """
+    import re
+
+    s = name.strip().lower()
+    s = re.sub(r"^[\s\-*_#>]*\d+[.)]\s*", "", s)  # leading "1." / "2)"
+    s = s.strip("*_` ")
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    return s.strip("-")
+
+
 def extract_json_object(text: str) -> dict[str, Any] | None:
     """Best-effort extraction of a single JSON object from model/CLI output.
 
