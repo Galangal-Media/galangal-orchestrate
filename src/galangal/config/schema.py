@@ -22,6 +22,15 @@ class StageConfig(BaseModel):
     skip: list[str] = Field(default_factory=list, description="Stages to always skip")
     timeout: int = Field(default=14400, description="Stage timeout in seconds (default: 4 hours)")
     max_retries: int = Field(default=5, description="Max retries per stage")
+    review_iteration_ask_after: int = Field(
+        default=3,
+        description=(
+            "During a REVIEW->DEV iteration loop, surface a summary of the "
+            "outstanding review notes and ask the user (with an option to add "
+            "guidance) after this many round-trips without approval. 0 disables "
+            "the check-in and lets the loop run freely."
+        ),
+    )
     commit_per_stage: bool = Field(
         default=True,
         description="Create WIP commits after each code-modifying stage, squash at finalization",

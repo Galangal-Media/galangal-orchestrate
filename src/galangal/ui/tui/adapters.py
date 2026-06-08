@@ -40,6 +40,7 @@ class PromptType(Enum):
     MULTILINE_INPUT = "multiline_input"  # Multi-line text input
     DISCOVERY_QA = "discovery_qa"  # Discovery Q&A session
     PEER_REVIEW_DECISION = "peer_review_decision"  # Peer review comparison
+    REVIEW_ITERATION_CHECKIN = "review_iteration_checkin"  # REVIEW->DEV loop check-in
 
 
 # Default options for prompts without specific configuration
@@ -112,6 +113,12 @@ PROMPT_OPTIONS: dict[PromptType, list[PromptOption]] = {
         PromptOption("3", "Provide guidance & retry", "user_feedback", "#8ec07c"),
         PromptOption("4", "View Full Review", "view", "#83a598"),
         PromptOption("5", "Quit", "quit", "#fabd2f"),
+    ],
+    PromptType.REVIEW_ITERATION_CHECKIN: [
+        PromptOption("1", "Keep iterating", "continue", "#b8bb26"),
+        PromptOption("2", "Provide guidance & continue", "user_feedback", "#8ec07c"),
+        PromptOption("3", "View Review Notes", "view", "#83a598"),
+        PromptOption("4", "Pause workflow", "quit", "#fabd2f"),
     ],
 }
 
