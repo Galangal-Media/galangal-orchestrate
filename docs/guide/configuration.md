@@ -164,6 +164,7 @@ stages:
 | `timeout` | int | `14400` | Stage timeout (seconds) |
 | `max_retries` | int | `5` | Max retries per stage |
 | `commit_per_stage` | bool | `true` | Create WIP commits after code-modifying stages, squash at finalization |
+| `review_iteration_ask_after` | int | `3` | During a REVIEW→DEV iteration loop, surface a summary of the outstanding review notes and ask you (with an option to add guidance) after this many round-trips without approval. `0` disables the check-in and lets the loop run freely. |
 
 Valid stages to skip:
 - `DESIGN`, `PREFLIGHT`, `MIGRATION`, `TEST`
@@ -222,9 +223,14 @@ ai:
       command: "claude"
       args:
         - "--verbose"
+      model: opus          # optional: pin a model (passed via --model); unset = CLI default
       max_turns: 200
   stage_backends:
     REVIEW: codex
+  stage_models:            # optional: per-stage model overrides
+    REVIEW: opus
+    DEV: sonnet
+  auto_model_tiers: false  # optional: cheaper models for mechanical stages
   profile: null
   profiles: {}
 ```
@@ -235,11 +241,16 @@ ai:
 | `backends` | dict | - | Backend configurations |
 | `backends.<name>.command` | string | - | CLI command |
 | `backends.<name>.args` | list | `[]` | Additional arguments |
+| `backends.<name>.model` | string | `null` | Model passed to the CLI via `--model` (e.g. `opus`, `sonnet`, `claude-opus-4-8`). Unset = the CLI's own default model. Honored by the `claude` backend. |
 | `backends.<name>.max_turns` | int | `200` | Max AI turns |
 | `backends.<name>.read_only` | bool | `false` | Backend runs in read-only mode; artifacts written via post-processing |
 | `stage_backends` | dict | `{}` | Per-stage backend overrides (e.g., `{"REVIEW": "codex"}`) |
+| `stage_models` | dict | `{}` | Per-stage model overrides applied to the resolved backend (e.g., `{"REVIEW": "opus", "DEV": "sonnet"}`). Takes priority over `auto_model_tiers`. |
+| `auto_model_tiers` | bool | `false` | Opt-in: route mechanical stages (TEST/QA/DOCS/SUMMARY) to cheaper models, leaving reasoning stages on the CLI default. Explicit `stage_models` and a pinned `backends.<name>.model` always win. Honored by the `claude` backend. |
 | `profile` | string | `null` | Active profile name (see [AI Profiles](#ai-profiles)) |
 | `profiles` | dict | `{}` | Named routing profiles (see [AI Profiles](#ai-profiles)) |
+
+> **Model selection precedence (claude backend):** per-stage `stage_models` → `auto_model_tiers` mapping → pinned `backends.claude.model` → the CLI's own default. If none are set, galangal uses whatever model your installed Claude Code CLI defaults to.
 
 ### peer_review
 
@@ -250,6 +261,9 @@ peer_review:
   enabled: true
   backend: "codex"
   stages: ["PM", "DESIGN"]
+  auto_accept: true
+  ask_user_after_loops: 2
+  max_auto_loops: 5
 ```
 
 | Field | Type | Default | Description |
@@ -257,8 +271,15 @@ peer_review:
 | `enabled` | bool | `false` | Enable peer review after configured stages |
 | `backend` | string | `"codex"` | Which AI backend performs the review |
 | `stages` | list | `["PM", "DESIGN"]` | Which stages get peer reviewed |
+| `auto_accept` | bool | `true` | Auto-accept reviewer feedback and re-run the stage without prompting |
+| `ask_user_after_loops` | int | `2` | Surface the disagreement to you (with an option to add guidance) after this many auto-accept loops without resolution. `0` = ask on the first disagreement. Capped by `max_auto_loops`. |
+| `max_auto_loops` | int | `5` | Hard cap on auto-accept loops before you're asked for advice |
 
-When enabled, after a configured stage completes successfully, a second AI backend independently reviews the output. If the reviewer disagrees, both opinions are shown to the user who makes the final call. If the reviewer backend is unavailable or fails, the workflow continues normally (graceful degradation).
+When enabled, after a configured stage completes successfully a second AI backend independently reviews the output. If it disagrees:
+
+- With `auto_accept` (default), the stage re-runs with the reviewer's feedback automatically. After `ask_user_after_loops` round-trips without converging, you get a summary and can **keep iterating, add free-text guidance, accept either side, or pause** — instead of silently looping to the hard cap.
+- If the reviewer **ran but produced unparseable output**, it is treated as `REQUEST_CHANGES` (fail-closed), not a silent approval.
+- If the reviewer backend is genuinely **unavailable** (not installed / failed to start), the workflow continues normally (graceful degradation).
 
 ### AI Profiles
 

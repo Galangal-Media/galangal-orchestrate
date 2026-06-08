@@ -19,8 +19,11 @@ If anything fails, the workflow rolls back with context about what went wrong.
 ## Quick Start
 
 ```bash
-# Install
+# Install (lean core)
 pip install galangal-orchestrate
+
+# Optional: semantic mistake tracking (adds sentence-transformers/torch, ~hundreds of MB)
+pip install "galangal-orchestrate[full]"
 
 # Initialize in your project
 cd your-project
@@ -28,6 +31,9 @@ galangal init
 
 # Start a task
 galangal start "Add user authentication with JWT"
+
+# Run non-interactively (CI/scripts, no TUI)
+galangal start "Fix the login bug" --type bugfix --headless
 
 # Check status / resume
 galangal status

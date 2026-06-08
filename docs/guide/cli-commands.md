@@ -44,20 +44,30 @@ galangal start "Add user authentication"
 
 Options:
 ```bash
-galangal start "Fix login bug" --type bug_fix
+galangal start "Fix login bug" --type bugfix      # skip the interactive type picker
 galangal start "Update deps" --type chore
-galangal start "Refactor auth" --type refactor
-galangal start "Add docs" --type docs
-galangal start "Critical fix" --type hotfix
+galangal start "Add auth" --name add-auth         # explicit task name
+galangal start "Fix login" --type bugfix --skip-discovery   # skip the Q&A phase
+galangal start "Fix login" --type bugfix --headless         # no TUI (CI/scripts)
 ```
 
-Task types:
+| Flag | Description |
+|------|-------------|
+| `--type, -t` | Task type — skips the interactive selection. Accepts the names below or `1`–`6`. |
+| `--name, -n` | Task name (auto-generated from the description if omitted). |
+| `--skip-discovery` | Skip the discovery Q&A phase and go straight to spec generation. |
+| `--issue, -i` | Create the task from a GitHub issue number. |
+| `--headless` | Run without the interactive TUI, for CI/scripts. Requires a description; defaults `--type` to `feature` if not given. Does not support `--issue` (use `galangal github run`). |
+
+Task types (`--type` values):
 - `feature` (default) - New functionality
-- `bug_fix` - Fix broken behavior
+- `bugfix` - Fix broken behavior
 - `refactor` - Code restructuring
 - `chore` - Maintenance tasks
 - `docs` - Documentation only
 - `hotfix` - Critical fix
+
+**Exit codes** (useful for scripting/CI): `0` success, `1` failure/cancelled setup.
 
 ### list
 
@@ -102,6 +112,8 @@ Options:
 galangal reset --stage PM       # Reset to specific stage
 galangal reset --keep-artifacts # Keep existing artifacts
 ```
+
+Declining the confirmation prompt exits `0` (a cancellation, not an error).
 
 ## Workflow Control Commands
 
@@ -263,6 +275,8 @@ galangal complete --pr --draft      # Create draft PR
 galangal complete --archive         # Archive task to done/
 galangal complete --no-archive      # Keep task in tasks dir
 ```
+
+**Exit codes:** `0` finalized with a PR created, `2` finalized but the PR was not created (create it manually), `1` finalization failed.
 
 ## Utility Commands
 
