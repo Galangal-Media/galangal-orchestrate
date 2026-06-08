@@ -72,7 +72,11 @@ Create `SECURITY_CHECKLIST.md` in the task's artifacts directory:
 
 **APPROVED** - Safe to deploy
 OR
-**REJECTED** - Must fix: [list blocking issues]
+**REJECTED** - Must fix in DEV: [list blocking code-level issues]
+OR
+**REDESIGN** - The vulnerability is architectural (the approach itself is unsafe,
+not just the code). Rolls back to DESIGN to reconsider the approach. Explain what is
+structurally unsafe and the safer direction.
 ```
 
 ## Process
@@ -81,4 +85,5 @@ OR
 2. Run available security scans
 3. Document any issues found
 4. If issues are pre-existing or waived, document the justification
-5. Provide final APPROVED or REJECTED recommendation
+5. Provide a final decision: **APPROVED**, **REJECTED** (fixable in DEV), or
+   **REDESIGN** (architectural flaw — back to DESIGN)

@@ -541,6 +541,21 @@ Only update documentation types marked as YES above.""")
                 f"{content}"
             )
 
+        # DESIGN stage: on a REDESIGN rollback from REVIEW/SECURITY, include the
+        # prior design and the rollback feedback so it revises the approach rather
+        # than regenerating it blind.
+        if stage == Stage.DESIGN:
+            if artifact_exists("DESIGN.md", task_name):
+                parts.append(
+                    f"\n# DESIGN.md (your previous design — revise it)\n"
+                    f"{read_artifact('DESIGN.md', task_name)}"
+                )
+            if artifact_exists("ROLLBACK.md", task_name):
+                parts.append(
+                    "\n# ROLLBACK.md (PRIORITY - the approach was sent back for redesign; "
+                    f"address this)\n{read_artifact('ROLLBACK.md', task_name)}"
+                )
+
         # Stages after DESIGN: include DESIGN.md if it exists, otherwise fall back to PLAN.md
         # (DESIGN.md supersedes PLAN.md, but some task types skip DESIGN)
         if stage not in [Stage.PM, Stage.DESIGN]:

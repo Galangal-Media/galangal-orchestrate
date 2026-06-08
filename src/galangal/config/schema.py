@@ -405,6 +405,14 @@ class TaskTypeSettings(BaseModel):
         default=False,
         description="Skip the discovery Q&A phase for this task type",
     )
+    skip_stages: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Extra stages to skip for this task type, on top of the built-in "
+            "defaults (e.g. ['DESIGN', 'DOCS', 'SUMMARY'] for a faster path). "
+            "PM, DEV, and COMPLETE cannot be skipped."
+        ),
+    )
 
 
 class ArtifactDependencySpec(BaseModel):

@@ -300,6 +300,9 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
             ("APPROVED", True, "Security review approved", None, False),
             ("REJECTED", False, "Security review found blocking issues", "DEV", False),
             ("BLOCKED", False, "Security review found blocking issues", "DEV", False),
+            # Security flaw rooted in the design (not just the code) -> reconsider
+            # the approach in DESIGN.
+            ("REDESIGN", False, "Security review found an architectural flaw", "DESIGN", False),
         ),
         default_validation="decision",
         artifact_schema={
@@ -318,6 +321,9 @@ STAGE_METADATA: dict[Stage, StageMetadata] = {
         decision_outcomes=(
             ("APPROVE", True, "Review approved", None, False),
             ("REQUEST_CHANGES", False, "Review requested changes", "DEV", False),
+            # Architectural problem: reconsider the approach in DESIGN rather than
+            # band-aiding it in DEV.
+            ("REDESIGN", False, "Review found an architectural problem", "DESIGN", False),
         ),
         default_validation="decision_or_markers",
         artifact_schema={

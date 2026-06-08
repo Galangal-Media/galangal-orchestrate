@@ -41,8 +41,14 @@ Create QA_REPORT.md in the task's artifacts directory:
 [Type check results]
 
 ## Acceptance Criteria Verification
-- [ ] Criterion 1: PASS/FAIL
-- [ ] Criterion 2: PASS/FAIL
+List EVERY acceptance criterion from SPEC.md verbatim, with a verdict and the
+concrete evidence that proves it (a test name, command output, or observed
+behavior) — not just an assertion that it passes.
+
+| # | Criterion (verbatim from SPEC.md) | Verdict | Evidence |
+|---|-----------------------------------|---------|----------|
+| 1 | ... | PASS / FAIL | e.g. "test_login_rejects_expired_token passes" |
+| 2 | ... | PASS / FAIL | ... |
 
 ## Issues Found
 [List any issues that need to be addressed]
@@ -64,4 +70,7 @@ Create QA_REPORT.md in the task's artifacts directory:
 - Focus on exploratory testing, edge cases, and code quality
 - Be thorough in checking acceptance criteria
 - Document any issues clearly for the DEV stage to fix
+- Every acceptance criterion from SPEC.md must appear in the verification table.
+- Overall status is PASS only if **every** criterion is PASS (or a documented,
+  sound deviation). Any unmet criterion → overall FAIL.
 - If issues are found, status should be FAIL and decision file should contain FAIL

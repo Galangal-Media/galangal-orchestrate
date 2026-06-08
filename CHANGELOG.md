@@ -4,6 +4,27 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.54.0 — Workflow & prompt design improvements
+
+- **REVIEW prompt rewritten:** genericized (removed one project's AsyncPG/JSONB
+  specifics that were shipped to everyone), and it now blocks (`REQUEST_CHANGES`)
+  only on genuine correctness/security/maintainability defects — style, formatting,
+  typos, unused imports, and missing type hints are recorded as non-blocking
+  Suggestions instead of triggering an expensive DEV↔REVIEW loop.
+- **REDESIGN rollback target:** REVIEW and SECURITY can now return `REDESIGN`, which
+  rolls back to **DESIGN** (not DEV) for architectural problems, so a flawed approach
+  is reconsidered rather than band-aided in DEV. DESIGN now receives `ROLLBACK.md` and
+  the prior `DESIGN.md` so it revises instead of regenerating blind.
+- **TEST_GATE runs inside the DEV↔REVIEW loop** (when enabled), so a regression
+  introduced by a review fix is caught immediately rather than only after REVIEW
+  approves and the full pipeline re-runs.
+- **QA acceptance-criteria traceability:** the QA report now requires a per-criterion
+  table (criterion verbatim → verdict → concrete evidence), and overall PASS requires
+  every criterion to pass — replacing the loose holistic checkbox.
+- **Configurable per-task-type fast path:** `task_type_settings.<type>.skip_stages`
+  lets a project prune stages for a faster pipeline (on top of the built-in
+  per-type defaults; PM/DEV/COMPLETE are never skippable).
+
 ## 0.53.0 — Hub hardening (round 2)
 
 - **Agent-identity protection:** the connection manager no longer lets a

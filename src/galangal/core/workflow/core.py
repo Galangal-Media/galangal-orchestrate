@@ -247,8 +247,17 @@ def get_next_stage(current: Stage, state: WorkflowState) -> Stage | None:
         if next_stage.value in config_skip_stages:
             continue
 
-        # Check 2: task type skipping
+        # Check 2: task type skipping (built-in defaults + per-project config
+        # overrides). Config can prune stages for a faster path; PM/DEV/COMPLETE
+        # are never skippable.
         if should_skip_for_task_type(next_stage, task_type):
+            continue
+        tt_settings = config.task_type_settings.get(task_type.value)
+        if (
+            tt_settings
+            and next_stage not in (Stage.PM, Stage.DEV, Stage.COMPLETE)
+            and next_stage.value.upper() in {s.upper() for s in tt_settings.skip_stages}
+        ):
             continue
 
         # Check 3: fast-track skipping (minor rollback - skip stages that already passed)
@@ -1023,14 +1032,18 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
         reason=reason,
     )
 
-    # Review iteration: when REVIEW rolls back to DEV, enter direct DEV↔REVIEW
-    # loop by skipping all stages between DEV and REVIEW. The full validation
-    # pipeline runs once REVIEW approves.
+    # Review iteration: when REVIEW rolls back to DEV, enter a direct DEV↔REVIEW
+    # loop by skipping the stages between DEV and REVIEW. TEST_GATE is kept in the
+    # loop (when enabled) so a regression introduced by a review fix is caught
+    # immediately rather than only after REVIEW approves and the full pipeline
+    # re-runs. The full validation pipeline still runs once REVIEW approves.
     if from_stage == Stage.REVIEW and target_stage == Stage.DEV:
         state.review_iteration = True
         dev_idx = STAGE_ORDER.index(Stage.DEV)
         review_idx = STAGE_ORDER.index(Stage.REVIEW)
-        state.fast_track_skip = {s.value for s in STAGE_ORDER[dev_idx + 1 : review_idx]}
+        loop_skip = set(STAGE_ORDER[dev_idx + 1 : review_idx])
+        loop_skip.discard(Stage.TEST_GATE)  # mechanical regression check stays in the loop
+        state.fast_track_skip = {s.value for s in loop_skip}
         fast_track_skip_list = sorted(state.fast_track_skip)
     elif result.is_fast_track:
         # Minor rollback from other stages: skip stages that already passed
