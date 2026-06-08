@@ -94,12 +94,16 @@ class TestClaudeBackendInvoke:
         assert "50" in result.message
 
     def test_max_turns_returns_max_turns_result(self):
-        """Test that max turns exceeded returns StageResult.max_turns."""
+        """Max turns is detected from the structured result subtype, not prose."""
         backend = ClaudeBackend()
+
+        max_turns_event = (
+            '{"type":"result","subtype":"error_max_turns","result":"","num_turns":200}\n'
+        )
 
         mock_process = MagicMock()
         mock_process.poll.side_effect = [None, 0]
-        mock_process.stdout.readline.side_effect = ["reached max turns limit\n", ""]
+        mock_process.stdout.readline.side_effect = [max_turns_event, ""]
         mock_process.communicate.return_value = ("", "")
         mock_process.returncode = 0
 

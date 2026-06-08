@@ -68,6 +68,7 @@ def prepare_backend_for_stage(
 def get_backend(
     name: str,
     config: GalangalConfig | None = None,
+    model_override: str | None = None,
 ) -> AIBackend:
     """
     Factory function to instantiate backends by name.
@@ -75,6 +76,8 @@ def get_backend(
     Args:
         name: Backend name (e.g., "claude", "codex")
         config: Optional project config to get backend-specific settings
+        model_override: Optional model to use instead of the backend's
+            configured model (e.g., a per-stage override)
 
     Returns:
         Instantiated backend with configuration
@@ -91,6 +94,10 @@ def get_backend(
     backend_config: AIBackendConfig | None = None
     if config:
         backend_config = config.ai.backends.get(name.lower())
+
+    # Apply a per-stage model override without mutating the shared config object.
+    if model_override and backend_config is not None:
+        backend_config = backend_config.model_copy(update={"model": model_override})
 
     return backend_class(backend_config)
 
@@ -131,6 +138,7 @@ def get_backend_with_fallback(
     name: str,
     fallbacks: dict[str, str] | None = None,
     config: GalangalConfig | None = None,
+    model_override: str | None = None,
 ) -> AIBackend:
     """
     Get a backend, falling back to alternatives if unavailable.
@@ -139,6 +147,8 @@ def get_backend_with_fallback(
         name: Primary backend name
         fallbacks: Optional custom fallback mapping. Defaults to DEFAULT_FALLBACKS.
         config: Optional project config for backend settings
+        model_override: Optional model to use instead of the backend's
+            configured model (e.g., a per-stage override)
 
     Returns:
         The requested backend if available, otherwise the fallback backend
@@ -149,16 +159,16 @@ def get_backend_with_fallback(
     fallbacks = fallbacks or DEFAULT_FALLBACKS
 
     if is_backend_available(name, config):
-        return get_backend(name, config)
+        return get_backend(name, config, model_override)
 
     # Try fallback
     fallback_name = fallbacks.get(name.lower())
     if fallback_name and is_backend_available(fallback_name, config):
-        return get_backend(fallback_name, config)
+        return get_backend(fallback_name, config, model_override)
 
     # Last resort: try claude if it exists
     if name.lower() != "claude" and is_backend_available("claude", config):
-        return get_backend("claude", config)
+        return get_backend("claude", config, model_override)
 
     raise AIError(
         f"Backend '{name}' not available and no fallback found",
@@ -192,9 +202,14 @@ def get_backend_for_stage(
     else:
         backend_name = config.ai.default
 
+    # Check for a stage-specific model override (applied to the resolved backend)
+    model_override = config.ai.stage_models.get(stage_key)
+
     if use_fallback:
-        return get_backend_with_fallback(backend_name, config=config)
-    return get_backend(backend_name, config)
+        return get_backend_with_fallback(
+            backend_name, config=config, model_override=model_override
+        )
+    return get_backend(backend_name, config, model_override)
 
 
 __all__ = [

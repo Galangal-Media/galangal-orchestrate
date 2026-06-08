@@ -158,6 +158,14 @@ class AIBackendConfig(BaseModel):
 
     command: str = Field(description="Command to invoke the AI")
     args: list[str] = Field(default_factory=list, description="Command arguments")
+    model: str | None = Field(
+        default=None,
+        description=(
+            "Model to pass to the CLI via --model (e.g. 'opus', 'sonnet', "
+            "'claude-opus-4-8'). If unset, the CLI's own default model is used. "
+            "Currently honored by the claude backend."
+        ),
+    )
     max_turns: int = Field(default=200, description="Maximum conversation turns")
     read_only: bool = Field(
         default=False,
@@ -173,6 +181,10 @@ class AIProfile(BaseModel):
     stage_backends: dict[str, str] = Field(
         default_factory=dict,
         description="Per-stage backend overrides (e.g., {'REVIEW': 'codex'})",
+    )
+    stage_models: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-stage model overrides (e.g., {'REVIEW': 'opus', 'DEV': 'sonnet'})",
     )
     peer_review_backend: str | None = Field(
         default=None,
@@ -227,6 +239,13 @@ class AIConfig(BaseModel):
         default_factory=dict,
         description="Per-stage backend overrides (e.g., {'REVIEW': 'codex'})",
     )
+    stage_models: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Per-stage model overrides applied to the resolved backend "
+            "(e.g., {'REVIEW': 'opus', 'DEV': 'sonnet'})"
+        ),
+    )
     profile: str | None = Field(
         default=None,
         description="Active profile name (overrides default and stage_backends)",
@@ -249,6 +268,8 @@ class AIConfig(BaseModel):
         active = self.profiles[self.profile]
         self.default = active.default
         self.stage_backends = active.stage_backends
+        if active.stage_models:
+            self.stage_models = active.stage_models
         return self
 
 

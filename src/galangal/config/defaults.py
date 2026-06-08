@@ -104,6 +104,15 @@ validation:
 ai:
   default: claude
 
+  # Per-stage model overrides (uncomment to use). Applied to the resolved
+  # backend for that stage. Leave a backend's model unset to use the CLI's
+  # own default model.
+  # stage_models:
+  #   REVIEW: opus      # use the strongest model where it matters most
+  #   DESIGN: opus
+  #   DEV: sonnet       # cheaper/faster for mechanical stages
+  #   DOCS: sonnet
+
   # Active profile (uncomment to use)
   # profile: default
 
@@ -114,6 +123,9 @@ ai:
   #     stage_backends:
   #       QA: codex
   #       REVIEW: codex
+  #     stage_models:
+  #       REVIEW: opus
+  #       DEV: sonnet
   #   no-claude:
   #     default: gemini
   #     stage_backends:
@@ -125,6 +137,7 @@ ai:
     claude:
       command: "claude"
       args: ["--output-format", "stream-json", "--verbose", "--max-turns", "{{max_turns}}", "--permission-mode", "bypassPermissions"]
+      # model: opus     # pin a model (passed via --model); unset = CLI default
       max_turns: 200
 
 # =============================================================================

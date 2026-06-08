@@ -75,6 +75,35 @@ def check_claude_auth() -> tuple[bool, str]:
     return True, "CLI available (run 'claude' to verify auth)"
 
 
+def check_active_model() -> tuple[bool | None, str]:
+    """Report which model the default backend will use.
+
+    A blank model means the CLI's own default model is used, so galangal
+    automatically picks up whatever model the installed CLI defaults to.
+    """
+    if not is_initialized():
+        return None, "Not initialized (uses CLI default model)"
+
+    try:
+        from galangal.config.loader import load_config, reset_caches
+
+        reset_caches()  # Ensure fresh load
+        config = load_config()
+    except Exception as e:
+        return False, f"Could not read config: {e}"
+
+    default_name = config.ai.default
+    backend = config.ai.backends.get(default_name)
+    model = backend.model if backend else None
+    base = f"{default_name}: {model}" if model else f"{default_name}: CLI default model"
+
+    overrides = config.ai.stage_models
+    if overrides:
+        pairs = ", ".join(f"{stage}={mdl}" for stage, mdl in sorted(overrides.items()))
+        return True, f"{base} (per-stage: {pairs})"
+    return True, base
+
+
 def check_git_installed() -> tuple[bool, str]:
     """Check git is installed."""
     path = shutil.which("git")
@@ -300,6 +329,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         ("Claude CLI", check_claude_cli),
         ("GitHub CLI", check_github_cli),
         ("Config file", check_config_valid),
+        ("Active model", check_active_model),
         ("Codex backend mode", check_codex_backend_mode),
         ("Gemini backend mode", check_gemini_backend_mode),
         ("Tasks directory", check_tasks_dir),

@@ -43,8 +43,19 @@ class ClaudeBackend(AIBackend):
     def _build_command(self, prompt_file: str, max_turns: int) -> str:
         """Build the shell command to invoke Claude."""
         command, args = self._resolve_command_and_args(max_turns)
+        args = self._with_model(args)
         args_str = " ".join(args)
         return f"cat '{prompt_file}' | {command} {args_str}"
+
+    def _with_model(self, args: list[str]) -> list[str]:
+        """Append --model when a model is configured (and not already present).
+
+        If no model is configured, the Claude CLI's own default model is used.
+        """
+        model = self._config.model if self._config else None
+        if model and "--model" not in args:
+            return [*args, "--model", model]
+        return args
 
     def invoke(
         self,
@@ -105,13 +116,9 @@ class ClaudeBackend(AIBackend):
                 # Process completed - analyze output
                 full_output = result.output
 
-                if "max turns" in full_output.lower() or "reached max" in full_output.lower():
-                    if ui:
-                        ui.add_activity("Max turns reached", "❌")
-                    return StageResult.max_turns(full_output)
-
-                # Extract result from JSON stream
+                # Extract the structured result event from the JSON stream.
                 result_text = ""
+                result_subtype = ""
                 for line in full_output.splitlines():
                     if not line.strip():
                         continue
@@ -119,6 +126,7 @@ class ClaudeBackend(AIBackend):
                         data = json.loads(line.strip())
                         if data.get("type") == "result":
                             result_text = data.get("result", "")
+                            result_subtype = data.get("subtype", "")
                             if ui:
                                 ui.set_turns(data.get("num_turns", 0))
                             break
@@ -126,6 +134,13 @@ class ClaudeBackend(AIBackend):
                         logger.debug("json_decode_error", error=str(e), line=line[:100])
                     except (KeyError, TypeError):
                         pass
+
+                # Detect max-turns from the structured result subtype rather than
+                # scanning prose (Claude's own output can contain "max turns").
+                if result_subtype == "error_max_turns":
+                    if ui:
+                        ui.add_activity("Max turns reached", "❌")
+                    return StageResult.max_turns(full_output)
 
                 if result.exit_code == 0:
                     return StageResult.create_success(
@@ -173,7 +188,9 @@ class ClaudeBackend(AIBackend):
             data = json.loads(line.strip())
             msg_type = data.get("type", "")
 
-            if msg_type == "assistant" and "tool_use" in str(data):
+            if msg_type == "assistant":
+                # Handle every assistant message: text-only turns (narration and
+                # final answers) carry no tool_use block but must still display.
                 self._handle_assistant_message(data, ui, pending_tools)
             elif msg_type == "user":
                 self._handle_user_message(data, ui, pending_tools)
@@ -298,9 +315,11 @@ class ClaudeBackend(AIBackend):
             with self._temp_file(prompt, suffix=".txt") as prompt_file:
                 # Use config command or default
                 command = self._config.command if self._config else self.DEFAULT_COMMAND
+                model = self._config.model if self._config else None
+                model_flag = f" --model {model}" if model else ""
 
                 # Pipe file content to claude via stdin (simple text output mode)
-                shell_cmd = f"cat '{prompt_file}' | {command} --output-format text"
+                shell_cmd = f"cat '{prompt_file}' | {command} --output-format text{model_flag}"
                 result = subprocess.run(
                     shell_cmd,
                     shell=True,
