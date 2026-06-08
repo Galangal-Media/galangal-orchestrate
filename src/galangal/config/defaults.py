@@ -113,6 +113,11 @@ ai:
   #   DEV: sonnet       # cheaper/faster for mechanical stages
   #   DOCS: sonnet
 
+  # Opt-in: route mechanical stages (TEST/QA/DOCS/SUMMARY) to cheaper models by
+  # default, leaving reasoning stages on the CLI default. stage_models above and
+  # a pinned backend model always take priority. (claude backend)
+  # auto_model_tiers: true
+
   # Active profile (uncomment to use)
   # profile: default
 

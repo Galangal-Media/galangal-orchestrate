@@ -9,9 +9,8 @@ from galangal.ai.base import AIBackend
 from galangal.ai.claude import ClaudeBackend
 from galangal.ai.codex import CodexBackend
 from galangal.ai.gemini import GeminiBackend
-from galangal.exceptions import AIError, ExitCode
-
 from galangal.core.state import Stage
+from galangal.exceptions import AIError, ExitCode
 
 if TYPE_CHECKING:
     from galangal.config.schema import AIBackendConfig, GalangalConfig
@@ -33,6 +32,17 @@ DEFAULT_FALLBACKS: dict[str, str] = {
 # Read-only backends are preferred here because these stages only need to
 # read code and produce a structured verdict, never edit files.
 REVIEW_LIKE_STAGES: frozenset[Stage] = frozenset({Stage.REVIEW, Stage.SECURITY, Stage.QA})
+
+# Opt-in cheaper-model defaults for mechanical stages (ai.auto_model_tiers).
+# Uses Claude CLI model aliases so it tracks the current model lineup. Stages
+# absent from this map keep the CLI's default (strongest) model. Explicit
+# config.ai.stage_models entries and pinned backend models override this.
+DEFAULT_STAGE_MODEL_TIERS: dict[str, str] = {
+    "TEST": "sonnet",
+    "QA": "sonnet",
+    "DOCS": "sonnet",
+    "SUMMARY": "haiku",
+}
 
 
 def prepare_backend_for_stage(
@@ -202,8 +212,12 @@ def get_backend_for_stage(
     else:
         backend_name = config.ai.default
 
-    # Check for a stage-specific model override (applied to the resolved backend)
+    # Check for a stage-specific model override (applied to the resolved backend).
+    # Explicit stage_models win; otherwise opt-in auto-tiering picks a cheaper
+    # model for mechanical stages.
     model_override = config.ai.stage_models.get(stage_key)
+    if model_override is None and config.ai.auto_model_tiers:
+        model_override = DEFAULT_STAGE_MODEL_TIERS.get(stage_key)
 
     if use_fallback:
         return get_backend_with_fallback(

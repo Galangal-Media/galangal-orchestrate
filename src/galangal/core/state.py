@@ -690,6 +690,11 @@ def get_hidden_stages_for_task_type(
 # Maximum rollbacks to the same stage within the time window
 MAX_ROLLBACKS_PER_STAGE = 3
 ROLLBACK_TIME_WINDOW_HOURS = 1
+# Absolute cap on rollbacks to the same stage over the whole task. The
+# time-window cap above misses genuinely-stuck loops whose cycles take longer
+# than the window (each rollback ages out before the next), so this bounds the
+# total number of attempts regardless of how slowly they happen.
+MAX_TOTAL_ROLLBACKS_PER_STAGE = 6
 
 
 @dataclass
@@ -1064,13 +1069,19 @@ class RollbackState:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=ROLLBACK_TIME_WINDOW_HOURS)
         cutoff_str = cutoff.isoformat()
 
-        recent_rollbacks = [
-            r
-            for r in self.rollback_history
-            if r.to_stage == target_stage.value and r.timestamp > cutoff_str
-        ]
+        to_target = [r for r in self.rollback_history if r.to_stage == target_stage.value]
+        recent_rollbacks = [r for r in to_target if r.timestamp > cutoff_str]
 
-        return len(recent_rollbacks) < MAX_ROLLBACKS_PER_STAGE
+        # Block on either a burst within the window OR too many over the whole
+        # task (the latter catches slow loops the window would miss).
+        return (
+            len(recent_rollbacks) < MAX_ROLLBACKS_PER_STAGE
+            and len(to_target) < MAX_TOTAL_ROLLBACKS_PER_STAGE
+        )
+
+    def get_total_rollback_count(self, target_stage: "Stage") -> int:
+        """Get the total number of rollbacks to a stage over the whole task."""
+        return len([r for r in self.rollback_history if r.to_stage == target_stage.value])
 
     def get_rollback_count(self, target_stage: "Stage") -> int:
         """Get the number of recent rollbacks to a stage.
@@ -1588,6 +1599,10 @@ class WorkflowState:
     def get_rollback_count(self, target_stage: Stage) -> int:
         """Get the number of recent rollbacks to a stage."""
         return self._rollback.get_rollback_count(target_stage)
+
+    def get_total_rollback_count(self, target_stage: Stage) -> int:
+        """Get the total number of rollbacks to a stage over the whole task."""
+        return self._rollback.get_total_rollback_count(target_stage)
 
     # =========================================================================
     # Fast-track rollback methods (delegating to FastTrackState)

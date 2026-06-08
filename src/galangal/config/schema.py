@@ -255,6 +255,15 @@ class AIConfig(BaseModel):
             "(e.g., {'REVIEW': 'opus', 'DEV': 'sonnet'})"
         ),
     )
+    auto_model_tiers: bool = Field(
+        default=False,
+        description=(
+            "Opt-in: route mechanical stages (TEST/QA/DOCS/SUMMARY) to cheaper "
+            "models by default, leaving reasoning stages on the CLI default. "
+            "Explicit stage_models / a pinned backend model always take priority. "
+            "Honored by the claude backend."
+        ),
+    )
     profile: str | None = Field(
         default=None,
         description="Active profile name (overrides default and stage_backends)",

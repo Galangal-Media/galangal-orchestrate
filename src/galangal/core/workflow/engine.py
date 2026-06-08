@@ -330,17 +330,16 @@ class WorkflowEngine:
                 )
             else:
                 # Rollback was blocked (loop detection)
-                rollback_count = (
-                    self.state.get_rollback_count(result.rollback_to) if result.rollback_to else 0
-                )
                 target = result.rollback_to.value if result.rollback_to else "None"
-
-                if rollback_count >= 3:
-                    block_reason = f"Too many rollbacks to {target} ({rollback_count} in last hour)"
-                elif result.rollback_to is None:
+                if result.rollback_to is None:
                     block_reason = "Rollback target not specified in validation"
                 else:
-                    block_reason = "Rollback blocked (unknown reason)"
+                    total = self.state.get_total_rollback_count(result.rollback_to)
+                    recent = self.state.get_rollback_count(result.rollback_to)
+                    block_reason = (
+                        f"Too many rollbacks to {target} "
+                        f"({total} total, {recent} in the last hour)"
+                    )
 
                 return event(
                     EventType.ROLLBACK_BLOCKED,
