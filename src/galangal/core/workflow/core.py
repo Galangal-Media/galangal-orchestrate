@@ -647,6 +647,20 @@ def execute_stage(
     if stage == Stage.COMPLETE:
         return StageResult.create_success("Workflow complete")
 
+    # Materialize canonical DB artifacts to the working directory so the agent's
+    # filesystem view matches the DB. Non-mirrored artifacts (everything except
+    # PLAN.md/SUMMARY.md) are deleted from disk after each stage's ingest, so
+    # without this a re-run sees only a partial subset on disk and may regenerate
+    # artifacts that already exist (e.g. SPEC.md authored by an earlier attempt).
+    try:
+        from galangal.core.task_index import TaskIndex
+
+        restored = TaskIndex().rehydrate_task_artifacts(task_name=task_name)
+        if restored:
+            tui_app.add_activity(f"Restored {restored} artifact(s) to working dir", "📤")
+    except Exception:
+        pass
+
     # NOTE: Skip conditions are checked in get_next_stage() which is the single
     # source of truth for skip logic. By the time we reach execute_stage(),
     # the stage has already been determined to not be skipped.

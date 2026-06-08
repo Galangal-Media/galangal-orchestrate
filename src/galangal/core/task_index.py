@@ -630,6 +630,47 @@ class TaskIndex:
         with self._connect() as conn:
             return self._migrate_all_legacy_artifacts(conn, delete_files=delete_files)
 
+    def rehydrate_task_artifacts(self, *, task_name: str) -> int:
+        """Materialize canonical DB artifacts to the task's working directory.
+
+        Non-mirrored artifacts are deleted from disk after each stage's ingest, so
+        on a re-run the agent's filesystem view is a partial subset of the DB and
+        it can mistakenly regenerate artifacts that already exist (e.g. SPEC.md).
+        Writing the DB's present artifacts back to ``galangal-tasks/<task>/`` before
+        a stage runs keeps the agent's view consistent with canonical storage.
+
+        Only writes files that are missing or whose content differs (no churn).
+        Returns the number of files written. Best-effort; never raises.
+        """
+        task_dir = get_tasks_dir() / task_name
+        written = 0
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT name, content FROM artifacts WHERE task_name = ? AND is_present = 1",
+                    (task_name,),
+                ).fetchall()
+                if not rows:
+                    return 0
+                task_dir.mkdir(parents=True, exist_ok=True)
+                for row in rows:
+                    name = row["name"]
+                    content = row["content"]
+                    # Guard against path escapes; artifact names are basenames.
+                    if content is None or not name or "/" in name or name.startswith("."):
+                        continue
+                    path = task_dir / name
+                    try:
+                        if path.exists() and path.read_text() == content:
+                            continue
+                        path.write_text(str(content))
+                        written += 1
+                    except OSError:
+                        continue
+        except Exception:
+            return written
+        return written
+
     def ingest_task_artifacts(self, *, task_name: str) -> int:
         """Import filesystem artifacts for a single task into DB and delete originals.
 

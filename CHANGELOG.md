@@ -4,6 +4,17 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.50.0
+
+- **Artifact rehydration (disk↔DB consistency):** before each stage runs, the
+  canonical DB artifacts are now materialized back to the task's working directory.
+  Previously, non-mirrored artifacts (everything except `PLAN.md`/`SUMMARY.md`) were
+  deleted from disk after each stage's ingest and never restored, so on a re-run the
+  agent saw only a partial subset on disk and could regenerate artifacts that already
+  existed in the DB — e.g. an agent re-authoring `SPEC.md` because it "couldn't find
+  it on disk," even though it was safe in `.galangal/tasks.db`. The agent's filesystem
+  view now matches canonical storage.
+
 ## 0.49.0
 
 - **doctor:** now checks the CLI for the *active* backend(s) (default + per-stage),
