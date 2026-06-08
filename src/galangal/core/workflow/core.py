@@ -700,12 +700,12 @@ def execute_stage(
     if backend.read_only and stage in REVIEW_LIKE_STAGES:
         prompt = builder.build_minimal_review_prompt(state, backend_name=backend.name)
         tui_app.add_activity("Using minimal context for independent review", "📋")
-    else:
-        prompt = builder.build_full_prompt(stage, state, backend_name=prompt_backend_name)
 
-    # Add retry context
-    if state.attempt > 1 and state.last_failure:
-        retry_context = f"""
+        # The minimal-review prompt doesn't include the failure trailer that
+        # build_full_prompt adds, so append retry context here for that path only.
+        if state.attempt > 1 and state.last_failure:
+            prompt = f"""{prompt}
+
 ## ⚠️ RETRY ATTEMPT {state.attempt}
 
 The previous attempt failed with the following error:
@@ -716,7 +716,9 @@ The previous attempt failed with the following error:
 
 Please fix the issue above before proceeding. Do not repeat the same mistake.
 """
-        prompt = f"{prompt}\n\n{retry_context}"
+    else:
+        # build_full_prompt already appends the attempt / previous-failure trailer.
+        prompt = builder.build_full_prompt(stage, state, backend_name=prompt_backend_name)
 
     _append_task_log(
         task_name,

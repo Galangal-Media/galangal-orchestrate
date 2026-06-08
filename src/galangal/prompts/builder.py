@@ -14,6 +14,10 @@ from galangal.core.state import Stage, WorkflowState
 if TYPE_CHECKING:
     from galangal.config.schema import StageArtifactConfig
 
+# Soft per-artifact size budget (~4k tokens). Normal artifacts are well under
+# this; only pathologically large ones get trimmed in the prompt.
+MAX_ARTIFACT_BLOCK_CHARS = 16000
+
 
 class PromptBuilder:
     """
@@ -267,23 +271,21 @@ class PromptBuilder:
         base_prompt = self.get_stage_prompt(stage, backend_name)
         task_name = state.task_name
 
-        # Build context
+        # Build context. Keep this prefix stable across retries (no per-attempt
+        # values here) so the large artifact block can be served from the prompt
+        # cache; the volatile attempt/previous-failure content goes at the very
+        # end (see the trailer below).
         context_parts = [
             f"# Task: {task_name}",
             f"# Task Type: {state.task_type.display_name()}",
             f"# Description\n{state.task_description}",
             f"\n# Current Stage: {stage.value}",
-            f"\n# Attempt: {state.attempt}",
             f"\n# Artifacts Directory: {self.config.tasks_dir}/{task_name}/",
         ]
 
         # Add screenshot context if available (especially useful for PM and early stages)
         if stage in [Stage.PM, Stage.DESIGN, Stage.DEV]:
             context_parts.extend(self._get_screenshot_context(state))
-
-        # Add failure context
-        if state.last_failure:
-            context_parts.append(f"\n# Previous Failure\n{state.last_failure}")
 
         # Add relevant artifacts based on stage
         context_parts.extend(self._get_artifact_context(stage, task_name))
@@ -334,7 +336,26 @@ Only update documentation types marked as YES above.""")
         decision_info = get_decision_info_for_prompt(stage)
         decision_suffix = f"\n\n---\n\n{decision_info}" if decision_info else ""
 
-        return f"{context}\n\n---\n\n{base_prompt}{decision_suffix}"
+        body = f"{context}\n\n---\n\n{base_prompt}{decision_suffix}"
+
+        # Volatile trailer at the very end: keeping per-attempt content out of the
+        # prefix lets the stable artifact/context block hit the prompt cache across
+        # retries. This is also the single place last_failure is surfaced (it can
+        # be set with attempt==1 after a guidance/staleness rollback).
+        trailer_parts: list[str] = []
+        if state.attempt > 1:
+            trailer_parts.append(f"# Attempt {state.attempt}")
+        if state.last_failure:
+            emphasis = (
+                " - fix this before proceeding and do not repeat it"
+                if state.attempt > 1
+                else ""
+            )
+            trailer_parts.append(f"# Previous Failure{emphasis}\n{state.last_failure}")
+
+        if trailer_parts:
+            return f"{body}\n\n---\n\n" + "\n\n".join(trailer_parts)
+        return body
 
     def _get_schema_requirements(self, stage: Stage, state: WorkflowState) -> str:
         """Describe the required structure of the artifacts this stage produces.
@@ -394,17 +415,36 @@ Only update documentation types marked as YES above.""")
             List of formatted artifact sections (e.g., "# SPEC.md\\n{content}").
         """
         # Check if artifact_context is configured for this stage
+        parts: list[str]
         if self.config.artifact_context is not None:
             stage_config = getattr(
                 self.config.artifact_context, stage.value.lower(), None
             )
             if stage_config and (stage_config.required or stage_config.include):
-                return self._get_configured_artifact_context(
-                    stage_config, task_name
-                )
+                parts = self._get_configured_artifact_context(stage_config, task_name)
+            else:
+                parts = self._get_default_artifact_context(stage, task_name)
+        else:
+            # Fall back to default hardcoded logic
+            parts = self._get_default_artifact_context(stage, task_name)
 
-        # Fall back to default hardcoded logic
-        return self._get_default_artifact_context(stage, task_name)
+        return [self._cap_artifact_block(p) for p in parts]
+
+    def _cap_artifact_block(self, block: str) -> str:
+        """Trim a pathologically large artifact block, preserving its header.
+
+        Keeps normal artifacts intact (threshold ~4k tokens) but stops a single
+        huge artifact from blowing up the prompt; the full version stays on disk.
+        """
+        if len(block) <= MAX_ARTIFACT_BLOCK_CHARS:
+            return block
+        head, _, _ = block.partition("\n")
+        truncated = block[:MAX_ARTIFACT_BLOCK_CHARS]
+        return (
+            f"{truncated}\n\n[... {head.lstrip('# ').strip()} truncated to "
+            f"{MAX_ARTIFACT_BLOCK_CHARS} chars; read the full file from "
+            f"{self.config.tasks_dir}/ or .galangal/tasks.db if you need more.]"
+        )
 
     def _get_configured_artifact_context(
         self, config: StageArtifactConfig, task_name: str
