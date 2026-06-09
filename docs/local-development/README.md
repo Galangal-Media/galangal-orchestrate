@@ -9,6 +9,7 @@ This guide covers setting up and testing galangal-orchestrate locally without af
 | Document | Description |
 |----------|-------------|
 | [README](README.md) (this file) | Setup and development workflow |
+| [Global Editable Install](global-editable-install.md) | Run the latest local `galangal` globally (cross-project), and the version-header nuance |
 | [Versioning](versioning.md) | Version management and releases |
 | [Architecture](architecture.md) | Overall system architecture and components |
 | [State Management](state-management.md) | WorkflowState, persistence, task types |
@@ -92,6 +93,10 @@ pipx install -e /path/to/galangal-orchestrate
 
 Now `galangal` is available globally and uses your local source code. Any changes you make take effect immediately.
 
+> For running `galangal` from **other repositories** (and why the version in the
+> header can lag behind your code), see
+> [Global Editable Install](global-editable-install.md).
+
 ### Verify it's using local code
 
 ```bash
@@ -139,15 +144,18 @@ pytest --tb=short      # shorter tracebacks
 
 ### Version mismatch after updating source
 
-**Problem:** `pip show galangal-orchestrate` shows an old version even though you updated `pyproject.toml`.
+**Problem:** `pip show galangal-orchestrate` (or the CLI header) shows an old version even though you bumped the `VERSION` file / pulled new commits.
 
-**Cause:** Editable installs cache package metadata at install time.
+**Cause:** Editable installs cache package metadata at install time, and galangal reads its version from that metadata (`importlib.metadata`). Code is live; the reported number is not.
 
-**Solution:** Reinstall to refresh the metadata:
+**Solution:** Reinstall to refresh the metadata (use `--force` for pipx):
 
 ```bash
-pip install -e .
+pip install -e .                                   # in-repo venv
+pipx install --editable --force /path/to/repo      # global pipx
 ```
+
+See [Global Editable Install](global-editable-install.md) for the full explanation.
 
 ### Command not found after venv activation
 
