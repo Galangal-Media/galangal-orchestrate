@@ -804,7 +804,7 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     tui_app.add_activity("Validating stage outputs...", "⚙")
 
     runner = ValidationRunner()
-    result = runner.validate_stage(stage.value, task_name)
+    result = runner.validate_stage(stage.value, task_name, base_sha=state.base_commit_sha)
 
     _append_task_log(task_name, "=== Validation ===", line_type="validation")
     _append_task_log(task_name, f"success: {result.success}", line_type="validation")

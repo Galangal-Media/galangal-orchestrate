@@ -107,6 +107,16 @@ class ValidationCommand(BaseModel):
     )
     optional: bool = Field(default=False, description="Don't fail if this command fails")
     allow_failure: bool = Field(default=False, description="Report but don't block on failure")
+    baseline_diff: bool = Field(
+        default=False,
+        description=(
+            "Fail only on errors NEW since the task's base commit, not pre-existing "
+            "ones. The command is run against the base commit (cached) and the error "
+            "output is diffed. Use for lint/type-check (pyright, mypy, ruff, tsc) in "
+            "repos that carry pre-existing errors, so a genuine new error isn't lost "
+            "in the noise. Best with globally-installed tools (see baseline.py)."
+        ),
+    )
     timeout: int | None = Field(
         default=None, description="Command timeout in seconds (overrides stage default)"
     )

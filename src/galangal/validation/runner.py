@@ -210,6 +210,7 @@ class ValidationRunner:
         self,
         stage: str,
         task_name: str,
+        base_sha: str | None = None,
     ) -> ValidationResult:
         """
         Validate a workflow stage based on config.
@@ -237,6 +238,8 @@ class ValidationRunner:
             ValidationResult indicating success/failure with optional rollback target.
         """
         stage_lower = stage.lower()
+        # Base commit for baseline_diff commands (only fail on errors new since base).
+        self._base_sha = base_sha
 
         # Get stage validation config
         validation_config = self.config.validation
@@ -661,28 +664,32 @@ class ValidationRunner:
         try:
             if isinstance(cmd_config.command, list):
                 # List form: substitute placeholders in each element, run without shell
-                cmd = [
+                run_cmd: str | list[str] = [
                     self._substitute_placeholders(arg, placeholders) for arg in cmd_config.command
                 ]
-                result = subprocess.run(
-                    cmd,
-                    shell=False,
-                    cwd=self.project_root,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                )
+                use_shell = False
             else:
                 # String form: substitute and run via shell (backwards compatible)
-                command = self._substitute_placeholders(cmd_config.command, placeholders)
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    cwd=self.project_root,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                )
+                run_cmd = self._substitute_placeholders(cmd_config.command, placeholders)
+                use_shell = True
+
+            result = subprocess.run(
+                run_cmd,
+                shell=use_shell,
+                cwd=self.project_root,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+
+            # Baseline diff: pass when no errors are NEW since the base commit, even
+            # if the command exits non-zero on pre-existing errors.
+            base_sha = getattr(self, "_base_sha", None)
+            if cmd_config.baseline_diff and base_sha:
+                verdict = self._apply_baseline_diff(cmd_config, run_cmd, use_shell, result, base_sha, timeout)
+                if verdict is not None:
+                    return verdict
+                # baseline could not be computed -> fall through to plain gating
 
             if result.returncode == 0:
                 return ValidationResult(
@@ -710,6 +717,47 @@ class ValidationRunner:
                 f"{cmd_config.name}: error - {e}",
                 rollback_to="DEV",
             )
+
+    def _apply_baseline_diff(
+        self,
+        cmd_config: ValidationCommand,
+        run_cmd: str | list[str],
+        use_shell: bool,
+        result: subprocess.CompletedProcess,
+        base_sha: str,
+        timeout: int,
+    ) -> ValidationResult | None:
+        """Pass/fail a command on errors NEW since the base commit.
+
+        Returns a ValidationResult, or None if the baseline couldn't be computed
+        (caller then falls back to plain exit-code gating).
+        """
+        from galangal.validation.baseline import compute_baseline_errors, normalize_error_lines
+
+        baseline = compute_baseline_errors(
+            run_cmd,
+            shell=use_shell,
+            base_sha=base_sha,
+            project_root=Path(self.project_root),
+            timeout=timeout,
+        )
+        if baseline is None:
+            return None
+
+        current = normalize_error_lines(result.stdout + result.stderr, [str(self.project_root)])
+        new_errors = current - baseline
+        if not new_errors:
+            return ValidationResult(
+                True,
+                f"{cmd_config.name}: no new errors since base ({len(baseline)} pre-existing ignored)",
+                output=result.stdout,
+            )
+        return ValidationResult(
+            False,
+            f"{cmd_config.name}: {len(new_errors)} new error(s) since base commit",
+            output="New errors introduced by this task:\n" + "\n".join(sorted(new_errors)),
+            rollback_to="DEV",
+        )
 
     def _run_all_commands(self, stage_config: StageValidation, task_name: str) -> dict[str, Any]:
         """

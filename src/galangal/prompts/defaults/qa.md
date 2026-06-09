@@ -70,6 +70,15 @@ behavior) — not just an assertion that it passes.
 - Focus on exploratory testing, edge cases, and code quality
 - Be thorough in checking acceptance criteria
 - Document any issues clearly for the DEV stage to fix
+- **Don't re-dismiss a previously-raised finding.** If ROLLBACK.md or an earlier
+  report flagged an issue, do not wave it through as "pre-existing/unrelated"
+  without explicit, *verified* justification — confirm it against the actual code or
+  installed SDK first. A defect dismissed in an earlier cycle is exactly what reaches
+  production.
+- **A lint/type error on a file or line this task changed is in scope**, even if
+  similar errors exist elsewhere in the repo. Don't lump a new error in with
+  pre-existing noise — verify whether the task introduced it (the validation gate
+  diffs against the base commit) and treat anything new as a failure.
 - Every acceptance criterion from SPEC.md must appear in the verification table.
 - Overall status is PASS only if **every** criterion is PASS (or a documented,
   sound deviation). Any unmet criterion → overall FAIL.

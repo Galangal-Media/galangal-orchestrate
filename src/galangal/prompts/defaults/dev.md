@@ -79,6 +79,15 @@ Update DEVELOPMENT.md after completing each significant piece of work:
 - Follow existing patterns in the codebase
 - Keep changes minimal and focused
 - Do NOT write tests - the TEST stage handles that
+- **Verify external APIs before you call them.** When using a third-party
+  library/SDK, confirm the module, class, attribute, or method actually exists in
+  the *installed* version — read its source or stubs (e.g. inspect the package under
+  site-packages), or trust the type checker — instead of assuming a name from
+  memory. A hallucinated attribute/method (e.g. `obj.phone_number_sid` when the real
+  field is `obj.sid`) passes mocked tests but raises `AttributeError` at runtime. If
+  you are not certain a symbol exists, verify it; do not guess.
+- If your change triggers a NEW type-check/lint error, fix it — don't wave it off as
+  pre-existing. The pipeline flags only errors introduced since the base commit.
 - **UPDATE DEVELOPMENT.md regularly** - this is your progress log
 
 ## If You Get Stuck

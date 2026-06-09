@@ -91,6 +91,21 @@ validation:
         command: "echo 'Configure your test command in .galangal/config.yaml'"
         # timeout: 3600
 
+      # --- Catch hallucinated APIs / new type errors (recommended) ---
+      # baseline_diff runs the checker against the task's BASE commit (cached) and
+      # fails ONLY on errors introduced since then - so pre-existing repo errors
+      # don't force you to disable the gate, and a genuinely new error (e.g. a
+      # hallucinated SDK attribute) is caught instead of lost in the noise.
+      # - name: "Type check (new errors only)"
+      #   command: "pyright"          # or "mypy ." / "tsc --noEmit"
+      #   baseline_diff: true
+      #   timeout: 600
+
+      # Runtime import smoke: catches imports / import-time errors that mocked
+      # tests hide. Point it at the modules your task touches.
+      # - name: "Import smoke"
+      #   command: "python -c 'import your_package.changed_module'"
+
   # Review - code review (AI-driven)
   review:
     pass_marker: "APPROVE"

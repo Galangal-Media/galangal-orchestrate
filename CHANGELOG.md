@@ -4,6 +4,29 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.58.0 — Catch hallucinated APIs: baseline-diffed validation + grounding prompts
+
+Targets the dominant AI-coding failure mode (seen in a real task: a hallucinated
+Twilio attribute `phone_number_sid` that mocked tests passed but crashed at runtime,
+and which the type checker *did* flag but got dismissed as "pre-existing").
+
+- **Baseline-diffed validation (`baseline_diff: true`).** A validation command can
+  now fail **only on errors NEW since the task's base commit**. The command is run
+  against the base commit (via a cached transient `git worktree`) and its error
+  output is diffed, so pre-existing repo lint/type errors no longer force you to
+  disable the gate — and a genuinely new error is caught instead of lost in the
+  noise. Reuses the `base_commit_sha` already captured at task start. Ideal for
+  `pyright`/`mypy`/`ruff`/`tsc`.
+- **Import-smoke + baseline examples** added (commented) to the default config so
+  they're discoverable.
+- **DEV prompt:** must verify external library symbols exist in the *installed*
+  package before calling them (don't guess attribute/method names), and fix new
+  type/lint errors rather than dismissing them as pre-existing.
+- **TEST prompt:** don't mock the library you're verifying — exercise the real SDK
+  surface on at least one path so a hallucinated API fails in tests, not prod.
+- **QA prompt:** don't re-dismiss a previously-raised finding without verified
+  justification; a lint/type error on a file the task changed is in scope.
+
 ## 0.57.2 — Dashboard: render "Last Failure" as markdown with a reveal toggle
 
 - The task detail page's **Last Failure** block now renders as **markdown**

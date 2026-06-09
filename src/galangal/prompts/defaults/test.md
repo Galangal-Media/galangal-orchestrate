@@ -62,4 +62,10 @@ Create TEST_PLAN.md in the task's artifacts directory:
 - Include both happy path and error cases
 - Follow existing test patterns in the codebase
 - Tests should be deterministic (no flaky tests)
+- **Don't mock the thing you're verifying.** For external integrations (SDK/API
+  clients, DB drivers), mocking the *entire* library means the tests validate your
+  assumptions about its API rather than reality — a wrong attribute or method name
+  passes green and then crashes at runtime. Mock only the network/IO boundary; for
+  at least one path, exercise the real library surface (real client construction,
+  real attribute/method access) so a hallucinated API is caught here, not in prod.
 - Status should always be PASS (you wrote the tests successfully)
