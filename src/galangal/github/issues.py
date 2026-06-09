@@ -3,7 +3,9 @@ GitHub issue listing and parsing.
 """
 
 from dataclasses import dataclass
+from typing import ClassVar
 
+from galangal.config.loader import get_config
 from galangal.github.client import GitHubClient, GitHubError
 
 # Default label for galangal-managed issues
@@ -39,54 +41,61 @@ class GitHubIssue:
         """Generate a task name prefix from the issue number."""
         return f"issue-{self.number}"
 
+    # Resolution order when an issue carries labels for several task types. The
+    # most urgent / specific type wins, so e.g. an issue tagged both "hotfix" and
+    # "feature" deterministically resolves to hotfix regardless of label order.
+    _TYPE_PRIORITY: ClassVar[tuple[str, ...]] = (
+        "hotfix",
+        "bug_fix",
+        "refactor",
+        "feature",
+        "chore",
+        "docs",
+    )
+
+    # Hardcoded fallback used when config is unavailable.
+    _DEFAULT_LABELS: ClassVar[dict[str, set[str]]] = {
+        "bug_fix": {"bug", "bugfix"},
+        "feature": {"enhancement", "feature"},
+        "docs": {"documentation", "docs"},
+        "refactor": {"refactor"},
+        "chore": {"chore", "maintenance"},
+        "hotfix": {"hotfix", "critical"},
+    }
+
     def get_task_type_hint(self) -> str | None:
         """
         Infer task type from issue labels using config-based mapping.
+
+        Resolution is by fixed priority (see ``_TYPE_PRIORITY``), not label
+        order, so the result is deterministic when an issue matches more than one
+        task type.
 
         Returns:
             Suggested task type or None if no match
         """
         from galangal.config.loader import get_config
 
-        label_lower = [lbl.lower() for lbl in self.labels]
+        label_lower = {lbl.lower() for lbl in self.labels}
 
-        # Get label mapping from config
+        # Build a {task_type: set(labels)} map from config, falling back to
+        # hardcoded defaults if config is unavailable.
         try:
-            config = get_config()
-            mapping = config.github.label_mapping
+            mapping = get_config().github.label_mapping
+            type_labels = {
+                "bug_fix": {lbl.lower() for lbl in mapping.bug},
+                "feature": {lbl.lower() for lbl in mapping.feature},
+                "docs": {lbl.lower() for lbl in mapping.docs},
+                "refactor": {lbl.lower() for lbl in mapping.refactor},
+                "chore": {lbl.lower() for lbl in mapping.chore},
+                "hotfix": {lbl.lower() for lbl in mapping.hotfix},
+            }
         except Exception:
-            # Fall back to defaults if config not available
-            mapping = None
+            type_labels = self._DEFAULT_LABELS
 
-        if mapping:
-            # Check each task type's labels
-            for label in label_lower:
-                if label in [lbl.lower() for lbl in mapping.bug]:
-                    return "bug_fix"
-                if label in [lbl.lower() for lbl in mapping.feature]:
-                    return "feature"
-                if label in [lbl.lower() for lbl in mapping.docs]:
-                    return "docs"
-                if label in [lbl.lower() for lbl in mapping.refactor]:
-                    return "refactor"
-                if label in [lbl.lower() for lbl in mapping.chore]:
-                    return "chore"
-                if label in [lbl.lower() for lbl in mapping.hotfix]:
-                    return "hotfix"
-        else:
-            # Fallback to hardcoded defaults
-            if "bug" in label_lower or "bugfix" in label_lower:
-                return "bug_fix"
-            if "enhancement" in label_lower or "feature" in label_lower:
-                return "feature"
-            if "documentation" in label_lower or "docs" in label_lower:
-                return "docs"
-            if "refactor" in label_lower:
-                return "refactor"
-            if "chore" in label_lower or "maintenance" in label_lower:
-                return "chore"
-            if "hotfix" in label_lower or "critical" in label_lower:
-                return "hotfix"
+        for task_type in self._TYPE_PRIORITY:
+            if label_lower & type_labels.get(task_type, set()):
+                return task_type
 
         return None
 
@@ -199,6 +208,26 @@ def mark_issue_in_progress(issue_number: int) -> bool:
     return success1 and success2
 
 
+def restore_issue_to_pickup(issue_number: int) -> bool:
+    """
+    Return an issue to the pickup queue after a task is abandoned or fails.
+
+    Inverse of :func:`mark_issue_in_progress`: removes "in-progress" and re-adds
+    the "galangal" pickup label so the issue is visible again to `galangal github
+    issues`. Safe to call when the labels are already in that state.
+
+    Args:
+        issue_number: The issue number
+
+    Returns:
+        True if successful
+    """
+    client = GitHubClient()
+    success1 = client.remove_issue_label(issue_number, "in-progress")
+    success2 = client.add_issue_label(issue_number, GALANGAL_LABEL)
+    return success1 and success2
+
+
 def mark_issue_pr_created(issue_number: int, pr_url: str) -> bool:
     """
     Mark an issue as having a PR created.
@@ -261,8 +290,17 @@ def prepare_issue_for_task(
     # Form description from title and body
     description = f"{issue.title}\n\n{issue.body}"
 
-    # Note: screenshots are extracted later via download_issue_screenshots()
-    # We just store the body for later processing
+    # Optionally append the comment thread — clarifications, repro steps, and
+    # decisions usually live there, not in the original body. The same combined
+    # text is stored as ``issue_body`` so screenshots posted in comments are
+    # picked up by download_issue_screenshots() too.
+    comments_md = _fetch_and_format_comments(issue.number)
+    if comments_md:
+        description = f"{description}\n\n{comments_md}"
+
+    screenshot_source = issue.body
+    if comments_md:
+        screenshot_source = f"{issue.body}\n\n{comments_md}"
 
     return IssueTaskData(
         issue_number=issue.number,
@@ -270,8 +308,51 @@ def prepare_issue_for_task(
         task_type_hint=issue.get_task_type_hint(),
         github_repo=repo_name,
         screenshots=[],  # Populated after task dir exists
-        issue_body=issue.body,
+        issue_body=screenshot_source,
     )
+
+
+def _fetch_and_format_comments(issue_number: int) -> str:
+    """Fetch and render an issue's comment thread as markdown.
+
+    Returns an empty string when comment ingestion is disabled, there are no
+    comments, or the fetch fails (all non-fatal — the task proceeds without
+    comment context).
+    """
+    try:
+        config = get_config()
+        if not config.github.include_issue_comments:
+            return ""
+        max_comments = config.github.max_issue_comments
+    except Exception:
+        # Config unavailable: default to including a bounded number of comments.
+        max_comments = 20
+
+    try:
+        comments = GitHubClient().get_issue_comments(issue_number)
+    except Exception:
+        return ""
+
+    if not comments:
+        return ""
+
+    # Keep the most recent N to bound prompt size, but render oldest-first so the
+    # discussion reads in chronological order.
+    if max_comments > 0 and len(comments) > max_comments:
+        comments = comments[-max_comments:]
+
+    lines = ["## Issue Discussion (comments)"]
+    for c in comments:
+        author = (c.get("author") or {}).get("login", "unknown")
+        when = c.get("createdAt", "")
+        body = (c.get("body") or "").strip()
+        if not body:
+            continue
+        header = f"**@{author}**" + (f" ({when})" if when else "")
+        lines.append(f"\n{header}:\n{body}")
+
+    # Only a header means every comment was empty.
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def download_issue_screenshots(

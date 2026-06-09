@@ -119,6 +119,7 @@ class ClaudeBackend(AIBackend):
                 # Extract the structured result event from the JSON stream.
                 result_text = ""
                 result_subtype = ""
+                metrics: dict[str, Any] | None = None
                 for line in full_output.splitlines():
                     if not line.strip():
                         continue
@@ -127,6 +128,7 @@ class ClaudeBackend(AIBackend):
                         if data.get("type") == "result":
                             result_text = data.get("result", "")
                             result_subtype = data.get("subtype", "")
+                            metrics = self._extract_metrics(data)
                             if ui:
                                 ui.set_turns(data.get("num_turns", 0))
                             break
@@ -134,6 +136,9 @@ class ClaudeBackend(AIBackend):
                         logger.debug("json_decode_error", error=str(e), line=line[:100])
                     except (KeyError, TypeError):
                         pass
+
+                if metrics and ui:
+                    ui.add_activity(self._format_metrics(metrics), "💰")
 
                 # Detect max-turns from the structured result subtype rather than
                 # scanning prose (Claude's own output can contain "max turns").
@@ -146,6 +151,7 @@ class ClaudeBackend(AIBackend):
                     return StageResult.create_success(
                         message=result_text or "Stage completed",
                         output=full_output,
+                        metrics=metrics,
                     )
 
                 # Analyze the error for better diagnostics
@@ -159,6 +165,7 @@ class ClaudeBackend(AIBackend):
                     message=error_ctx.message,
                     output=full_output,
                     error_context=error_ctx,
+                    metrics=metrics,
                 )
 
         except Exception as e:
@@ -173,6 +180,56 @@ class ClaudeBackend(AIBackend):
                 output=str(e),
                 error_context=error_ctx,
             )
+
+    @staticmethod
+    def _extract_metrics(data: dict[str, Any]) -> dict[str, Any] | None:
+        """Pull cost / token usage out of the Claude CLI ``result`` event.
+
+        The CLI emits a final ``{"type": "result", ...}`` line carrying
+        ``total_cost_usd``, ``num_turns`` and a nested ``usage`` block. We capture
+        these so a stage's cost is recorded rather than discarded. Returns None if
+        nothing useful is present (older CLI versions, partial streams).
+        """
+        usage = data.get("usage") or {}
+        metrics: dict[str, Any] = {}
+
+        cost = data.get("total_cost_usd")
+        if isinstance(cost, (int, float)):
+            metrics["cost_usd"] = round(float(cost), 4)
+
+        turns = data.get("num_turns")
+        if isinstance(turns, int):
+            metrics["num_turns"] = turns
+
+        if isinstance(usage, dict):
+            for src, dest in (
+                ("input_tokens", "input_tokens"),
+                ("output_tokens", "output_tokens"),
+                ("cache_read_input_tokens", "cache_read_tokens"),
+                ("cache_creation_input_tokens", "cache_creation_tokens"),
+            ):
+                val = usage.get(src)
+                if isinstance(val, int):
+                    metrics[dest] = val
+
+        return metrics or None
+
+    @staticmethod
+    def _format_metrics(metrics: dict[str, Any]) -> str:
+        """Render a compact one-line metrics summary for the activity feed."""
+        parts: list[str] = []
+        if "cost_usd" in metrics:
+            parts.append(f"${metrics['cost_usd']:.4f}")
+        if "num_turns" in metrics:
+            parts.append(f"{metrics['num_turns']} turns")
+        tok_in = metrics.get("input_tokens")
+        tok_out = metrics.get("output_tokens")
+        if tok_in is not None or tok_out is not None:
+            parts.append(f"{tok_in or 0}→{tok_out or 0} tok")
+        cached = metrics.get("cache_read_tokens")
+        if cached:
+            parts.append(f"{cached} cached")
+        return "Usage: " + ", ".join(parts) if parts else "Usage: (none)"
 
     def _process_stream_line(
         self,

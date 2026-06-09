@@ -237,6 +237,22 @@ class WorkflowLogger:
             skipped=skipped,
         )
 
+    def stage_usage(
+        self,
+        stage: str,
+        task_name: str,
+        attempt: int = 1,
+        **metrics: Any,
+    ) -> None:
+        """Log backend cost/token usage for a stage attempt."""
+        self._logger.info(
+            "stage_usage",
+            stage=stage,
+            task=task_name,
+            attempt=attempt,
+            **metrics,
+        )
+
     def stage_failed(
         self,
         stage: str,

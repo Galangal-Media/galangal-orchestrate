@@ -353,6 +353,22 @@ Only update documentation types marked as YES above.""")
             )
             trailer_parts.append(f"# Previous Failure{emphasis}\n{state.last_failure}")
 
+            # When several attempts have failed in a row, surface the earlier
+            # failures too. Seeing the whole oscillation stops the model from
+            # flip-flopping between two wrong fixes (each of which only "fixed"
+            # the single most-recent error it was shown).
+            history = getattr(state, "failure_history", None) or []
+            earlier = [f for f in history if f != state.last_failure]
+            if earlier:
+                earlier_block = "\n\n".join(
+                    f"## Earlier attempt {i + 1}\n{f}" for i, f in enumerate(earlier)
+                )
+                trailer_parts.append(
+                    "# Earlier Failures This Stage\n"
+                    "These earlier attempts ALSO failed. Do not reintroduce any of "
+                    "them while fixing the latest one:\n\n" + earlier_block
+                )
+
         if trailer_parts:
             return f"{body}\n\n---\n\n" + "\n\n".join(trailer_parts)
         return body

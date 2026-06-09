@@ -139,6 +139,36 @@ def normalize_section_name(name: str) -> str:
     return s.strip("-")
 
 
+def strip_code_fences(text: str) -> str:
+    """Remove a single wrapping markdown code fence from model output.
+
+    AI text generators (commit messages, PR titles) sometimes wrap their whole
+    answer in a ```` ``` ```` fence. Committed verbatim that renders as literal
+    backticks on GitHub. If the text is a single fenced block, return its inner
+    content; otherwise return it stripped and unchanged. This is for plain-text
+    destinations only — leave genuinely-markdown fields (PR bodies) alone.
+    """
+    if not text:
+        return text
+
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+
+    # Drop the opening fence line (``` plus an optional language tag).
+    newline = stripped.find("\n")
+    if newline == -1:
+        # Single line like "```feat: ..." — strip leading backticks only.
+        return stripped.lstrip("`").strip()
+    inner = stripped[newline + 1 :]
+
+    # Drop the closing fence if present (the last ``` and anything after it).
+    fence_end = inner.rfind("```")
+    if fence_end != -1:
+        inner = inner[:fence_end]
+    return inner.strip()
+
+
 def extract_json_object(text: str) -> dict[str, Any] | None:
     """Best-effort extraction of a single JSON object from model/CLI output.
 

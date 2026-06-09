@@ -321,6 +321,31 @@ class GitHubClient:
             pass
         return None
 
+    def get_issue_comments(self, issue_number: int) -> list[dict[str, Any]]:
+        """
+        Fetch the comment thread for an issue.
+
+        Args:
+            issue_number: Issue number
+
+        Returns:
+            List of comment dicts (each with 'author', 'body', 'createdAt'),
+            oldest-first. Empty list on error or when there are no comments.
+        """
+        try:
+            data = self.run_json_command(
+                ["issue", "view", str(issue_number), "--json", "comments"]
+            )
+            if isinstance(data, dict):
+                comments = data.get("comments")
+                if isinstance(comments, list):
+                    return comments
+        except GitHubError:
+            pass
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+        return []
+
     def list_labels(self) -> list[dict[str, Any]] | None:
         """
         List all labels in the repository.

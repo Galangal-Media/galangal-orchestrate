@@ -776,6 +776,17 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     )
     if invoke_result.message:
         _append_task_log(task_name, invoke_result.message, line_type="meta")
+    if invoke_result.metrics:
+        # Record backend cost/usage for this attempt so it is auditable in the
+        # task log even though the live activity feed only shows it transiently.
+        metric_str = ", ".join(f"{k}={v}" for k, v in invoke_result.metrics.items())
+        _append_task_log(task_name, f"=== Usage: {metric_str} ===", line_type="meta")
+        workflow_logger.stage_usage(
+            stage=stage.value,
+            task_name=task_name,
+            attempt=state.attempt,
+            **invoke_result.metrics,
+        )
 
     # Return early if AI invocation failed
     if not invoke_result.success:
@@ -1004,6 +1015,30 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
     # Check for rollback loops (exempt REVIEW→DEV iteration since the
     # whole point of the iteration loop is repeated back-and-forth)
     is_review_iteration = from_stage == Stage.REVIEW and target_stage == Stage.DEV
+
+    # The review iteration is exempt from the generic loop limit, so give it its
+    # own hard cap: once it has gone round too many times without REVIEW
+    # approving, block the rollback and escalate (the runners turn a blocked
+    # rollback into a user prompt, or a pause in headless mode) rather than
+    # grinding indefinitely.
+    if is_review_iteration:
+        review_max = get_config().stages.review_iteration_max
+        if review_max > 0 and state.review_iteration_count >= review_max:
+            from galangal.logging import workflow_logger
+
+            loop_msg = (
+                f"Review iteration cap reached: {state.review_iteration_count} "
+                f"REVIEW→DEV round-trips (max {review_max}). Manual intervention "
+                "required."
+            )
+            workflow_logger.rollback(
+                from_stage=from_stage.value,
+                to_stage=target_stage.value,
+                task_name=task_name,
+                reason=f"BLOCKED: {loop_msg}",
+            )
+            return False
+
     if not is_review_iteration and not state.should_allow_rollback(target_stage):
         from galangal.logging import workflow_logger
 

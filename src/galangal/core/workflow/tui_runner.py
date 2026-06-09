@@ -161,8 +161,9 @@ def _run_workflow_with_tui(
     # Track peer review auto-accept loops per stage (runtime only, not persisted)
     peer_review_loops: dict[str, int] = {}
 
-    # Track REVIEW->DEV iteration round-trips (runtime only, not persisted)
-    review_iterations: dict[str, int] = {}
+    # REVIEW->DEV round-trips are counted on the persisted state
+    # (state.review_iteration_count), so the check-in and hard cap survive
+    # pause-resume rather than resetting to zero each session.
 
     async def workflow_loop() -> None:
         """Async workflow loop running within Textual's event loop."""
@@ -231,7 +232,7 @@ def _run_workflow_with_tui(
 
                 # Handle the workflow event
                 result = await _handle_workflow_event(
-                    app, engine, workflow_event, config, peer_review_loops, review_iterations
+                    app, engine, workflow_event, config, peer_review_loops
                 )
                 if result == "break":
                     break
@@ -290,7 +291,6 @@ async def _handle_workflow_event(
     event: WorkflowEvent,
     config: GalangalConfig,
     peer_review_loops: dict[str, int] | None = None,
-    review_iterations: dict[str, int] | None = None,
 ) -> str:
     """
     Handle a workflow event from the engine.
@@ -308,9 +308,9 @@ async def _handle_workflow_event(
 
     if event.type == EventType.STAGE_COMPLETED:
         app.clear_error()
-        # REVIEW passing ends a DEV<->REVIEW iteration loop; clear its counter.
-        if review_iterations is not None and state.stage == Stage.REVIEW:
-            review_iterations.pop("REVIEW_DEV", None)
+        # When REVIEW approves during a DEV<->REVIEW loop the engine clears the
+        # persisted round-trip counter via complete_review_iteration(); no
+        # runner-local bookkeeping needed here.
         duration = state.record_stage_duration()
         app.show_stage_complete(state.stage.value, True, duration)
         if state.stage_durations:
@@ -432,18 +432,13 @@ async def _handle_workflow_event(
         # loop indefinitely. Count the round-trips and check in with the user
         # (with a summary + optional guidance) once they pass the threshold.
         ask_after = config.stages.review_iteration_ask_after
-        if (
-            review_iterations is not None
-            and ask_after > 0
-            and from_stage == Stage.REVIEW
-            and target == Stage.DEV
-        ):
-            count = review_iterations.get("REVIEW_DEV", 0) + 1
-            review_iterations["REVIEW_DEV"] = count
-            if count >= ask_after:
-                return await _handle_review_iteration_checkin(
-                    app, engine, count, review_iterations
-                )
+        if ask_after > 0 and from_stage == Stage.REVIEW and target == Stage.DEV:
+            # handle_rollback already incremented the persisted counter; check in
+            # every `ask_after` round-trips without resetting it (so progress
+            # toward the hard cap is preserved across check-ins and resumes).
+            count = state.review_iteration_count
+            if count >= ask_after and count % ask_after == 0:
+                return await _handle_review_iteration_checkin(app, engine, count)
         return "continue"
 
     if event.type == EventType.ROLLBACK_BLOCKED:
@@ -689,14 +684,17 @@ async def _handle_review_iteration_checkin(
     app: WorkflowTUIApp,
     engine: WorkflowEngine,
     count: int,
-    review_iterations: dict[str, int],
 ) -> str:
     """Check in with the user during a long REVIEW->DEV iteration loop.
 
-    The REVIEW->DEV loop is intentionally exempt from the rollback loop limit, so
-    without this it could bounce between DEV and REVIEW indefinitely. This
-    summarizes the outstanding review notes and lets the user keep iterating,
-    inject guidance into the next DEV attempt, or pause.
+    The REVIEW->DEV loop is intentionally exempt from the generic rollback loop
+    limit (it has its own hard cap in handle_rollback). Before that cap is hit,
+    this periodic check-in summarizes the outstanding review notes and lets the
+    user keep iterating, inject guidance into the next DEV attempt, or pause.
+
+    The round-trip count is read from state.review_iteration_count and is NOT
+    reset here — only REVIEW approving (complete_review_iteration) clears it — so
+    progress toward the hard cap is preserved across check-ins and resumes.
 
     Returns "continue" to keep going or "break" to pause the workflow.
     """
@@ -736,14 +734,14 @@ async def _handle_review_iteration_checkin(
             # ROLLBACK.md, so last_failure is free to carry just the user's steer.
             state.last_failure = f"User guidance (authoritative): {guidance.strip()[:1500]}"
             save_state(state)
-            review_iterations["REVIEW_DEV"] = 0
             app.add_activity("Added your guidance for the next DEV attempt", "📝")
             app.show_message("Guidance added, continuing iteration", "info")
             return "continue"
 
         if choice == "continue":
-            # Reset the budget so we check in again after another N round-trips.
-            review_iterations["REVIEW_DEV"] = 0
+            # The next check-in fires after another `ask_after` round-trips
+            # (count % ask_after == 0); the persisted counter keeps advancing
+            # toward the hard cap.
             app.add_activity("Continuing REVIEW iteration", "🔄")
             return "continue"
 

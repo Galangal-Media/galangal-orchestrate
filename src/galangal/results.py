@@ -7,7 +7,7 @@ with magic string prefixes like "PREFLIGHT_FAILED:" or "ROLLBACK:".
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
 
@@ -60,15 +60,25 @@ class StageResult(Result):
     output: str | None = None
     is_fast_track: bool = False  # True for minor rollbacks (skip passed stages)
     error_context: ErrorContext | None = None  # Structured error details
+    # Backend usage metrics for the invocation that produced this result, when
+    # available (cost_usd, num_turns, input_tokens, output_tokens,
+    # cache_read_tokens, cache_creation_tokens). Populated by the AI backend.
+    metrics: dict[str, Any] | None = None
 
     @classmethod
-    def create_success(cls, message: str = "", output: str | None = None) -> StageResult:
+    def create_success(
+        cls,
+        message: str = "",
+        output: str | None = None,
+        metrics: dict[str, Any] | None = None,
+    ) -> StageResult:
         """Create a successful stage result."""
         return cls(
             success=True,
             message=message,
             type=StageResultType.SUCCESS,
             output=output,
+            metrics=metrics,
         )
 
     @classmethod
@@ -159,6 +169,7 @@ class StageResult(Result):
         message: str,
         output: str | None = None,
         error_context: ErrorContext | None = None,
+        metrics: dict[str, Any] | None = None,
     ) -> StageResult:
         """Create a general error result with optional structured error context."""
         return cls(
@@ -167,6 +178,7 @@ class StageResult(Result):
             type=StageResultType.ERROR,
             output=output,
             error_context=error_context,
+            metrics=metrics,
         )
 
     @classmethod

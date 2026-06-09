@@ -15,6 +15,7 @@ from galangal.config.loader import get_config, get_done_dir, get_project_root
 from galangal.core.artifacts import read_artifact, run_command
 from galangal.core.state import Stage, get_task_dir
 from galangal.core.tasks import clear_active_task
+from galangal.core.utils import strip_code_fences
 from galangal.ui.console import console, print_error, print_success, print_warning
 
 
@@ -41,12 +42,14 @@ Requirements:
 3. Be specific about what changed
 4. Use imperative mood ("Add feature" not "Added feature")
 5. No period at end
+6. Plain text only — no markdown code fences (```) or backticks
 
 Output ONLY the title, nothing else."""
 
     title = backend.generate_text(prompt, timeout=30)
     if title:
-        title = title.split("\n")[0].strip()
+        # Strip any markdown fence the model added, then take the first line.
+        title = strip_code_fences(title).split("\n")[0].strip()
         return title[:72] if len(title) > 72 else title
 
     # Fallback
@@ -100,12 +103,16 @@ Requirements:
 2. Blank line
 3. Body: 2-4 bullet points summarizing key changes
 4. Do NOT include any co-authored-by or generated-by lines
+5. Output plain text only — do NOT wrap the message in markdown code fences
+   (```) or backticks; it is committed verbatim and shown raw on GitHub
 
 Output ONLY the commit message, nothing else."""
 
     summary = backend.generate_text(prompt, timeout=60)
     if summary:
-        return summary.strip()
+        # The message goes straight into `git commit`; strip any wrapping ```
+        # fence so GitHub doesn't render literal backticks in the commit body.
+        return strip_code_fences(summary)
 
     return f"{description[:72]}"
 

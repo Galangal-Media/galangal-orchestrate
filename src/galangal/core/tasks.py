@@ -82,6 +82,27 @@ def list_tasks() -> list[tuple[str, str, str, str]]:
     return sorted(tasks)
 
 
+def find_active_task_for_issue(issue_number: int) -> str | None:
+    """Return the name of an active task already linked to this issue, if any.
+
+    Used to avoid creating a second task for an issue that is already in flight
+    (a re-trigger or a concurrent pickup). Scans active tasks and matches on the
+    persisted ``github_issue`` rather than the task-name prefix, so it is robust
+    to custom task names.
+    """
+    from galangal.core.state import load_state
+
+    for entry in list_tasks():
+        name = entry[0]
+        try:
+            st = load_state(name)
+        except Exception:
+            continue
+        if st and st.github_issue == issue_number:
+            return name
+    return None
+
+
 def generate_task_name_ai(description: str) -> str | None:
     """Use AI to generate a concise, meaningful task name.
 
@@ -381,6 +402,20 @@ def create_task_from_issue(
         mark_issue_in_progress,
         prepare_issue_for_task,
     )
+
+    # Step -1: Refuse to start a second task for an issue that already has one in
+    # flight. Prevents duplicate branches/tasks from a re-trigger or concurrent
+    # pickup. Done before any branch switching so we don't disturb the repo.
+    existing = find_active_task_for_issue(issue.number)
+    if existing and existing != task_name_override:
+        return TaskFromIssueResult(
+            success=False,
+            message=(
+                f"Issue #{issue.number} already has an active task '{existing}'. "
+                f"Resume it instead, or remove it before starting a new one."
+            ),
+            task_name=existing,
+        )
 
     # Step 0: Ensure we're on the base branch with latest changes
     on_base, current_branch, base_branch = is_on_base_branch()
