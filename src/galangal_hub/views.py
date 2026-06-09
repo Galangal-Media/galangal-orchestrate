@@ -42,8 +42,9 @@ async def login_page(request: Request) -> Response:
         return RedirectResponse(url="/", status_code=302)
 
     return templates.TemplateResponse(
+        request,
         "login.html",
-        {"request": request, "error": None},
+        {"error": None},
     )
 
 
@@ -69,8 +70,9 @@ async def login_submit(
     else:
         # Invalid credentials
         return templates.TemplateResponse(
+            request,
             "login.html",
-            {"request": request, "error": "Invalid username or password"},
+            {"error": "Invalid username or password"},
             status_code=401,
         )
 

@@ -4,6 +4,14 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.57.1 — Fix hub login page 500 on modern Starlette
+
+- **`/login` returned 500** (`TypeError: unhashable type: 'dict'`) on current
+  Starlette: `views.py` used the deprecated `TemplateResponse(name, context)`
+  signature, which modern Starlette interprets as `(request, name, …)` — passing
+  the context dict as the template name. Switched both call sites to the
+  request-first signature. Added a `GET /login` rendering regression test.
+
 ## 0.57.0 — Headless peer review
 
 - **Peer review now runs in headless mode** (previously skipped entirely). With no

@@ -100,3 +100,24 @@ async def test_ws_auth_rejects_without_key_and_no_query_fallback():
     assert await auth.verify_websocket_auth({"authorization": "Bearer k"}, {}) is True
     assert await auth.verify_websocket_auth({"x-api-key": "k"}, {}) is True
     assert await auth.verify_websocket_auth({"x-api-key": "nope"}, {}) is False
+
+
+# --- login page rendering (regression: Starlette TemplateResponse signature) ---
+
+
+def test_login_page_renders_200(tmp_path):
+    """GET /login must render the template, not 500.
+
+    Regression for the old TemplateResponse(name, context) signature, which on
+    modern Starlette passes the context dict as the template name.
+    """
+    from fastapi.testclient import TestClient
+
+    from galangal_hub.server import create_app
+
+    auth.set_dashboard_credentials("admin", "pw")  # enable dashboard auth
+    with TestClient(create_app(db_path=str(tmp_path / "hub.db"))) as c:
+        # No session cookie -> should render the login form (200), not redirect/500.
+        r = c.get("/login")
+        assert r.status_code == 200
+        assert "login" in r.text.lower()
