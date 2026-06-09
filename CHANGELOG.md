@@ -4,6 +4,13 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.57.2 — Dashboard: render "Last Failure" as markdown with a reveal toggle
+
+- The task detail page's **Last Failure** block now renders as **markdown**
+  (GFM: tables, code, lists) instead of a raw paragraph, and shows a **clamped
+  snippet with a "Show all" / "Show less"** toggle so a long QA/rollback report no
+  longer floods the page. The description block also gains GFM rendering.
+
 ## 0.57.1 — Fix hub login page 500 on modern Starlette
 
 - **`/login` returned 500** (`TypeError: unhashable type: 'dict'`) on current

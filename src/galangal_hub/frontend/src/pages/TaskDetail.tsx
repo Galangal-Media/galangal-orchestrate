@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react"
 import { useParams, Link } from "react-router-dom"
 import Markdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -129,6 +130,7 @@ export function TaskDetail() {
   const [autoScroll, setAutoScroll] = useState(true)
   const [verboseMode, setVerboseMode] = useState(false)
   const [showDescription, setShowDescription] = useState(false)
+  const [showFullFailure, setShowFullFailure] = useState(false)
 
   const { lastMessage } = useWebSocket("/ws/dashboard")
 
@@ -366,7 +368,7 @@ export function TaskDetail() {
             {(task.description || task.task_description) ? (
               showDescription ? (
                 <div className="prose prose-sm prose-invert max-w-none prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground prose-code:text-primary prose-a:text-primary prose-li:text-muted-foreground">
-                  <Markdown>{task.description || task.task_description}</Markdown>
+                  <Markdown remarkPlugins={[remarkGfm]}>{task.description || task.task_description}</Markdown>
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground italic">
@@ -383,7 +385,28 @@ export function TaskDetail() {
                   <AlertTriangle className="h-3.5 w-3.5" />
                   <span className="text-xs font-semibold">Last Failure</span>
                 </div>
-                <p className="text-xs text-muted-foreground leading-relaxed">{task.last_failure}</p>
+                <div className="relative">
+                  <div
+                    className={`prose prose-sm prose-invert max-w-none text-xs prose-headings:text-foreground prose-headings:text-xs prose-p:text-muted-foreground prose-p:text-xs prose-strong:text-foreground prose-code:text-primary prose-a:text-primary prose-li:text-muted-foreground prose-pre:text-xs prose-pre:bg-muted/40 prose-pre:overflow-x-auto ${
+                      showFullFailure ? "" : "max-h-40 overflow-hidden"
+                    }`}
+                  >
+                    <Markdown remarkPlugins={[remarkGfm]}>{task.last_failure}</Markdown>
+                  </div>
+                  {!showFullFailure && (
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-card to-transparent" />
+                  )}
+                </div>
+                {task.last_failure.length > 400 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 mt-1 px-0 text-xs text-primary hover:text-primary hover:bg-transparent"
+                    onClick={() => setShowFullFailure(!showFullFailure)}
+                  >
+                    {showFullFailure ? "Show less" : "Show all"}
+                  </Button>
+                )}
               </div>
             )}
           </CardContent>
