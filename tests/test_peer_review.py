@@ -788,44 +788,43 @@ class TestReviewIterationCheckin:
 
     @pytest.mark.asyncio
     async def test_below_threshold_does_not_prompt(self):
-        """Early REVIEW->DEV round-trips just increment the counter, no prompt."""
+        """Below the threshold (persisted count < ask_after), no prompt."""
         from galangal.core.workflow.tui_runner import _handle_workflow_event
 
         engine = MagicMock()
+        # handle_rollback (bypassed here) would have set this; simulate count=1.
         engine.state = make_state(stage=Stage.REVIEW)
+        engine.state.review_iteration_count = 1
         app = MagicMock()
         app.prompt_async = AsyncMock()
-        review_iterations: dict[str, int] = {}
 
         result = await _handle_workflow_event(
-            app, engine, self._rollback_event(), self._config(ask_after=3),
-            None, review_iterations,
+            app, engine, self._rollback_event(), self._config(ask_after=3), None,
         )
 
         assert result == "continue"
-        assert review_iterations["REVIEW_DEV"] == 1
         app.prompt_async.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_prompts_at_threshold(self):
-        """At the threshold, the user is asked and the counter resets on continue."""
+        """At a multiple of ask_after, the user is asked; the count is preserved."""
         from galangal.core.workflow.tui_runner import _handle_workflow_event
 
         engine = MagicMock()
         engine.state = make_state(stage=Stage.REVIEW)
+        engine.state.review_iteration_count = 3
         app = MagicMock()
         app.prompt_async = AsyncMock(return_value="continue")
-        review_iterations: dict[str, int] = {"REVIEW_DEV": 2}
 
         with patch("galangal.core.artifacts.read_artifact", return_value="Fix the API"):
             result = await _handle_workflow_event(
-                app, engine, self._rollback_event(), self._config(ask_after=3),
-                None, review_iterations,
+                app, engine, self._rollback_event(), self._config(ask_after=3), None,
             )
 
         assert result == "continue"
         app.prompt_async.assert_called_once()
-        assert review_iterations["REVIEW_DEV"] == 0
+        # Count is NOT reset on continue (it drives the hard cap).
+        assert engine.state.review_iteration_count == 3
 
     @pytest.mark.asyncio
     async def test_guidance_routed_to_last_failure(self):
@@ -833,25 +832,23 @@ class TestReviewIterationCheckin:
         from galangal.core.workflow.tui_runner import _handle_workflow_event
 
         state = make_state(stage=Stage.REVIEW)
+        state.review_iteration_count = 3
         engine = MagicMock()
         engine.state = state
         app = MagicMock()
         app.prompt_async = AsyncMock(return_value="user_feedback")
         app.multiline_input_async = AsyncMock(return_value="Use the existing cache layer")
-        review_iterations: dict[str, int] = {"REVIEW_DEV": 3}
 
         with (
             patch("galangal.core.artifacts.read_artifact", return_value="Perf concerns"),
             patch("galangal.core.workflow.tui_runner.save_state"),
         ):
             result = await _handle_workflow_event(
-                app, engine, self._rollback_event(), self._config(ask_after=3),
-                None, review_iterations,
+                app, engine, self._rollback_event(), self._config(ask_after=3), None,
             )
 
         assert result == "continue"
         assert "Use the existing cache layer" in state.last_failure
-        assert review_iterations["REVIEW_DEV"] == 0
 
     @pytest.mark.asyncio
     async def test_disabled_when_zero(self):
@@ -860,39 +857,27 @@ class TestReviewIterationCheckin:
 
         engine = MagicMock()
         engine.state = make_state(stage=Stage.REVIEW)
+        engine.state.review_iteration_count = 99
         app = MagicMock()
         app.prompt_async = AsyncMock()
-        review_iterations: dict[str, int] = {"REVIEW_DEV": 99}
 
         result = await _handle_workflow_event(
-            app, engine, self._rollback_event(), self._config(ask_after=0),
-            None, review_iterations,
+            app, engine, self._rollback_event(), self._config(ask_after=0), None,
         )
 
         assert result == "continue"
         app.prompt_async.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_review_pass_resets_counter(self):
-        """REVIEW completing (passing) clears the iteration counter."""
-        from galangal.core.workflow.tui_runner import _handle_workflow_event
-
+    def test_review_pass_resets_counter(self):
+        """REVIEW approving during an iteration clears the persisted counter."""
         state = make_state(stage=Stage.REVIEW)
-        engine = MagicMock()
-        engine.state = state
-        engine.handle_action = MagicMock(
-            return_value=event(EventType.WORKFLOW_COMPLETE, stage=Stage.REVIEW)
-        )
-        app = MagicMock()
-        review_iterations: dict[str, int] = {"REVIEW_DEV": 2}
+        state.review_iteration = True
+        state.review_iteration_count = 4
 
-        completed = event(EventType.STAGE_COMPLETED, stage=Stage.REVIEW)
-        with patch("galangal.core.workflow.tui_runner.save_state"):
-            await _handle_workflow_event(
-                app, engine, completed, self._config(), None, review_iterations,
-            )
+        state.complete_review_iteration()
 
-        assert "REVIEW_DEV" not in review_iterations
+        assert state.review_iteration_count == 0
+        assert state.review_iteration is False
 
 
 # =============================================================================

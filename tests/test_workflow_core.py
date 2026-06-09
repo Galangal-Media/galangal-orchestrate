@@ -58,6 +58,62 @@ class TestHandleRollback:
             assert "QA" in state.last_failure
             assert read_artifact("ROLLBACK.md", "test-task") is not None
 
+    def test_review_iteration_hard_cap_blocks_rollback(self):
+        """REVIEW->DEV rollback is blocked once the iteration cap is reached."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            task_dir = Path(tmpdir) / "galangal-tasks" / "test-task"
+            task_dir.mkdir(parents=True)
+            set_project_root(Path(tmpdir))
+
+            config = GalangalConfig(stages=StageConfig(review_iteration_max=3))
+
+            state = make_state(task_name="test-task", stage=Stage.REVIEW, attempt=1)
+            # Already at the cap from prior round-trips.
+            state.review_iteration_count = 3
+
+            result = StageResult.rollback_required(
+                message="Still not approved",
+                rollback_to=Stage.DEV,
+            )
+
+            with (
+                patch("galangal.core.workflow.core.save_state"),
+                patch("galangal.core.workflow.core.get_config", return_value=config),
+            ):
+                handled = handle_rollback(state, result)
+
+            # Blocked: the loop cannot grind past the cap.
+            assert handled is False
+            assert state.stage == Stage.REVIEW  # unchanged
+
+    def test_review_iteration_under_cap_allows_rollback(self):
+        """REVIEW->DEV rollback proceeds and counts up while under the cap."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            task_dir = Path(tmpdir) / "galangal-tasks" / "test-task"
+            task_dir.mkdir(parents=True)
+            set_project_root(Path(tmpdir))
+
+            config = GalangalConfig(stages=StageConfig(review_iteration_max=8))
+
+            state = make_state(task_name="test-task", stage=Stage.REVIEW, attempt=1)
+            state.review_iteration_count = 2
+
+            result = StageResult.rollback_required(
+                message="Address review notes",
+                rollback_to=Stage.DEV,
+            )
+
+            with (
+                patch("galangal.core.workflow.core.save_state"),
+                patch("galangal.core.workflow.core.get_config", return_value=config),
+            ):
+                handled = handle_rollback(state, result)
+
+            assert handled is True
+            assert state.stage == Stage.DEV
+            # plan_rollback_skips incremented the persisted round-trip count.
+            assert state.review_iteration_count == 3
+
     def test_ignores_non_rollback_results(self):
         """Test that handle_rollback ignores non-rollback results."""
         state = make_state(task_name="test-task", stage=Stage.DEV, attempt=1)

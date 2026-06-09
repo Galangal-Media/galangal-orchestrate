@@ -31,6 +31,15 @@ class StageConfig(BaseModel):
             "the check-in and lets the loop run freely."
         ),
     )
+    review_iteration_max: int = Field(
+        default=8,
+        description=(
+            "Hard cap on REVIEW->DEV round-trips. Once exceeded the rollback is "
+            "blocked and escalated to the user (or pauses a headless run) instead "
+            "of looping forever. 0 disables the cap. Should be >= "
+            "review_iteration_ask_after."
+        ),
+    )
     commit_per_stage: bool = Field(
         default=True,
         description="Create WIP commits after each code-modifying stage, squash at finalization",
@@ -568,6 +577,17 @@ class GitHubConfig(BaseModel):
     label_mapping: GitHubLabelMapping = Field(
         default_factory=GitHubLabelMapping,
         description="Maps GitHub labels to task types",
+    )
+    include_issue_comments: bool = Field(
+        default=True,
+        description=(
+            "Include the issue's comment thread (clarifications, repro steps) in "
+            "the task description, and download screenshots posted in comments."
+        ),
+    )
+    max_issue_comments: int = Field(
+        default=20,
+        description="Most-recent issue comments to include when ingesting context",
     )
 
 

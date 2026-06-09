@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 
 class TaskType(str, Enum):
@@ -805,6 +805,16 @@ class ExecutionState:
     clarification_required: bool = False
     last_failure: str | None = None
     review_iteration: bool = False
+    # Number of REVIEW->DEV round-trips in the current iteration loop. Persisted
+    # so the cap / user check-in survives a pause-resume cycle.
+    review_iteration_count: int = 0
+    # Truncated errors from the most recent failed attempts at the *current*
+    # stage, oldest-first. Lets a retry see the whole oscillation, not just the
+    # last failure, so it stops flip-flopping between two wrong fixes.
+    failure_history: list[str] = field(default_factory=list)
+
+    # Keep at most this many prior failures; older ones are dropped.
+    MAX_FAILURE_HISTORY: ClassVar[int] = 3
 
     def record_failure(self, error: str, max_length: int = 4000) -> None:
         """Record a failed attempt.
@@ -818,12 +828,17 @@ class ExecutionState:
         """
         self.attempt += 1
         if len(error) > max_length:
-            self.last_failure = (
+            truncated = (
                 error[:max_length]
                 + "\n\n[... truncated, see task logs in .galangal/tasks.db for full output]"
             )
         else:
-            self.last_failure = error
+            truncated = error
+        self.last_failure = truncated
+        self.failure_history.append(truncated)
+        # Bound the history so state.json stays small.
+        if len(self.failure_history) > self.MAX_FAILURE_HISTORY:
+            self.failure_history = self.failure_history[-self.MAX_FAILURE_HISTORY :]
 
     def can_retry(self, max_retries: int) -> bool:
         """Check if another retry attempt is allowed."""
@@ -834,6 +849,9 @@ class ExecutionState:
         self.attempt = 1
         if clear_failure:
             self.last_failure = None
+            # The accumulated history belongs to the stage we are leaving; a new
+            # stage (or a clean restart) starts with an empty oscillation record.
+            self.failure_history = []
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -843,6 +861,8 @@ class ExecutionState:
             "awaiting_approval": self.awaiting_approval,
             "clarification_required": self.clarification_required,
             "last_failure": self.last_failure,
+            "failure_history": self.failure_history,
+            "review_iteration_count": self.review_iteration_count,
         }
 
     @classmethod
@@ -854,6 +874,8 @@ class ExecutionState:
             awaiting_approval=d.get("awaiting_approval", False),
             clarification_required=d.get("clarification_required", False),
             last_failure=d.get("last_failure"),
+            review_iteration_count=d.get("review_iteration_count", 0),
+            failure_history=list(d.get("failure_history", [])),
         )
 
 
@@ -1261,6 +1283,8 @@ class WorkflowState:
         task_name: str,
         # Optional fields with defaults
         review_iteration: bool = False,
+        review_iteration_count: int = 0,
+        failure_history: list[str] | None = None,
         task_type: TaskType = TaskType.FEATURE,
         rollback_history: list[RollbackEvent] | None = None,
         qa_rounds: list[dict[str, Any]] | None = None,
@@ -1295,6 +1319,8 @@ class WorkflowState:
             clarification_required=clarification_required,
             last_failure=last_failure,
             review_iteration=review_iteration,
+            review_iteration_count=review_iteration_count,
+            failure_history=list(failure_history) if failure_history else [],
         )
 
         # GitHub context sub-model
@@ -1429,6 +1455,18 @@ class WorkflowState:
     @review_iteration.setter
     def review_iteration(self, value: bool) -> None:
         self._execution.review_iteration = value
+
+    @property
+    def review_iteration_count(self) -> int:
+        return self._execution.review_iteration_count
+
+    @review_iteration_count.setter
+    def review_iteration_count(self, value: int) -> None:
+        self._execution.review_iteration_count = value
+
+    @property
+    def failure_history(self) -> list[str]:
+        return self._execution.failure_history
 
     # --- GitHubContext properties ---
     @property
@@ -1654,6 +1692,9 @@ class WorkflowState:
         """
         if from_stage == Stage.REVIEW and target_stage == Stage.DEV:
             self.review_iteration = True
+            # Count each round-trip so the loop cap / user check-in has a
+            # persisted basis (survives pause-resume, unlike a runner-local dict).
+            self.review_iteration_count += 1
             dev_idx = STAGE_ORDER.index(Stage.DEV)
             review_idx = STAGE_ORDER.index(Stage.REVIEW)
             loop_skip = set(STAGE_ORDER[dev_idx + 1 : review_idx])
@@ -1678,6 +1719,7 @@ class WorkflowState:
         REVIEW→DEV branch of ``plan_rollback_skips``.
         """
         self.review_iteration = False
+        self.review_iteration_count = 0
         self.clear_fast_track()
         self.clear_passed_stages()
 
@@ -1704,7 +1746,9 @@ class WorkflowState:
         d["awaiting_approval"] = self.awaiting_approval
         d["clarification_required"] = self.clarification_required
         d["last_failure"] = self.last_failure
+        d["failure_history"] = self.failure_history
         d["review_iteration"] = self.review_iteration
+        d["review_iteration_count"] = self.review_iteration_count
 
         # GitHub context (flat)
         d["github_issue"] = self.github_issue
@@ -1781,7 +1825,9 @@ class WorkflowState:
             awaiting_approval=d.get("awaiting_approval", False),
             clarification_required=d.get("clarification_required", False),
             last_failure=d.get("last_failure"),
+            failure_history=d.get("failure_history"),
             review_iteration=d.get("review_iteration", False),
+            review_iteration_count=d.get("review_iteration_count", 0),
             # Task metadata
             started_at=d.get("started_at", datetime.now(timezone.utc).isoformat()),
             task_description=d.get("task_description", ""),

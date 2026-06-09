@@ -201,7 +201,26 @@ async def run_workflow_headless(
         logger.exception(f"Headless workflow error: {e}")
         notify_output(f"Workflow error: {e}", "error")
         notify_task_complete(state, success=False)
+        # The task failed terminally (not a pause/resume): hand the issue back to
+        # the pickup queue so it isn't stranded with an "in-progress" label.
+        _restore_issue_on_failure(state)
         return "error"
+
+
+def _restore_issue_on_failure(state: WorkflowState) -> None:
+    """Best-effort: return a linked issue to the pickup queue on terminal failure.
+
+    Only meaningful for issue-linked tasks; a no-op otherwise. Never raises — a
+    label-restore failure must not mask the original workflow error.
+    """
+    if not state.github_issue:
+        return
+    try:
+        from galangal.github.issues import restore_issue_to_pickup
+
+        restore_issue_to_pickup(state.github_issue)
+    except Exception:
+        logger.debug("Failed to restore issue label on failure", exc_info=True)
 
 
 async def _handle_event_headless(
