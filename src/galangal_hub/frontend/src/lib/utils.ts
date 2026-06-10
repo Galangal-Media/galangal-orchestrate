@@ -30,3 +30,22 @@ export function truncate(str: string, length: number): string {
   if (str.length <= length) return str
   return str.slice(0, length) + '...'
 }
+
+export function formatCost(usd: number): string {
+  // Sub-cent precision matters for cheap stages; clamp display to 4 decimals.
+  if (usd >= 1) return `$${usd.toFixed(2)}`
+  return `$${usd.toFixed(4)}`
+}
+
+export function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`
+  return `${tokens}`
+}
+
+export function formatDuration(seconds: number): string {
+  const s = Math.floor(seconds)
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+}

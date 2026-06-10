@@ -10,8 +10,8 @@ import { ArtifactViewer } from "@/components/artifact/ArtifactViewer"
 import { useWebSocket } from "@/hooks/useWebSocket"
 import { api } from "@/lib/api"
 import type { AgentInfo, TaskState, PromptData } from "@/types/api"
-import { formatRelativeTime } from "@/lib/utils"
-import { ArrowLeft, GitBranch, Terminal, Clock, AlertTriangle, Loader2 } from "lucide-react"
+import { formatRelativeTime, formatCost, formatTokens, formatDuration } from "@/lib/utils"
+import { ArrowLeft, GitBranch, Terminal, Clock, AlertTriangle, Loader2, DollarSign, RotateCcw } from "lucide-react"
 
 function isStageRunning(task: TaskState): boolean {
   const stage = task.stage.toLowerCase()
@@ -117,6 +117,76 @@ function parseOutputLine(line: string, index: number): ParsedOutput | null {
     }
     return null
   }
+}
+
+function CostUsageCard({ task }: { task: TaskState }) {
+  const cost = task.task_cost_usd ?? 0
+  const tokens = task.task_tokens ?? 0
+  const rollbacks = task.rollback_count ?? 0
+  const durations = task.stage_durations ?? {}
+  const costs = task.stage_costs ?? {}
+
+  // Stage rows in recorded order (stage_durations is appended in pipeline order),
+  // then any cost-only stages not yet seen.
+  const stageKeys = [
+    ...Object.keys(durations),
+    ...Object.keys(costs).filter((k) => !(k in durations)),
+  ]
+
+  // Nothing worth showing yet.
+  if (cost === 0 && tokens === 0 && stageKeys.length === 0 && rollbacks === 0) {
+    return null
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Cost & Usage
+          </CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap gap-4 text-sm">
+          <div>
+            <div className="text-muted-foreground text-xs">Cost</div>
+            <div className="tabular-nums font-semibold">{formatCost(cost)}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground text-xs">Tokens</div>
+            <div className="tabular-nums font-semibold">{formatTokens(tokens)}</div>
+          </div>
+          {rollbacks > 0 && (
+            <div>
+              <div className="text-muted-foreground text-xs flex items-center gap-1">
+                <RotateCcw className="h-3 w-3" /> Rollbacks
+              </div>
+              <div className="tabular-nums font-semibold text-warning">{rollbacks}</div>
+            </div>
+          )}
+        </div>
+
+        {stageKeys.length > 0 && (
+          <div className="border-t border-border pt-3">
+            <div className="text-muted-foreground text-xs mb-2">Per stage</div>
+            <div className="space-y-1">
+              {stageKeys.map((stage) => (
+                <div key={stage} className="flex items-center justify-between text-xs">
+                  <span className="font-mono">{stage}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {durations[stage] != null && <span>{formatDuration(durations[stage])}</span>}
+                    {costs[stage] ? <span className="ml-2">{formatCost(costs[stage])}</span> : null}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
 }
 
 export function TaskDetail() {
@@ -412,6 +482,9 @@ export function TaskDetail() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Cost & Usage */}
+      <CostUsageCard task={task} />
 
       {/* Live Output */}
       <section>

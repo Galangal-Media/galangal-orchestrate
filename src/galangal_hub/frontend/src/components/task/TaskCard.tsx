@@ -1,9 +1,9 @@
 import { Link } from "react-router-dom"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { formatRelativeTime } from "@/lib/utils"
+import { formatRelativeTime, formatCost } from "@/lib/utils"
 import type { TaskState } from "@/types/api"
-import { Clock, GitBranch } from "lucide-react"
+import { Clock, GitBranch, DollarSign } from "lucide-react"
 
 interface TaskCardProps {
   task: TaskState
@@ -54,12 +54,20 @@ export function TaskCard({ task, agentId }: TaskCardProps) {
             </p>
           )}
 
-          {task.started_at && (
-            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground pt-1">
-              <Clock className="h-3 w-3" />
-              <span>Started {formatRelativeTime(task.started_at)}</span>
-            </div>
-          )}
+          <div className="flex items-center justify-between gap-2 pt-1">
+            {task.started_at ? (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <Clock className="h-3 w-3" />
+                <span>Started {formatRelativeTime(task.started_at)}</span>
+              </div>
+            ) : <span />}
+            {task.task_cost_usd ? (
+              <div className="flex items-center gap-1 text-[11px] text-muted-foreground tabular-nums">
+                <DollarSign className="h-3 w-3" />
+                <span>{formatCost(task.task_cost_usd)}</span>
+              </div>
+            ) : null}
+          </div>
         </CardContent>
       </Card>
     </Link>
