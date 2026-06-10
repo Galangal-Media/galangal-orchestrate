@@ -25,6 +25,10 @@ export interface TaskState {
   stage_durations?: Record<string, number>
   github_issue?: number
   github_repo?: string
+  task_cost_usd?: number
+  task_tokens?: number
+  stage_costs?: Record<string, number>
+  rollback_count?: number
 }
 
 export interface PromptOption {
