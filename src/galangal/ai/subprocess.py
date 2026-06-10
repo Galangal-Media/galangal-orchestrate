@@ -4,7 +4,9 @@ Subprocess runner with pause/timeout handling for AI backends.
 
 from __future__ import annotations
 
+import os
 import select
+import signal
 import subprocess
 import time
 from collections import deque
@@ -91,6 +93,7 @@ class SubprocessRunner:
         poll_interval_idle: float = 0.5,
         max_output_chars: int | None = 1_000_000,
         output_file: str | None = None,
+        no_progress_timeout: int = 0,
     ):
         """
         Initialize the subprocess runner.
@@ -107,9 +110,13 @@ class SubprocessRunner:
             poll_interval_idle: Sleep between polls when idle
             max_output_chars: Max output chars kept in memory (None for unlimited)
             output_file: Optional file path to stream full output
+            no_progress_timeout: Kill the process if it emits no output for this
+                many seconds (0 disables). Catches a wedged agent before the full
+                timeout elapses.
         """
         self.command = command
         self.timeout = timeout
+        self.no_progress_timeout = no_progress_timeout
         self.pause_check = pause_check
         self.ui = ui
         self.on_output = on_output
@@ -134,6 +141,11 @@ class SubprocessRunner:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            # Own process group so kill reaches the whole pipeline (the shell AND
+            # the agent/test child it spawns). Without this, killing the shell on
+            # timeout/watchdog leaves the child alive, holding the stdout pipe and
+            # hanging the read of remaining output.
+            start_new_session=True,
         )
 
         output_buffer: deque[str] = deque()
@@ -141,6 +153,9 @@ class SubprocessRunner:
         output_handle = None
         start_time = time.time()
         last_idle_callback = start_time
+        # Distinct from last_idle_callback (which the idle tick also resets): this
+        # only advances on real output, so the watchdog measures true silence.
+        last_output_time = start_time
 
         if self.output_file:
             try:
@@ -172,7 +187,9 @@ class SubprocessRunner:
 
                 # Update last idle callback time if we had output
                 if had_output:
-                    last_idle_callback = time.time()
+                    now = time.time()
+                    last_idle_callback = now
+                    last_output_time = now
 
                 # Process completed
                 if retcode is not None:
@@ -190,10 +207,33 @@ class SubprocessRunner:
                         output="".join(output_buffer),
                     )
 
+                # No-progress watchdog: kill a process that has gone silent for
+                # too long even though the overall timeout hasn't elapsed.
+                if (
+                    self.no_progress_timeout
+                    and time.time() - last_output_time > self.no_progress_timeout
+                ):
+                    self._kill_group(process)
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    self._capture_remaining(process, record_output)
+                    if self.ui:
+                        self.ui.add_activity(
+                            f"No output for {self.no_progress_timeout}s - aborting", "❌"
+                        )
+                    return RunResult(
+                        outcome=RunOutcome.TIMEOUT,
+                        exit_code=None,
+                        output="".join(output_buffer),
+                        timeout_seconds=self.no_progress_timeout,
+                    )
+
                 # Check for timeout
                 elapsed = time.time() - start_time
                 if elapsed > self.timeout:
-                    process.kill()
+                    self._kill_group(process)
                     try:
                         process.wait(timeout=5)
                     except subprocess.TimeoutExpired:
@@ -229,7 +269,7 @@ class SubprocessRunner:
         except Exception:
             # Ensure process is terminated on any error
             try:
-                process.kill()
+                self._kill_group(process)
                 process.wait(timeout=5)
             except Exception:
                 pass
@@ -240,6 +280,39 @@ class SubprocessRunner:
                     output_handle.close()
                 except OSError:
                     pass
+
+    @staticmethod
+    def _kill_group(process: subprocess.Popen[str]) -> None:
+        """Kill the process's whole group so shell children die with it.
+
+        ``process.kill()`` only signals the direct child (``/bin/sh``); the agent
+        or test runner it spawned would otherwise survive and keep the pipe open.
+        Falls back to a plain kill if the group signal can't be sent.
+
+        Safety: only ever ``killpg`` a real, positive child pid whose group id is
+        positive. A ``MagicMock`` process (in tests) has a ``pid`` that coerces to
+        0 via ``__index__``; ``os.getpgid(0)``/``killpg(0, ...)`` would target the
+        CALLER's own process group and SIGKILL the whole test session. Guard hard
+        against that.
+        """
+        pid = getattr(process, "pid", None)
+        if type(pid) is not int or pid <= 0:
+            # Mocked or invalid process: never risk a group signal.
+            try:
+                process.kill()
+            except Exception:
+                pass
+            return
+        try:
+            pgid = os.getpgid(pid)
+            if pgid <= 0:
+                raise OSError("refusing to signal process group <= 0")
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                process.kill()
+            except OSError:
+                pass
 
     def _read_output(
         self,
@@ -279,12 +352,12 @@ class SubprocessRunner:
         return had_output
 
     def _terminate_gracefully(self, process: subprocess.Popen[str]) -> None:
-        """Terminate process gracefully, then force kill if needed."""
+        """Terminate process gracefully, then force-kill the group if needed."""
         process.terminate()
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            process.kill()
+            self._kill_group(process)
 
     def _capture_remaining(
         self,

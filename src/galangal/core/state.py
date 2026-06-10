@@ -812,9 +812,27 @@ class ExecutionState:
     # stage, oldest-first. Lets a retry see the whole oscillation, not just the
     # last failure, so it stops flip-flopping between two wrong fixes.
     failure_history: list[str] = field(default_factory=list)
+    # Cumulative backend usage across all stages/attempts of the task, for the
+    # cost circuit breaker and reporting. Populated from StageResult.metrics.
+    task_cost_usd: float = 0.0
+    task_tokens: int = 0
+    # Set once the user acknowledges a cost-budget breach and chooses to keep
+    # going, so the circuit breaker doesn't re-prompt every subsequent stage.
+    budget_ack: bool = False
 
     # Keep at most this many prior failures; older ones are dropped.
     MAX_FAILURE_HISTORY: ClassVar[int] = 3
+
+    def add_usage(self, metrics: dict[str, Any] | None) -> None:
+        """Accumulate one invocation's cost/token metrics into the task totals."""
+        if not metrics:
+            return
+        cost = metrics.get("cost_usd")
+        if isinstance(cost, (int, float)):
+            self.task_cost_usd = round(self.task_cost_usd + float(cost), 4)
+        tokens = (metrics.get("input_tokens") or 0) + (metrics.get("output_tokens") or 0)
+        if tokens:
+            self.task_tokens += int(tokens)
 
     def record_failure(self, error: str, max_length: int = 4000) -> None:
         """Record a failed attempt.
@@ -863,6 +881,9 @@ class ExecutionState:
             "last_failure": self.last_failure,
             "failure_history": self.failure_history,
             "review_iteration_count": self.review_iteration_count,
+            "task_cost_usd": self.task_cost_usd,
+            "task_tokens": self.task_tokens,
+            "budget_ack": self.budget_ack,
         }
 
     @classmethod
@@ -876,6 +897,9 @@ class ExecutionState:
             last_failure=d.get("last_failure"),
             review_iteration_count=d.get("review_iteration_count", 0),
             failure_history=list(d.get("failure_history", [])),
+            task_cost_usd=d.get("task_cost_usd", 0.0),
+            task_tokens=d.get("task_tokens", 0),
+            budget_ack=d.get("budget_ack", False),
         )
 
 
@@ -1285,6 +1309,9 @@ class WorkflowState:
         review_iteration: bool = False,
         review_iteration_count: int = 0,
         failure_history: list[str] | None = None,
+        task_cost_usd: float = 0.0,
+        task_tokens: int = 0,
+        budget_ack: bool = False,
         task_type: TaskType = TaskType.FEATURE,
         rollback_history: list[RollbackEvent] | None = None,
         qa_rounds: list[dict[str, Any]] | None = None,
@@ -1321,6 +1348,9 @@ class WorkflowState:
             review_iteration=review_iteration,
             review_iteration_count=review_iteration_count,
             failure_history=list(failure_history) if failure_history else [],
+            task_cost_usd=task_cost_usd,
+            task_tokens=task_tokens,
+            budget_ack=budget_ack,
         )
 
         # GitHub context sub-model
@@ -1467,6 +1497,34 @@ class WorkflowState:
     @property
     def failure_history(self) -> list[str]:
         return self._execution.failure_history
+
+    @property
+    def task_cost_usd(self) -> float:
+        return self._execution.task_cost_usd
+
+    @task_cost_usd.setter
+    def task_cost_usd(self, value: float) -> None:
+        self._execution.task_cost_usd = value
+
+    @property
+    def task_tokens(self) -> int:
+        return self._execution.task_tokens
+
+    @task_tokens.setter
+    def task_tokens(self, value: int) -> None:
+        self._execution.task_tokens = value
+
+    @property
+    def budget_ack(self) -> bool:
+        return self._execution.budget_ack
+
+    @budget_ack.setter
+    def budget_ack(self, value: bool) -> None:
+        self._execution.budget_ack = value
+
+    def add_usage(self, metrics: dict[str, Any] | None) -> None:
+        """Accumulate one invocation's cost/token metrics into the task totals."""
+        self._execution.add_usage(metrics)
 
     # --- GitHubContext properties ---
     @property
@@ -1749,6 +1807,9 @@ class WorkflowState:
         d["failure_history"] = self.failure_history
         d["review_iteration"] = self.review_iteration
         d["review_iteration_count"] = self.review_iteration_count
+        d["task_cost_usd"] = self.task_cost_usd
+        d["task_tokens"] = self.task_tokens
+        d["budget_ack"] = self.budget_ack
 
         # GitHub context (flat)
         d["github_issue"] = self.github_issue
@@ -1828,6 +1889,9 @@ class WorkflowState:
             failure_history=d.get("failure_history"),
             review_iteration=d.get("review_iteration", False),
             review_iteration_count=d.get("review_iteration_count", 0),
+            task_cost_usd=d.get("task_cost_usd", 0.0),
+            task_tokens=d.get("task_tokens", 0),
+            budget_ack=d.get("budget_ack", False),
             # Task metadata
             started_at=d.get("started_at", datetime.now(timezone.utc).isoformat()),
             task_description=d.get("task_description", ""),

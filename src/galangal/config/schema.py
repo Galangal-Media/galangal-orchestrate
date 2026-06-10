@@ -40,6 +40,54 @@ class StageConfig(BaseModel):
             "review_iteration_ask_after."
         ),
     )
+    stage_timeouts: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Per-stage timeout overrides in seconds (e.g. {'PM': 600, 'DEV': "
+            "14400}). Stages not listed fall back to `timeout`. Lets planning "
+            "stages fail fast instead of hanging for the full default."
+        ),
+    )
+    no_progress_timeout: int = Field(
+        default=0,
+        description=(
+            "Abort a backend invocation that produces NO output for this many "
+            "seconds (a wedged agent), even if under the overall timeout. 0 "
+            "disables the watchdog. Should be well under `timeout`."
+        ),
+    )
+    max_task_cost_usd: float = Field(
+        default=0.0,
+        description=(
+            "Circuit breaker: pause and escalate once a task's cumulative backend "
+            "cost (summed across stages/attempts) exceeds this many USD. 0 "
+            "disables. Requires a backend that reports cost (e.g. claude)."
+        ),
+    )
+    max_task_tokens: int = Field(
+        default=0,
+        description=(
+            "Circuit breaker on cumulative input+output tokens for a task. 0 "
+            "disables. Complements max_task_cost_usd."
+        ),
+    )
+    max_turns_resume_limit: int = Field(
+        default=2,
+        description=(
+            "When a stage hits the per-invocation max-turns ceiling, resume the "
+            "same session up to this many times to finish, instead of discarding "
+            "the work and retrying from scratch. 0 disables (legacy behavior)."
+        ),
+    )
+    stage_disallowed_tools: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-stage tool denylist passed to the backend (claude "
+            "--disallowedTools). E.g. {'PM': ['Edit', 'Bash'], 'DESIGN': "
+            "['Edit']} keeps planning stages from modifying source. Opt-in: empty "
+            "by default so existing workflows are unaffected."
+        ),
+    )
     commit_per_stage: bool = Field(
         default=True,
         description="Create WIP commits after each code-modifying stage, squash at finalization",
@@ -81,6 +129,14 @@ class TestGateConfig(BaseModel):
     )
     fail_fast: bool = Field(
         default=True, description="Stop on first test failure instead of running all"
+    )
+    retries: int = Field(
+        default=0,
+        description=(
+            "Re-run a failing test suite up to this many times before counting it "
+            "as failed. Absorbs flaky tests so one spurious failure doesn't trigger "
+            "an expensive rollback to DEV. 0 disables retrying."
+        ),
     )
 
     @field_validator("tests", mode="before")

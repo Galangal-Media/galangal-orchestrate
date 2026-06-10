@@ -441,6 +441,21 @@ async def _handle_workflow_event(
                 return await _handle_review_iteration_checkin(app, engine, count)
         return "continue"
 
+    if event.type == EventType.BUDGET_EXCEEDED:
+        app.show_error("Cost budget exceeded", event.message)
+        cont = await app.ask_yes_no_async(
+            f"{event.message}.\n\nContinue anyway (budget check disabled for this task)?"
+        )
+        app.clear_error()
+        if cont:
+            state.budget_ack = True
+            save_state(state)
+            app.show_message("Continuing despite budget", "warning")
+            return "continue"
+        save_state(state)
+        app._workflow_result = "paused"
+        return "break"
+
     if event.type == EventType.ROLLBACK_BLOCKED:
         app.show_stage_complete(state.stage.value, False)
         block_reason = event.data.get("block_reason", "")
