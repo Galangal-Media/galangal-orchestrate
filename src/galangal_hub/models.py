@@ -78,6 +78,11 @@ class TaskState(BaseModel):
     stage_durations: dict[str, int] | None = None
     github_issue: int | None = None
     github_repo: str | None = None
+    # Cost/usage so the dashboard can show spend live and on history.
+    task_cost_usd: float = 0.0
+    task_tokens: int = 0
+    stage_costs: dict[str, float] | None = None
+    rollback_count: int = 0
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

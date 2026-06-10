@@ -151,6 +151,12 @@ async def run_workflow_headless(
     notify_output(f"Starting workflow for task: {state.task_name}", "activity")
     notify_output(f"Current stage: {state.stage.value}", "activity")
 
+    # One-time startup checks (mid-stage crash marker, dirty working tree).
+    from galangal.core.workflow.core import workflow_startup_checks
+
+    for warning in workflow_startup_checks(state):
+        notify_output(warning, "activity")
+
     try:
         while not engine.is_complete and not app._paused:
             # Check GitHub issue status

@@ -172,6 +172,13 @@ def _run_workflow_with_tui(
         # Initialize hub client if configured
         await _init_hub_client(config, state)
 
+        # One-time startup checks (mid-stage crash marker, dirty working tree).
+        from galangal.core.workflow.core import workflow_startup_checks
+
+        for warning in workflow_startup_checks(state):
+            app.show_message(warning, "warning")
+            app.add_activity(warning, "⚠")
+
         try:
             while not engine.is_complete and not app._paused:
                 # Check GitHub issue status

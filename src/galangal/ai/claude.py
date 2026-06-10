@@ -5,11 +5,13 @@ Claude CLI backend implementation.
 from __future__ import annotations
 
 import json
+import random
 import shlex
+import time
 from typing import TYPE_CHECKING, Any
 
 from galangal.ai.base import AIBackend, PauseCheck
-from galangal.ai.errors import analyze_error
+from galangal.ai.errors import ErrorCategory, analyze_error
 from galangal.ai.subprocess import SubprocessRunner
 from galangal.config.loader import get_config, get_project_root
 from galangal.logging import get_logger
@@ -99,13 +101,16 @@ class ClaudeBackend(AIBackend):
         config = get_config()
         no_progress = config.stages.no_progress_timeout
         resume_limit = config.stages.max_turns_resume_limit
+        transient_limit = config.stages.transient_retry_limit
         disallowed = (
             config.stages.stage_disallowed_tools.get(stage, []) if stage else []
         )
 
         captured_session: dict[str, str | None] = {"id": None}
+        rate_state: dict[str, bool] = {"limited": False}
         totals: dict[str, Any] = {}
         extensions = 0
+        transient_retries = 0
         resume_session: str | None = None
         current_prompt = prompt
 
@@ -121,6 +126,7 @@ class ClaudeBackend(AIBackend):
                 disallowed_tools=disallowed,
                 resume_session=resume_session,
                 captured_session=captured_session,
+                rate_state=rate_state,
                 totals=totals,
             )
 
@@ -142,7 +148,35 @@ class ClaudeBackend(AIBackend):
                     )
                 continue
 
+            # Retry transient errors (rate limit / network blip) with jittered
+            # backoff, from scratch, instead of failing the whole stage.
+            if (
+                not result.success
+                and result.error_context is not None
+                and result.error_context.category
+                in (ErrorCategory.RATE_LIMIT, ErrorCategory.NETWORK)
+                and transient_retries < transient_limit
+            ):
+                delay = self._backoff_delay(transient_retries)
+                transient_retries += 1
+                if ui:
+                    ui.add_activity(
+                        f"Transient error ({result.error_context.category.name}) - "
+                        f"retrying in {delay:.0f}s ({transient_retries}/{transient_limit})",
+                        "🔁",
+                    )
+                time.sleep(delay)
+                resume_session = None
+                current_prompt = prompt
+                continue
+
             return result
+
+    @staticmethod
+    def _backoff_delay(attempt: int, base: float = 5.0, cap: float = 60.0) -> float:
+        """Exponential backoff with full jitter, capped."""
+        ceiling = min(cap, base * (2**attempt))
+        return random.uniform(base, ceiling) if ceiling > base else base
 
     def _invoke_once(
         self,
@@ -156,6 +190,7 @@ class ClaudeBackend(AIBackend):
         disallowed_tools: list[str],
         resume_session: str | None,
         captured_session: dict[str, str | None],
+        rate_state: dict[str, bool],
         totals: dict[str, Any],
     ) -> StageResult:
         """Run Claude once; cost/token metrics accumulate into ``totals``."""
@@ -166,6 +201,7 @@ class ClaudeBackend(AIBackend):
             if ui:
                 ui.add_raw_line(line)
             self._capture_session_id(line, captured_session)
+            self._update_rate_state(line, rate_state)
             self._process_stream_line(line, ui, pending_tools)
             self._notify_hub_output(line)
 
@@ -202,6 +238,7 @@ class ClaudeBackend(AIBackend):
                     poll_interval_idle=0.5,
                     output_file=log_file,
                     no_progress_timeout=no_progress,
+                    watchdog_suppressed=lambda: rate_state["limited"],
                 )
 
                 result = runner.run()
@@ -297,6 +334,28 @@ class ClaudeBackend(AIBackend):
         sid = data.get("session_id") if isinstance(data, dict) else None
         if isinstance(sid, str) and sid:
             holder["id"] = sid
+
+    @staticmethod
+    def _update_rate_state(line: str, rate_state: dict[str, bool]) -> None:
+        """Track whether the CLI is currently in a rate-limit wait.
+
+        Set while a system message mentions rate limiting (so the no-progress
+        watchdog holds off during the idle wait), and cleared as soon as real
+        assistant/user activity resumes.
+        """
+        try:
+            data = json.loads(line.strip())
+        except (json.JSONDecodeError, ValueError):
+            return
+        if not isinstance(data, dict):
+            return
+        msg_type = data.get("type", "")
+        if msg_type == "system":
+            message = str(data.get("message", "")).lower()
+            if "rate" in message:
+                rate_state["limited"] = True
+        elif msg_type in ("assistant", "user"):
+            rate_state["limited"] = False
 
     @staticmethod
     def _merge_metrics(

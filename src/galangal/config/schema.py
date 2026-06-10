@@ -79,6 +79,14 @@ class StageConfig(BaseModel):
             "the work and retrying from scratch. 0 disables (legacy behavior)."
         ),
     )
+    transient_retry_limit: int = Field(
+        default=2,
+        description=(
+            "Retry a backend invocation up to this many times on a transient "
+            "error (rate limit / network) with jittered exponential backoff, "
+            "before failing the stage. 0 disables."
+        ),
+    )
     stage_disallowed_tools: dict[str, list[str]] = Field(
         default_factory=dict,
         description=(

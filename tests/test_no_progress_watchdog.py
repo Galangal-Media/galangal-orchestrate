@@ -71,6 +71,20 @@ def test_watchdog_disabled_lets_output_through():
     assert "hello" in result.output
 
 
+def test_watchdog_suppressed_does_not_kill():
+    """While watchdog_suppressed() is True, a silent process is not killed."""
+    runner = SubprocessRunner(
+        command="sleep 2",  # silent, would trip a 1s watchdog
+        timeout=30,
+        no_progress_timeout=1,
+        watchdog_suppressed=lambda: True,  # e.g. a rate-limit wait
+        poll_interval_idle=0.1,
+    )
+    result = runner.run()
+    # Not killed by the watchdog: it runs to natural completion.
+    assert result.outcome == RunOutcome.COMPLETED
+
+
 def test_watchdog_not_triggered_by_steady_output():
     """A process emitting output within the window is not killed by the watchdog."""
     runner = SubprocessRunner(
