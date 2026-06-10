@@ -167,10 +167,11 @@ async def run_workflow_headless(
             # Start stage timer
             engine.start_stage_timer()
 
-            # Skip PM discovery Q&A in headless mode
+            # Headless PM discovery: there is no interactive user, so generate
+            # clarifying questions and answer them from the brief (issue body +
+            # comments) via the AI, instead of dropping discovery entirely.
             if engine.current_stage == Stage.PM and not state.qa_complete:
-                state.qa_complete = True
-                save_state(state)
+                await asyncio.to_thread(_run_headless_discovery, state)
 
             # Execute stage in thread (it's blocking)
             workflow_event = await asyncio.to_thread(
@@ -205,6 +206,81 @@ async def run_workflow_headless(
         # the pickup queue so it isn't stranded with an "in-progress" label.
         _restore_issue_on_failure(state)
         return "error"
+
+
+def _run_headless_discovery(state: WorkflowState) -> None:
+    """Generate and AI-answer PM discovery questions for a headless run.
+
+    Mirrors the interactive Q&A, but with no user: the brief (which for issue
+    runs now includes the issue body and comment thread) is used to answer the
+    model's own clarifying questions, and the result is written to
+    DISCOVERY_LOG.md so PM can incorporate it. Always marks discovery complete
+    so the run can never deadlock; on any failure it degrades to a plain skip.
+    """
+    import re
+
+    from galangal.core.workflow.tui_runner import _parse_discovery_questions, _write_discovery_log
+    from galangal.hub.hooks import notify_output
+    from galangal.prompts.builder import PromptBuilder
+
+    try:
+        config = get_config()
+
+        # Respect a per-task-type opt-out (same as the interactive path).
+        tt_settings = config.task_type_settings.get(state.task_type.value)
+        if tt_settings and getattr(tt_settings, "skip_discovery", False):
+            notify_output("Discovery skipped for this task type", "activity")
+            return
+
+        from galangal.ai import get_backend_with_fallback
+
+        backend = get_backend_with_fallback(config.ai.default, config=config)
+        builder = PromptBuilder()
+
+        # 1. Generate clarifying questions.
+        q_prompt = builder.build_discovery_prompt(state, [])
+        q_text = backend.generate_text(q_prompt, timeout=300)
+        questions = _parse_discovery_questions(q_text or "")
+        if not questions:
+            notify_output("Discovery: no clarifying questions needed", "activity")
+            return
+
+        notify_output(f"Discovery: answering {len(questions)} questions from the brief", "activity")
+
+        # 2. Answer them from the brief.
+        numbered = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
+        a_prompt = (
+            "Answer these clarifying questions about a development task using ONLY "
+            "the brief below. Be concise. If the brief does not specify something, "
+            "pick a sensible default and note it briefly.\n\n"
+            f"Brief:\n{state.task_description}\n\n"
+            f"Questions:\n{numbered}\n\n"
+            "Output a numbered list of answers matching the question numbers, one "
+            "answer per line. Output only the list."
+        )
+        a_text = backend.generate_text(a_prompt, timeout=300) or ""
+
+        # 3. Parse answers aligned to questions (pad any the model skipped).
+        parsed: dict[int, str] = {}
+        for line in a_text.splitlines():
+            m = re.match(r"^\s*(\d+)[.)]\s*(.+)$", line.strip())
+            if m:
+                parsed[int(m.group(1))] = m.group(2).strip()
+        answers = [
+            parsed.get(i + 1, "Not specified in the brief; use best engineering judgment.")
+            for i in range(len(questions))
+        ]
+
+        qa_rounds = [{"questions": questions, "answers": answers}]
+        state.qa_rounds = qa_rounds
+        _write_discovery_log(state.task_name, qa_rounds)
+        notify_output("Discovery: wrote DISCOVERY_LOG.md", "activity")
+    except Exception:
+        logger.debug("Headless discovery failed; proceeding without it", exc_info=True)
+    finally:
+        # Never block a headless run on discovery.
+        state.qa_complete = True
+        save_state(state)
 
 
 def _restore_issue_on_failure(state: WorkflowState) -> None:
@@ -381,6 +457,26 @@ async def _handle_event_headless(
             "activity",
         )
         return "continue"
+
+    if event.type == EventType.BUDGET_EXCEEDED:
+        notify_output(event.message, "error")
+        response = await _wait_for_hub_decision(
+            state,
+            f"{event.message}\n\nContinue (disables the budget check for this "
+            "task) or pause?",
+            prompt_type="BUDGET_EXCEEDED",
+            options=[
+                {"key": "continue", "label": "Continue", "result": "continue"},
+                {"key": "quit", "label": "Pause workflow", "result": "quit"},
+            ],
+        )
+        if response == "continue":
+            state.budget_ack = True
+            save_state(state)
+            return "continue"
+        save_state(state)
+        app._workflow_result = "paused"
+        return "break"
 
     if event.type == EventType.ROLLBACK_BLOCKED:
         notify_output(f"Rollback blocked: {event.message}", "error")

@@ -64,6 +64,7 @@ class EventType(Enum):
     MAX_RETRIES_EXCEEDED = auto()
     PREFLIGHT_FAILED = auto()
     ROLLBACK_BLOCKED = auto()
+    BUDGET_EXCEEDED = auto()
 
     # Peer review
     PEER_REVIEW_REQUIRED = auto()
@@ -257,9 +258,43 @@ class WorkflowEngine:
         Returns:
             WorkflowEvent describing the execution result.
         """
+        # Circuit breaker: if the task has already blown its cost/token budget,
+        # pause and escalate BEFORE spending more on this stage. Checked here
+        # (not after) so a stage that already completed still advanced normally
+        # and is not re-run on resume.
+        budget_event = self._check_budget()
+        if budget_event is not None:
+            return budget_event
+
         result = _execute_stage(self.state, tui_app=tui_app, pause_check=pause_check)
         self._pending_result = result
         return self._process_stage_result(result)
+
+    def _check_budget(self) -> WorkflowEvent | None:
+        """Return a BUDGET_EXCEEDED event if the task is over budget, else None."""
+        if self.state.budget_ack:
+            return None
+        max_cost = self.config.stages.max_task_cost_usd
+        max_tokens = self.config.stages.max_task_tokens
+        over_cost = max_cost > 0 and self.state.task_cost_usd > max_cost
+        over_tokens = max_tokens > 0 and self.state.task_tokens > max_tokens
+        if not (over_cost or over_tokens):
+            return None
+
+        reasons = []
+        if over_cost:
+            reasons.append(f"${self.state.task_cost_usd:.2f} > ${max_cost:.2f}")
+        if over_tokens:
+            reasons.append(f"{self.state.task_tokens} > {max_tokens} tokens")
+        return event(
+            EventType.BUDGET_EXCEEDED,
+            stage=self.state.stage,
+            message="Task cost budget exceeded: " + "; ".join(reasons),
+            cost_usd=self.state.task_cost_usd,
+            tokens=self.state.task_tokens,
+            max_cost_usd=max_cost,
+            max_tokens=max_tokens,
+        )
 
     def _process_stage_result(self, result: StageResult) -> WorkflowEvent:
         """Convert a StageResult to a WorkflowEvent."""

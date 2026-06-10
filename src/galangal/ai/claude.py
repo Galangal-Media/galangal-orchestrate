@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Any
 from galangal.ai.base import AIBackend, PauseCheck
 from galangal.ai.errors import analyze_error
 from galangal.ai.subprocess import SubprocessRunner
-from galangal.config.loader import get_project_root
+from galangal.config.loader import get_config, get_project_root
 from galangal.logging import get_logger
-from galangal.results import StageResult
+from galangal.results import StageResult, StageResultType
 
 if TYPE_CHECKING:
     from galangal.ui.tui import StageUI
@@ -40,10 +40,25 @@ class ClaudeBackend(AIBackend):
     def name(self) -> str:
         return "claude"
 
-    def _build_command(self, prompt_file: str, max_turns: int) -> str:
-        """Build the shell command to invoke Claude."""
+    def _build_command(
+        self,
+        prompt_file: str,
+        max_turns: int,
+        resume_session: str | None = None,
+        disallowed_tools: list[str] | None = None,
+    ) -> str:
+        """Build the shell command to invoke Claude.
+
+        ``disallowed_tools`` denies specific tools for this stage (e.g. Edit on a
+        planning stage); ``resume_session`` continues a prior session after a
+        max-turns ceiling instead of starting fresh.
+        """
         command, args = self._resolve_command_and_args(max_turns)
         args = self._with_model(args)
+        if disallowed_tools:
+            args = [*args, "--disallowedTools", ",".join(disallowed_tools)]
+        if resume_session:
+            args = [*args, "--resume", resume_session]
         args_str = " ".join(args)
         return f"cat '{prompt_file}' | {command} {args_str}"
 
@@ -57,6 +72,14 @@ class ClaudeBackend(AIBackend):
             return [*args, "--model", model]
         return args
 
+    # Continuation prompt fed to a resumed session that hit the turn ceiling.
+    _RESUME_PROMPT = (
+        "You ran out of turns before finishing. Continue exactly where you left "
+        "off and complete the remaining work for this stage. Do not restart from "
+        "scratch or re-do work already done; finish and write all required "
+        "artifacts."
+    )
+
     def invoke(
         self,
         prompt: str,
@@ -67,14 +90,82 @@ class ClaudeBackend(AIBackend):
         stage: str | None = None,
         log_file: str | None = None,
     ) -> StageResult:
-        """Invoke Claude Code with a prompt."""
-        # State for output processing
+        """Invoke Claude Code with a prompt.
+
+        On a max-turns ceiling, optionally resume the same session up to
+        ``stages.max_turns_resume_limit`` times to finish the work instead of
+        discarding it (the legacy behavior, when the limit is 0).
+        """
+        config = get_config()
+        no_progress = config.stages.no_progress_timeout
+        resume_limit = config.stages.max_turns_resume_limit
+        disallowed = (
+            config.stages.stage_disallowed_tools.get(stage, []) if stage else []
+        )
+
+        captured_session: dict[str, str | None] = {"id": None}
+        totals: dict[str, Any] = {}
+        extensions = 0
+        resume_session: str | None = None
+        current_prompt = prompt
+
+        while True:
+            result = self._invoke_once(
+                prompt=current_prompt,
+                timeout=timeout,
+                max_turns=max_turns,
+                ui=ui,
+                pause_check=pause_check,
+                log_file=log_file,
+                no_progress=no_progress,
+                disallowed_tools=disallowed,
+                resume_session=resume_session,
+                captured_session=captured_session,
+                totals=totals,
+            )
+
+            # Resume on a max-turns ceiling if we have budget and a session id.
+            hit_ceiling = result.type == StageResultType.MAX_TURNS
+            if (
+                hit_ceiling
+                and extensions < resume_limit
+                and captured_session["id"]
+            ):
+                extensions += 1
+                resume_session = captured_session["id"]
+                current_prompt = self._RESUME_PROMPT
+                if ui:
+                    ui.add_activity(
+                        f"Max turns reached - resuming session "
+                        f"({extensions}/{resume_limit})",
+                        "🔄",
+                    )
+                continue
+
+            return result
+
+    def _invoke_once(
+        self,
+        prompt: str,
+        timeout: int,
+        max_turns: int,
+        ui: StageUI | None,
+        pause_check: PauseCheck | None,
+        log_file: str | None,
+        no_progress: int,
+        disallowed_tools: list[str],
+        resume_session: str | None,
+        captured_session: dict[str, str | None],
+        totals: dict[str, Any],
+    ) -> StageResult:
+        """Run Claude once; cost/token metrics accumulate into ``totals``."""
         pending_tools: list[tuple[str, str]] = []
 
         def on_output(line: str) -> None:
             """Process each output line."""
             if ui:
                 ui.add_raw_line(line)
+            self._capture_session_id(line, captured_session)
             self._process_stream_line(line, ui, pending_tools)
             self._notify_hub_output(line)
 
@@ -89,7 +180,12 @@ class ClaudeBackend(AIBackend):
 
         try:
             with self._temp_file(prompt, suffix=".txt") as prompt_file:
-                shell_cmd = self._build_command(prompt_file, max_turns)
+                shell_cmd = self._build_command(
+                    prompt_file,
+                    max_turns,
+                    resume_session=resume_session,
+                    disallowed_tools=disallowed_tools,
+                )
 
                 if ui:
                     ui.set_status("starting", "initializing Claude")
@@ -105,6 +201,7 @@ class ClaudeBackend(AIBackend):
                     poll_interval_active=0.05,
                     poll_interval_idle=0.5,
                     output_file=log_file,
+                    no_progress_timeout=no_progress,
                 )
 
                 result = runner.run()
@@ -137,6 +234,7 @@ class ClaudeBackend(AIBackend):
                     except (KeyError, TypeError):
                         pass
 
+                metrics = self._merge_metrics(totals, metrics)
                 if metrics and ui:
                     ui.add_activity(self._format_metrics(metrics), "💰")
 
@@ -145,7 +243,9 @@ class ClaudeBackend(AIBackend):
                 if result_subtype == "error_max_turns":
                     if ui:
                         ui.add_activity("Max turns reached", "❌")
-                    return StageResult.max_turns(full_output)
+                    res = StageResult.max_turns(full_output)
+                    res.metrics = metrics
+                    return res
 
                 if result.exit_code == 0:
                     return StageResult.create_success(
@@ -180,6 +280,39 @@ class ClaudeBackend(AIBackend):
                 output=str(e),
                 error_context=error_ctx,
             )
+
+    @staticmethod
+    def _capture_session_id(line: str, holder: dict[str, str | None]) -> None:
+        """Capture the CLI session id from any stream line that carries one.
+
+        Needed to resume the session if it hits the turn ceiling. The init system
+        event and the final result event both include ``session_id``.
+        """
+        if holder["id"] or '"session_id"' not in line:
+            return
+        try:
+            data = json.loads(line.strip())
+        except (json.JSONDecodeError, ValueError):
+            return
+        sid = data.get("session_id") if isinstance(data, dict) else None
+        if isinstance(sid, str) and sid:
+            holder["id"] = sid
+
+    @staticmethod
+    def _merge_metrics(
+        totals: dict[str, Any], metrics: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Accumulate one run's numeric metrics into ``totals`` and return it.
+
+        Across resumed runs the caller sees the summed cost/tokens, so the task
+        budget and reporting count the whole stage, not just the last leg.
+        """
+        if not metrics:
+            return totals or None
+        for key, val in metrics.items():
+            if isinstance(val, (int, float)):
+                totals[key] = round(totals.get(key, 0) + val, 6)
+        return totals
 
     @staticmethod
     def _extract_metrics(data: dict[str, Any]) -> dict[str, Any] | None:

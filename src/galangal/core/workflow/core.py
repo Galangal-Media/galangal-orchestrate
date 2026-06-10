@@ -397,19 +397,12 @@ def _execute_test_gate(
             except Full:
                 pass
 
-    for test in test_config.tests:
-        tui_app.add_activity(f"Running: {test.name}", "▶")
-        tui_app.show_message(f"Test Gate: {test.name}", "info")
-
+    def _run_one_test(test: Any) -> tuple[bool, bool, int, str]:
+        """Run a single test suite once. Returns (passed, timed_out, exit_code, output)."""
         output_tail: deque[str] = deque()
         output_truncated = [False]
         exit_code = -1
         timed_out = False
-        _append_task_log(
-            task_name,
-            f"[TEST_GATE] Running '{test.name}' command: {test.command}",
-            line_type="meta",
-        )
 
         proc: subprocess.Popen | None = None
         try:
@@ -499,6 +492,43 @@ def _execute_test_gate(
                 "Full output is available in task_logs (.galangal/tasks.db).]\n\n"
                 f"{output}"
             )
+        return (exit_code == 0 and not timed_out), timed_out, exit_code, output
+
+    retries = max(0, getattr(test_config, "retries", 0))
+
+    for test in test_config.tests:
+        tui_app.add_activity(f"Running: {test.name}", "▶")
+        tui_app.show_message(f"Test Gate: {test.name}", "info")
+        _append_task_log(
+            task_name,
+            f"[TEST_GATE] Running '{test.name}' command: {test.command}",
+            line_type="meta",
+        )
+
+        # Re-run a failing suite up to `retries` times before counting it failed,
+        # so a single flaky failure doesn't trigger an expensive DEV rollback.
+        passed = False
+        timed_out = False
+        exit_code = -1
+        output = ""
+        for attempt in range(retries + 1):
+            passed, timed_out, exit_code, output = _run_one_test(test)
+            if passed:
+                if attempt > 0:
+                    tui_app.add_activity(
+                        f"{test.name} passed on retry {attempt}/{retries}", "🔁"
+                    )
+                    _append_task_log(
+                        task_name,
+                        f"[TEST_GATE] '{test.name}' passed on retry {attempt}/{retries} "
+                        "(flaky)",
+                        line_type="meta",
+                    )
+                break
+            if attempt < retries:
+                tui_app.add_activity(
+                    f"{test.name} failed - retrying ({attempt + 1}/{retries})", "🔁"
+                )
 
         if timed_out:
             results.append(
@@ -759,9 +789,12 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
 
     ui = TUIAdapter(tui_app)
     max_turns = backend.config.max_turns if backend.config else 200
+    # Per-stage timeout override (planning stages can fail fast), falling back to
+    # the global default for stages not listed.
+    stage_timeout = config.stages.stage_timeouts.get(stage.value, config.stages.timeout)
     invoke_result = backend.invoke(
         prompt=prompt,
-        timeout=config.stages.timeout,
+        timeout=stage_timeout,
         max_turns=max_turns,
         ui=ui,
         pause_check=pause_check,
@@ -787,6 +820,10 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
             attempt=state.attempt,
             **invoke_result.metrics,
         )
+        # Accumulate into the task total for the cost circuit breaker (checked by
+        # the engine after this stage) and end-of-task reporting.
+        state.add_usage(invoke_result.metrics)
+        save_state(state)
 
     # Return early if AI invocation failed
     if not invoke_result.success:
@@ -881,6 +918,7 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
                 rollback_to=Stage.from_str(result.rollback_to),
                 output=invoke_result.output,
                 is_fast_track=result.is_fast_track,
+                validation_detail=result.output,
             )
         # Log when rollback_to is not set (helps debug missing rollback)
         tui_app.add_activity("Validation failed without rollback target", "⚠")
@@ -1096,12 +1134,24 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
         task_name=task_name,
         stage=from_stage.value,
         reason=reason,
+        detail=result.validation_detail,
     )
 
     return True
 
 
-def _log_mistake_from_rollback(task_name: str, stage: str, reason: str) -> None:
-    """Log a mistake from a rollback for future reference."""
+def _log_mistake_from_rollback(
+    task_name: str, stage: str, reason: str, detail: str | None = None
+) -> None:
+    """Log a mistake from a rollback for future reference.
+
+    Includes the specific validation-failure detail (failing command output /
+    missing artifact) when available, so the cross-task mistake DB carries the
+    actual failure rather than a generic "validation failed" reason.
+    """
     from galangal.mistakes import log_mistake
-    log_mistake(reason, stage=stage, task_name=task_name)
+
+    text = reason
+    if detail and detail.strip() and detail.strip() not in reason:
+        text = f"{reason}\n\nDetail:\n{detail.strip()[:1500]}"
+    log_mistake(text, stage=stage, task_name=task_name)

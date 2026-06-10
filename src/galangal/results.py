@@ -64,6 +64,10 @@ class StageResult(Result):
     # available (cost_usd, num_turns, input_tokens, output_tokens,
     # cache_read_tokens, cache_creation_tokens). Populated by the AI backend.
     metrics: dict[str, Any] | None = None
+    # Specific validation-failure detail (the failing command output / missing
+    # artifact), distinct from the AI invocation `output`. Carried so rollback
+    # mistake-logging records the actual failure, not a generic reason.
+    validation_detail: str | None = None
 
     @classmethod
     def create_success(
@@ -107,6 +111,7 @@ class StageResult(Result):
         rollback_to: Stage,
         output: str | None = None,
         is_fast_track: bool = False,
+        validation_detail: str | None = None,
     ) -> StageResult:
         """Create a rollback required result.
 
@@ -116,6 +121,8 @@ class StageResult(Result):
             output: Optional detailed output.
             is_fast_track: If True, this is a minor rollback that should
                 skip stages that already passed.
+            validation_detail: The specific validation-failure detail, for
+                higher-signal mistake logging.
         """
         return cls(
             success=False,
@@ -124,6 +131,7 @@ class StageResult(Result):
             rollback_to=rollback_to,
             output=output,
             is_fast_track=is_fast_track,
+            validation_detail=validation_detail,
         )
 
     @classmethod
