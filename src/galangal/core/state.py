@@ -816,9 +816,15 @@ class ExecutionState:
     # cost circuit breaker and reporting. Populated from StageResult.metrics.
     task_cost_usd: float = 0.0
     task_tokens: int = 0
+    # Per-stage cost (USD), so the completion report can show which stage was
+    # expensive, not just the task total. Keyed by Stage.value.
+    stage_costs: dict[str, float] = field(default_factory=dict)
     # Set once the user acknowledges a cost-budget breach and chooses to keep
     # going, so the circuit breaker doesn't re-prompt every subsequent stage.
     budget_ack: bool = False
+    # Set True right before a backend invocation and cleared when the stage
+    # finishes. If it's still True on resume, the process died mid-stage.
+    stage_in_progress: bool = False
 
     # Keep at most this many prior failures; older ones are dropped.
     MAX_FAILURE_HISTORY: ClassVar[int] = 3
@@ -830,6 +836,8 @@ class ExecutionState:
         cost = metrics.get("cost_usd")
         if isinstance(cost, (int, float)):
             self.task_cost_usd = round(self.task_cost_usd + float(cost), 4)
+            key = self.stage.value
+            self.stage_costs[key] = round(self.stage_costs.get(key, 0.0) + float(cost), 4)
         tokens = (metrics.get("input_tokens") or 0) + (metrics.get("output_tokens") or 0)
         if tokens:
             self.task_tokens += int(tokens)
@@ -883,7 +891,9 @@ class ExecutionState:
             "review_iteration_count": self.review_iteration_count,
             "task_cost_usd": self.task_cost_usd,
             "task_tokens": self.task_tokens,
+            "stage_costs": self.stage_costs,
             "budget_ack": self.budget_ack,
+            "stage_in_progress": self.stage_in_progress,
         }
 
     @classmethod
@@ -899,7 +909,9 @@ class ExecutionState:
             failure_history=list(d.get("failure_history", [])),
             task_cost_usd=d.get("task_cost_usd", 0.0),
             task_tokens=d.get("task_tokens", 0),
+            stage_costs=dict(d.get("stage_costs", {})),
             budget_ack=d.get("budget_ack", False),
+            stage_in_progress=d.get("stage_in_progress", False),
         )
 
 
@@ -1311,7 +1323,9 @@ class WorkflowState:
         failure_history: list[str] | None = None,
         task_cost_usd: float = 0.0,
         task_tokens: int = 0,
+        stage_costs: dict[str, float] | None = None,
         budget_ack: bool = False,
+        stage_in_progress: bool = False,
         task_type: TaskType = TaskType.FEATURE,
         rollback_history: list[RollbackEvent] | None = None,
         qa_rounds: list[dict[str, Any]] | None = None,
@@ -1350,7 +1364,9 @@ class WorkflowState:
             failure_history=list(failure_history) if failure_history else [],
             task_cost_usd=task_cost_usd,
             task_tokens=task_tokens,
+            stage_costs=dict(stage_costs) if stage_costs else {},
             budget_ack=budget_ack,
+            stage_in_progress=stage_in_progress,
         )
 
         # GitHub context sub-model
@@ -1515,12 +1531,24 @@ class WorkflowState:
         self._execution.task_tokens = value
 
     @property
+    def stage_costs(self) -> dict[str, float]:
+        return self._execution.stage_costs
+
+    @property
     def budget_ack(self) -> bool:
         return self._execution.budget_ack
 
     @budget_ack.setter
     def budget_ack(self, value: bool) -> None:
         self._execution.budget_ack = value
+
+    @property
+    def stage_in_progress(self) -> bool:
+        return self._execution.stage_in_progress
+
+    @stage_in_progress.setter
+    def stage_in_progress(self, value: bool) -> None:
+        self._execution.stage_in_progress = value
 
     def add_usage(self, metrics: dict[str, Any] | None) -> None:
         """Accumulate one invocation's cost/token metrics into the task totals."""
@@ -1809,7 +1837,9 @@ class WorkflowState:
         d["review_iteration_count"] = self.review_iteration_count
         d["task_cost_usd"] = self.task_cost_usd
         d["task_tokens"] = self.task_tokens
+        d["stage_costs"] = self.stage_costs
         d["budget_ack"] = self.budget_ack
+        d["stage_in_progress"] = self.stage_in_progress
 
         # GitHub context (flat)
         d["github_issue"] = self.github_issue
@@ -1891,7 +1921,9 @@ class WorkflowState:
             review_iteration_count=d.get("review_iteration_count", 0),
             task_cost_usd=d.get("task_cost_usd", 0.0),
             task_tokens=d.get("task_tokens", 0),
+            stage_costs=d.get("stage_costs"),
             budget_ack=d.get("budget_ack", False),
+            stage_in_progress=d.get("stage_in_progress", False),
             # Task metadata
             started_at=d.get("started_at", datetime.now(timezone.utc).isoformat()),
             task_description=d.get("task_description", ""),

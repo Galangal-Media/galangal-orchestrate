@@ -94,6 +94,7 @@ class SubprocessRunner:
         max_output_chars: int | None = 1_000_000,
         output_file: str | None = None,
         no_progress_timeout: int = 0,
+        watchdog_suppressed: Callable[[], bool] | None = None,
     ):
         """
         Initialize the subprocess runner.
@@ -113,10 +114,14 @@ class SubprocessRunner:
             no_progress_timeout: Kill the process if it emits no output for this
                 many seconds (0 disables). Catches a wedged agent before the full
                 timeout elapses.
+            watchdog_suppressed: Optional callback; while it returns True the
+                no-progress watchdog is held off (e.g. during a rate-limit wait
+                when the CLI is legitimately idle).
         """
         self.command = command
         self.timeout = timeout
         self.no_progress_timeout = no_progress_timeout
+        self.watchdog_suppressed = watchdog_suppressed
         self.pause_check = pause_check
         self.ui = ui
         self.on_output = on_output
@@ -206,6 +211,11 @@ class SubprocessRunner:
                         exit_code=None,
                         output="".join(output_buffer),
                     )
+
+                # While suppressed (e.g. a rate-limit wait), keep the watchdog
+                # clock reset so a legitimately-idle CLI is never killed.
+                if self.watchdog_suppressed and self.watchdog_suppressed():
+                    last_output_time = time.time()
 
                 # No-progress watchdog: kill a process that has gone silent for
                 # too long even though the overall timeout hasn't elapsed.

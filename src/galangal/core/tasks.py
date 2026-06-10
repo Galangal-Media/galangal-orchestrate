@@ -24,19 +24,54 @@ if TYPE_CHECKING:
     from galangal.core.state import WorkflowState
 
 
+def _flock(handle, exclusive: bool) -> None:
+    """Best-effort advisory lock on a file handle (POSIX only; no-op elsewhere)."""
+    try:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+    except (ImportError, OSError):
+        pass
+
+
 def get_active_task() -> str | None:
-    """Get the currently active task name."""
+    """Get the currently active task name (under a shared lock)."""
     active_file = get_active_file()
-    if active_file.exists():
-        return active_file.read_text().strip()
-    return None
+    if not active_file.exists():
+        return None
+    try:
+        with open(active_file, encoding="utf-8") as f:
+            _flock(f, exclusive=False)
+            return f.read().strip() or None
+    except OSError:
+        return None
 
 
 def set_active_task(task_name: str) -> None:
-    """Set the active task."""
+    """Set the active task atomically under an exclusive lock.
+
+    Writes via a temp file + os.replace so a concurrent reader never sees a
+    partial name, and holds an exclusive lock so two concurrent setters (e.g.
+    parallel `resume` invocations) don't interleave.
+    """
+    import os
+
     tasks_dir = get_tasks_dir()
     tasks_dir.mkdir(parents=True, exist_ok=True)
-    get_active_file().write_text(task_name)
+    active_file = get_active_file()
+
+    # Lock handle (the live file) coordinates writers; the actual write is an
+    # atomic rename so readers always see a whole value.
+    lock_path = active_file.with_suffix(active_file.suffix + ".lock")
+    tmp_path = active_file.with_suffix(active_file.suffix + ".tmp")
+    try:
+        with open(lock_path, "w", encoding="utf-8") as lock_handle:
+            _flock(lock_handle, exclusive=True)
+            tmp_path.write_text(task_name, encoding="utf-8")
+            os.replace(tmp_path, active_file)
+    except OSError:
+        # Fall back to a plain write rather than failing the command.
+        active_file.write_text(task_name, encoding="utf-8")
 
 
 def clear_active_task() -> None:

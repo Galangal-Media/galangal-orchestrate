@@ -633,6 +633,43 @@ def _execute_test_gate(
         )
 
 
+def workflow_startup_checks(state: WorkflowState) -> list[str]:
+    """Return warnings to surface once at the start of a workflow session.
+
+    - Mid-stage crash: if ``stage_in_progress`` survived from a prior run, the
+      process died mid-stage; note it (the stage re-runs) and clear the marker.
+    - Dirty working tree: on a brand-new task with per-stage commits enabled,
+      pre-existing uncommitted edits would be swept into the task's commits.
+      Only checked for a fresh task (no stage has completed) to avoid
+      false-positiving on the agent's own in-progress work on resume.
+    """
+    warnings: list[str] = []
+
+    if state.stage_in_progress:
+        warnings.append(
+            f"Previous run of stage {state.stage.value} did not finish cleanly "
+            "(possible mid-stage crash); it will be re-run."
+        )
+        state.stage_in_progress = False
+        save_state(state)
+
+    is_fresh_task = not state.stage_durations
+    if is_fresh_task:
+        try:
+            from galangal.core.git_utils import has_changes_to_commit
+
+            if get_config().stages.commit_per_stage and has_changes_to_commit():
+                warnings.append(
+                    "Working tree has uncommitted changes; they will be swept "
+                    "into this task's commits. Commit or stash them first if "
+                    "they are unrelated."
+                )
+        except Exception:
+            pass
+
+    return warnings
+
+
 def execute_stage(
     state: WorkflowState,
     tui_app: WorkflowTUIApp,
@@ -792,6 +829,13 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     # Per-stage timeout override (planning stages can fail fast), falling back to
     # the global default for stages not listed.
     stage_timeout = config.stages.stage_timeouts.get(stage.value, config.stages.timeout)
+
+    # Mark the stage in-progress across the (long) backend invocation. If the
+    # process dies here, the marker survives in state.json and the next run can
+    # tell a mid-stage crash apart from a clean pause.
+    state.stage_in_progress = True
+    save_state(state)
+
     invoke_result = backend.invoke(
         prompt=prompt,
         timeout=stage_timeout,
@@ -801,6 +845,10 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
         stage=stage.value,
         log_file=None,
     )
+
+    # Backend returned: the crash-prone window is over. Clear the marker.
+    state.stage_in_progress = False
+    save_state(state)
 
     _append_task_log(
         task_name,

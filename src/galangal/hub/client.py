@@ -216,6 +216,10 @@ class HubClient:
             "stage_durations": state.stage_durations,
             "github_issue": state.github_issue,
             "github_repo": state.github_repo,
+            "task_cost_usd": state.task_cost_usd,
+            "task_tokens": state.task_tokens,
+            "stage_costs": state.stage_costs,
+            "rollback_count": len(state.rollback_history),
         }
         self._last_state = state_data
 
@@ -247,6 +251,10 @@ class HubClient:
                 "stage_durations": {},
                 "github_issue": None,
                 "github_repo": None,
+                "task_cost_usd": 0.0,
+                "task_tokens": 0,
+                "stage_costs": {},
+                "rollback_count": 0,
             },
         )
 

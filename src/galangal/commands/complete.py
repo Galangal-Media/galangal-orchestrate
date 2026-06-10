@@ -122,6 +122,7 @@ def create_pull_request(
     description: str,
     task_type: str,
     github_issue: int | None = None,
+    metrics_md: str | None = None,
 ) -> tuple[bool, str]:
     """Create a pull request for the task branch.
 
@@ -179,6 +180,10 @@ def create_pull_request(
         pr_body += f"Closes #{github_issue}\n\n"
 
     pr_body += "---\n"
+
+    # Cost/time/rollback metrics for the reviewer.
+    if metrics_md:
+        pr_body += f"\n{metrics_md}\n\n---\n"
 
     # Add codex review if configured
     if config.pr.codex_review:
@@ -354,6 +359,58 @@ Changes: {change_count} files"""
     return True, f"Committed {change_count} files"
 
 
+def _fmt_duration(seconds: int) -> str:
+    """Render a second count as a compact h/m/s string."""
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60}s"
+    return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
+
+
+def format_completion_report(state) -> str:
+    """Build a cost/time/rollback summary for a finished task.
+
+    Rendered as a markdown bullet list (readable in the console and in a PR
+    body). Returns an empty string when there is nothing worth reporting.
+    """
+    from galangal.core.state import STAGE_ORDER
+
+    durations = state.stage_durations or {}
+    costs = state.stage_costs or {}
+    total_time = sum(durations.values())
+    rollbacks = len(state.rollback_history)
+
+    if not (state.task_cost_usd or state.task_tokens or total_time or rollbacks):
+        return ""
+
+    lines = ["## Task metrics", ""]
+    if state.task_cost_usd:
+        lines.append(f"- Cost: ${state.task_cost_usd:.4f}")
+    if state.task_tokens:
+        lines.append(f"- Tokens: {state.task_tokens:,}")
+    if total_time:
+        lines.append(f"- Active time: {_fmt_duration(total_time)}")
+    if rollbacks:
+        lines.append(f"- Rollbacks: {rollbacks}")
+
+    # Per-stage breakdown in pipeline order (only stages with data).
+    stage_keys = [s.value for s in STAGE_ORDER if s.value in durations or s.value in costs]
+    if stage_keys:
+        lines.append("")
+        lines.append("Per stage:")
+        for key in stage_keys:
+            parts = []
+            if key in durations:
+                parts.append(_fmt_duration(durations[key]))
+            if costs.get(key):
+                parts.append(f"${costs[key]:.4f}")
+            lines.append(f"- {key}: {', '.join(parts)}")
+
+    return "\n".join(lines)
+
+
 def finalize_task(
     task_name: str, state, force: bool = False, progress_callback=None
 ) -> tuple[bool, str]:
@@ -438,6 +495,13 @@ def finalize_task(
             report("Aborted: commit/squash failed; task restored to original location.", "warning")
             return False, "Commit/squash failed"
 
+    # Cost/time/rollback summary for the user and the PR body.
+    metrics_md = format_completion_report(state)
+    if metrics_md:
+        for line in metrics_md.splitlines():
+            if line.strip():
+                report(line.replace("## ", "").rstrip())
+
     # 3. Create PR
     report("Creating pull request...")
     success, msg = create_pull_request(
@@ -445,6 +509,7 @@ def finalize_task(
         state.task_description,
         state.task_type.display_name(),
         github_issue=state.github_issue,
+        metrics_md=metrics_md,
     )
     pr_url = ""
     if success:
