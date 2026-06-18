@@ -43,6 +43,17 @@ class StageConfig(BaseModel):
             "0 disables the total cap."
         ),
     )
+    review_block_min_severity: str = Field(
+        default="major",
+        description=(
+            "Minimum issue severity that makes REVIEW block (REQUEST_CHANGES). If "
+            "the reviewer requests changes but every issue is below this severity "
+            "(e.g. only minor/suggestion), the decision is auto-upgraded to APPROVE "
+            "and the issues are recorded without a DEV round-trip. Order: "
+            "suggestion < minor < major < critical. Set to 'suggestion' to block on "
+            "anything (disables auto-approve)."
+        ),
+    )
     review_iteration_ask_after: int = Field(
         default=3,
         description=(

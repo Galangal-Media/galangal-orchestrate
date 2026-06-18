@@ -707,6 +707,32 @@ ROLLBACK_TIME_WINDOW_HOURS = 1
 # total number of attempts regardless of how slowly they happen.
 MAX_TOTAL_ROLLBACKS_PER_STAGE = 12
 
+# Review issue severity ranking (low -> high). Used by severity-gated
+# auto-approve and recurring-issue tracking.
+REVIEW_SEVERITY_ORDER = {"suggestion": 0, "minor": 1, "major": 2, "critical": 3}
+
+
+def review_severity_rank(severity: str | None) -> int:
+    """Rank a review-issue severity; unknown values rank as the highest
+    (critical) so an unrecognised label never silently bypasses a block."""
+    if not severity:
+        return REVIEW_SEVERITY_ORDER["critical"]
+    return REVIEW_SEVERITY_ORDER.get(severity.strip().lower(), REVIEW_SEVERITY_ORDER["critical"])
+
+
+def review_issue_fingerprint(issue: dict[str, Any]) -> str:
+    """Stable identity for a review issue across rounds.
+
+    Keys on file+line when present (robust to reworded descriptions), else on a
+    normalised prefix of the description.
+    """
+    file_ref = str(issue.get("file", "") or "").strip().lower()
+    line = issue.get("line")
+    if file_ref and line not in (None, ""):
+        return f"{file_ref}:{line}"
+    desc = " ".join(str(issue.get("description", "") or "").lower().split())
+    return f"{file_ref}|{desc[:80]}"
+
 
 @dataclass
 class RollbackEvent:
@@ -813,6 +839,10 @@ class ExecutionState:
     # Number of REVIEW->DEV round-trips in the current iteration loop. Persisted
     # so the cap / user check-in survives a pause-resume cycle.
     review_iteration_count: int = 0
+    # Per-round issue fingerprints from blocking REVIEW results in the current
+    # iteration loop (oldest round first). Used to flag issues raised repeatedly
+    # so DEV fixes them properly. Reset when the loop completes.
+    review_issue_rounds: list[list[dict[str, Any]]] = field(default_factory=list)
     # Truncated errors from the most recent failed attempts at the *current*
     # stage, oldest-first. Lets a retry see the whole oscillation, not just the
     # last failure, so it stops flip-flopping between two wrong fixes.
@@ -894,6 +924,7 @@ class ExecutionState:
             "last_failure": self.last_failure,
             "failure_history": self.failure_history,
             "review_iteration_count": self.review_iteration_count,
+            "review_issue_rounds": self.review_issue_rounds,
             "task_cost_usd": self.task_cost_usd,
             "task_tokens": self.task_tokens,
             "stage_costs": self.stage_costs,
@@ -911,6 +942,7 @@ class ExecutionState:
             clarification_required=d.get("clarification_required", False),
             last_failure=d.get("last_failure"),
             review_iteration_count=d.get("review_iteration_count", 0),
+            review_issue_rounds=[list(r) for r in d.get("review_issue_rounds", [])],
             failure_history=list(d.get("failure_history", [])),
             task_cost_usd=d.get("task_cost_usd", 0.0),
             task_tokens=d.get("task_tokens", 0),
@@ -1331,6 +1363,7 @@ class WorkflowState:
         # Optional fields with defaults
         review_iteration: bool = False,
         review_iteration_count: int = 0,
+        review_issue_rounds: list[list[dict[str, Any]]] | None = None,
         failure_history: list[str] | None = None,
         task_cost_usd: float = 0.0,
         task_tokens: int = 0,
@@ -1372,6 +1405,7 @@ class WorkflowState:
             last_failure=last_failure,
             review_iteration=review_iteration,
             review_iteration_count=review_iteration_count,
+            review_issue_rounds=[list(r) for r in review_issue_rounds] if review_issue_rounds else [],
             failure_history=list(failure_history) if failure_history else [],
             task_cost_usd=task_cost_usd,
             task_tokens=task_tokens,
@@ -1520,6 +1554,46 @@ class WorkflowState:
     @review_iteration_count.setter
     def review_iteration_count(self, value: int) -> None:
         self._execution.review_iteration_count = value
+
+    @property
+    def review_issue_rounds(self) -> list[list[dict[str, Any]]]:
+        return self._execution.review_issue_rounds
+
+    @review_issue_rounds.setter
+    def review_issue_rounds(self, value: list[list[dict[str, Any]]]) -> None:
+        self._execution.review_issue_rounds = value
+
+    def record_review_issue_round(self, issues: list[dict[str, Any]]) -> None:
+        """Record one blocking REVIEW round's issues (trimmed) for recurrence
+        detection. No-op when there are no structured issues."""
+        trimmed = [
+            {
+                "severity": i.get("severity", ""),
+                "file": i.get("file", ""),
+                "line": i.get("line"),
+                "description": i.get("description", ""),
+            }
+            for i in issues
+            if isinstance(i, dict)
+        ]
+        if trimmed:
+            self._execution.review_issue_rounds.append(trimmed)
+
+    def recurring_review_issues(self) -> list[dict[str, Any]]:
+        """Return issues from the latest recorded round whose fingerprint also
+        appeared in an earlier round, annotated with ``times_seen`` (number of
+        rounds it has appeared in) — i.e. issues REVIEW keeps re-raising."""
+        rounds = self._execution.review_issue_rounds
+        if len(rounds) < 2:
+            return []
+        current, prior = rounds[-1], rounds[:-1]
+        recurring = []
+        for issue in current:
+            fp = review_issue_fingerprint(issue)
+            prior_hits = sum(1 for r in prior if any(review_issue_fingerprint(p) == fp for p in r))
+            if prior_hits:
+                recurring.append({**issue, "times_seen": prior_hits + 1})
+        return recurring
 
     @property
     def failure_history(self) -> list[str]:
@@ -1849,6 +1923,7 @@ class WorkflowState:
         """
         self.review_iteration = False
         self.review_iteration_count = 0
+        self.review_issue_rounds = []
         self.clear_fast_track()
         self.clear_passed_stages()
 
@@ -1878,6 +1953,7 @@ class WorkflowState:
         d["failure_history"] = self.failure_history
         d["review_iteration"] = self.review_iteration
         d["review_iteration_count"] = self.review_iteration_count
+        d["review_issue_rounds"] = self.review_issue_rounds
         d["task_cost_usd"] = self.task_cost_usd
         d["task_tokens"] = self.task_tokens
         d["stage_costs"] = self.stage_costs
@@ -1962,6 +2038,7 @@ class WorkflowState:
             failure_history=d.get("failure_history"),
             review_iteration=d.get("review_iteration", False),
             review_iteration_count=d.get("review_iteration_count", 0),
+            review_issue_rounds=d.get("review_issue_rounds"),
             task_cost_usd=d.get("task_cost_usd", 0.0),
             task_tokens=d.get("task_tokens", 0),
             stage_costs=d.get("stage_costs"),

@@ -65,6 +65,12 @@ You MUST respond with a JSON object containing these fields:
   - `line`: Line number (if applicable)
   - `description`: Clear description of the issue
 
+  Label severity accurately: it has teeth. If you `REQUEST_CHANGES` but every
+  issue is below the project's blocking threshold (by default only `minor` /
+  `suggestion`), the decision is auto-upgraded to `APPROVE` and those issues are
+  recorded without a DEV round-trip. Reserve `critical` / `major` for genuine
+  blockers; use `minor` / `suggestion` for things that shouldn't hold up merge.
+
 ### Decision Logic
 
 - If any issues need fixing → use `REQUEST_CHANGES`

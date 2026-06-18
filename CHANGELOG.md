@@ -4,6 +4,26 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.63.0 — Smarter REVIEW: severity-gated auto-approve + recurring-issue tracking
+
+Reduces REVIEW↔DEV churn by not bouncing on trivia and by helping DEV fix
+root causes instead of getting bounced for the same issue repeatedly.
+
+- **Severity-gated auto-approve.** New `stages.review_block_min_severity`
+  (default `major`). If the reviewer returns `REQUEST_CHANGES` but every issue is
+  below the threshold (e.g. only `minor`/`suggestion`), the decision is upgraded
+  to `APPROVE` and the issues are recorded in `REVIEW_NOTES.md` without a DEV
+  round-trip. `REDESIGN` is never downgraded; unknown severities rank as
+  `critical` (fail-safe). Set the threshold to `suggestion` to disable.
+- **Recurring-issue tracking → DEV.** Each blocking REVIEW round's issues are
+  persisted (`review_issue_rounds`) and fingerprinted on `file:line` (robust to
+  reworded descriptions). On a REVIEW→DEV rollback, issues raised in more than
+  one round are surfaced in a prominent "⚠️ RECURRING ISSUES — fix the root
+  cause" section of `ROLLBACK.md` (which DEV reads), tagged `raised Nx`. Reset
+  when the iteration loop completes.
+- **Reviewer prompt** updated so severity labels are used accurately now that
+  they drive blocking.
+
 ## 0.62.0 — Break the endless REVIEW↔DEV loop; configurable rollback caps
 
 Targets a real task that ran 69+ hours because codex REVIEW kept trickle-feeding a

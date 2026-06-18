@@ -104,6 +104,7 @@ def _write_artifacts_from_readonly_output(
     output: str,
     task_name: str,
     tui_app: WorkflowTUIApp,
+    state: WorkflowState | None = None,
 ) -> None:
     """
     Write stage artifacts from read-only backend's structured JSON output.
@@ -134,7 +135,7 @@ def _write_artifacts_from_readonly_output(
     # Try schema-based artifact writing first
     schema = stage.metadata.artifact_schema
     if schema:
-        _write_schema_artifacts(data, schema, stage, task_name, tui_app)
+        _write_schema_artifacts(data, schema, stage, task_name, tui_app, state)
         return
 
     # Fall back to generic artifacts array
@@ -151,6 +152,7 @@ def _write_schema_artifacts(
     stage: Stage,
     task_name: str,
     tui_app: WorkflowTUIApp,
+    state: WorkflowState | None = None,
 ) -> None:
     """Write artifacts based on stage schema mapping."""
     from galangal.core.state import get_decision_values
@@ -161,21 +163,53 @@ def _write_schema_artifacts(
     decision_field = schema.get("decision_field")
     issues_field = schema.get("issues_field")
 
+    issues = data.get(issues_field, []) if issues_field else []
+    if not isinstance(issues, list):
+        issues = []
+
+    decision = data.get(decision_field, "") if decision_field else ""
+
+    # REVIEW severity-gated auto-approve: if the reviewer requested changes but no
+    # issue meets the configured blocking severity (e.g. only minor/suggestion),
+    # upgrade to APPROVE and record the issues without a DEV round-trip. REDESIGN
+    # (architectural) is never downgraded.
+    auto_approved = False
+    if stage == Stage.REVIEW and decision == "REQUEST_CHANGES":
+        from galangal.core.state import review_severity_rank
+
+        threshold = review_severity_rank(get_config().stages.review_block_min_severity)
+        has_blocking = any(review_severity_rank(i.get("severity")) >= threshold for i in issues)
+        if issues and not has_blocking:
+            decision = "APPROVE"
+            auto_approved = True
+            tui_app.add_activity(
+                f"Review auto-approved: {len(issues)} issue(s) below blocking severity "
+                f"'{get_config().stages.review_block_min_severity}' (recorded, not blocking)",
+                "✅",
+            )
+
     # Write notes file
     if notes_file and notes_field:
         notes = data.get(notes_field, "")
         if notes:
-            # Append formatted issues if present
-            if issues_field:
-                issues = data.get(issues_field, [])
+            if issues:
                 notes += _format_issues(issues)
-
+            if auto_approved:
+                notes += (
+                    "\n\n_Note: auto-approved — the issues above are below the "
+                    "blocking severity threshold and were recorded without blocking._\n"
+                )
             write_artifact(notes_file, notes, task_name)
             tui_app.add_activity(f"Wrote {notes_file} from backend output", "📝")
 
+    # Record this blocking REVIEW round's issues so a repeated issue can be
+    # flagged to DEV (recurring-issue detection happens on the next rollback).
+    if state is not None and stage == Stage.REVIEW and decision == "REQUEST_CHANGES" and issues:
+        state.record_review_issue_round(issues)
+        save_state(state)
+
     # Write decision file using stage-specific valid values
     if decision_file and decision_field:
-        decision = data.get(decision_field, "")
         # Get valid decisions from STAGE_METADATA
         valid_decisions = get_decision_values(stage)
         if decision in valid_decisions:
@@ -885,7 +919,9 @@ Please fix the issue above before proceeding. Do not repeat the same mistake.
     # Post-process for read-only backends (e.g., Codex with read_only=true)
     # These backends return structured JSON instead of writing files directly
     if backend.read_only and invoke_result.output:
-        _write_artifacts_from_readonly_output(stage, invoke_result.output, task_name, tui_app)
+        _write_artifacts_from_readonly_output(
+            stage, invoke_result.output, task_name, tui_app, state
+        )
 
     # Ingest any filesystem artifacts written by editable backends (e.g. Claude
     # Write tool) into canonical DB storage and delete the file copies.
@@ -1097,6 +1133,23 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
             notes_content = read_artifact(notes_artifact, task_name)
             if notes_content:
                 reason = f"{reason}\n\n## {notes_artifact}\n\n{notes_content}"
+
+    # Flag issues REVIEW has raised in more than one round so DEV addresses the
+    # root cause this time instead of a partial fix that gets bounced again.
+    if from_stage == Stage.REVIEW and target_stage == Stage.DEV:
+        recurring = state.recurring_review_issues()
+        if recurring:
+            lines = [
+                "\n\n## ⚠️ RECURRING ISSUES (raised in earlier review rounds — fix the "
+                "root cause properly this time, don't just patch the symptom)\n"
+            ]
+            for i in recurring:
+                sev = str(i.get("severity", "")).upper()
+                desc = i.get("description", "")
+                file_ref, line = i.get("file", ""), i.get("line")
+                loc = f" ({file_ref}:{line})" if file_ref and line else ""
+                lines.append(f"- **[{sev}]** {desc}{loc} — raised {i['times_seen']}x")
+            reason = reason + "\n".join(lines)
 
     # Check for rollback loops (exempt REVIEW→DEV iteration since the
     # whole point of the iteration loop is repeated back-and-forth)
