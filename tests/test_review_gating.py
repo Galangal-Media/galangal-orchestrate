@@ -122,6 +122,28 @@ class TestSeverityGatedAutoApprove:
         _, decision = self._run(sample_task, "APPROVE", [])
         assert decision == "APPROVE"
 
+    def test_files_reviewed_written_to_notes(self, sample_task: Path):
+        ui = MockStageUI()
+        state = make_state(stage=Stage.REVIEW)
+        data = {
+            "review_notes": "notes",
+            "decision": "APPROVE",
+            "issues": [],
+            "files_reviewed": [
+                {"file": "a.py", "verdict": "clean"},
+                {"file": "b.py", "verdict": "fixed null check"},
+            ],
+        }
+        with patch("galangal.core.workflow.core.get_config", return_value=_cfg("major")):
+            with patch("galangal.core.artifacts.get_task_dir", return_value=sample_task):
+                with patch("galangal.core.workflow.core.save_state"):
+                    _write_schema_artifacts(
+                        data, REVIEW_SCHEMA, Stage.REVIEW, "test-task", ui, state
+                    )
+        notes = read_artifact("REVIEW_NOTES.md", "test-task") or ""
+        assert "Files Reviewed" in notes
+        assert "a.py" in notes and "b.py" in notes
+
 
 class TestRollbackSurfacesRecurringIssues:
     def test_recurring_section_in_rollback_md(self, sample_task: Path):

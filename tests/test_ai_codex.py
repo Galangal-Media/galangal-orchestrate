@@ -454,3 +454,24 @@ class TestCodexBackendStderrHandling:
         # Verify stderr=STDOUT was passed to prevent deadlock
         call_kwargs = mock_popen.call_args[1]
         assert call_kwargs.get("stderr") == subprocess.STDOUT
+
+
+class TestBuildOutputSchema:
+    """REVIEW forces per-file coverage via a required files_reviewed field."""
+
+    def test_review_requires_files_reviewed(self):
+        from galangal.ai.codex import _build_output_schema
+
+        schema = _build_output_schema("REVIEW")
+        assert "files_reviewed" in schema["properties"]
+        assert "files_reviewed" in schema["required"]
+        item = schema["properties"]["files_reviewed"]["items"]
+        assert item["required"] == ["file", "verdict"]
+
+    def test_non_review_stage_has_no_files_reviewed(self):
+        from galangal.ai.codex import _build_output_schema
+
+        for stage in ("QA", "SECURITY"):
+            schema = _build_output_schema(stage)
+            assert "files_reviewed" not in schema["properties"]
+            assert "files_reviewed" not in schema["required"]

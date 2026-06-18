@@ -67,7 +67,7 @@ def _build_output_schema(stage: str | None) -> dict[str, Any]:
             # Stage not found or invalid, use defaults
             pass
 
-    return {
+    schema: dict[str, Any] = {
         "type": "object",
         "properties": {
             notes_field: {
@@ -101,6 +101,34 @@ def _build_output_schema(stage: str | None) -> dict[str, Any]:
         "required": [notes_field, "decision", "issues"],
         "additionalProperties": False,
     }
+
+    # REVIEW: require an explicit per-file coverage list so the reviewer is forced
+    # to walk the *whole* diff (every changed file) rather than stopping after the
+    # first few findings. Each file gets a one-line verdict.
+    if (stage or "").upper() == "REVIEW":
+        schema["properties"]["files_reviewed"] = {
+            "type": "array",
+            "description": (
+                "EVERY file changed in this diff (git diff against the base branch), "
+                "each with a one-line verdict. Must cover all changed files, not just "
+                "those with issues."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string"},
+                    "verdict": {
+                        "type": "string",
+                        "description": "Short per-file verdict, e.g. 'clean' or what was wrong",
+                    },
+                },
+                "required": ["file", "verdict"],
+                "additionalProperties": False,
+            },
+        }
+        schema["required"].append("files_reviewed")
+
+    return schema
 
 
 class CodexBackend(AIBackend):

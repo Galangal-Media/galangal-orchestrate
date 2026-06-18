@@ -194,6 +194,12 @@ def _write_schema_artifacts(
         if notes:
             if issues:
                 notes += _format_issues(issues)
+            files_reviewed = data.get("files_reviewed") or []
+            if isinstance(files_reviewed, list) and files_reviewed:
+                notes += "\n\n## Files Reviewed (coverage)\n\n"
+                for fr in files_reviewed:
+                    if isinstance(fr, dict):
+                        notes += f"- `{fr.get('file', '')}` — {fr.get('verdict', '')}\n"
             if auto_approved:
                 notes += (
                     "\n\n_Note: auto-approved — the issues above are below the "

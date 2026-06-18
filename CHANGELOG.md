@@ -4,6 +4,22 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.65.0 — Force exhaustive REVIEW: per-file coverage + completeness self-check
+
+Targets codex reporting only 3-4 issues per round and trickling the rest across
+many DEV↔REVIEW round-trips.
+
+- **Required per-file coverage.** The codex read-only output schema for REVIEW now
+  requires a `files_reviewed` array — one entry per changed file with a one-line
+  verdict. Because it's required, codex must walk the whole diff and account for
+  every file instead of stopping after the first few findings. The coverage list is
+  appended to `REVIEW_NOTES.md`. Only REVIEW is affected; QA/SECURITY schemas are
+  unchanged.
+- **Completeness self-check.** Both review prompts now enumerate the full diff
+  first (`git diff --name-only`), review every file end to end, run a pre-decision
+  self-check ("did I actually trace each file, or just skim it?"), and are told a
+  short issue list on a large feature usually means they stopped early.
+
 ## 0.64.0 — Autonomous arbiter, stage caching, spec anchoring, regression tests
 
 A batch of REVIEW-loop and efficiency improvements, plus a fix to "Fix in DEV".

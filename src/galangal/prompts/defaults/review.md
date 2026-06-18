@@ -93,11 +93,18 @@ approach-level problems.
 ## Process
 
 1. Read SPEC.md, DEVELOPMENT.md, and DESIGN.md (if present).
-2. Review the changed files: `git diff {base_branch}...HEAD` (first review) or
-   `git diff HEAD~1` (on a re-review, to focus on the latest fixes).
+2. **Enumerate the full diff first** — `git diff --name-only {base_branch}...HEAD` —
+   then review **every** changed file end to end. Do not stop after the first few
+   files or the first few findings: report every blocking issue in this pass, since
+   each one you miss costs a full extra DEV↔REVIEW round-trip. On a large feature, a
+   list of only 3–4 issues almost always means you stopped early.
 3. For each potential issue: verify it against the codebase, skip it if it's a
    non-goal, and classify it as Blocking or Suggestion.
-4. Write REVIEW_NOTES.md and choose a decision.
+4. **Completeness self-check before deciding:** go back over the file list and
+   confirm you actually traced each changed file's logic, error paths, and edge
+   cases — not just skimmed it. Review properly any file that got a cursory look.
+5. In REVIEW_NOTES.md, list the files you reviewed (so coverage is visible), then
+   choose a decision.
 
 ## Notes
 
