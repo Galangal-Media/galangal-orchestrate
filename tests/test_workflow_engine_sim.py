@@ -19,17 +19,18 @@ def test_feature_happy_path(tmp_path):
     ]
 
 
-def test_review_request_changes_loops_dev_review_then_full_pipeline(tmp_path):
+def test_review_request_changes_loops_dev_review_then_final_validation(tmp_path):
     # REVIEW asks for changes once: DEV->REVIEW loop (intermediate stages skipped),
-    # then on APPROVE the full validation pipeline re-runs before final REVIEW.
+    # then on APPROVE the full validation pipeline runs ONCE with no re-review.
     trace, terminal = simulate(tmp_path, Policy({"REVIEW": [rollback("DEV")]}))
     assert terminal == "WORKFLOW_COMPLETE"
     # The iteration loop: REVIEW -> DEV -> REVIEW with no intermediate stages.
     i = trace.index("REVIEW")
     assert trace[i:i + 3] == ["REVIEW", "DEV", "REVIEW"]
-    # After re-approval, QA/SECURITY run again before the final REVIEW.
+    # After approval, QA/SECURITY run again as final validation, but REVIEW does
+    # NOT run a third time (no re-review -> no fresh-issue loop).
     assert trace.count("QA") == 2
-    assert trace.count("REVIEW") == 3
+    assert trace.count("REVIEW") == 2
 
 
 def test_redesign_rolls_back_to_design(tmp_path):

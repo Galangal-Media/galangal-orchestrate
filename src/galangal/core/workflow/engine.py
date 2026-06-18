@@ -369,11 +369,11 @@ class WorkflowEngine:
                 if result.rollback_to is None:
                     block_reason = "Rollback target not specified in validation"
                 else:
-                    total = self.state.get_total_rollback_count(result.rollback_to)
-                    recent = self.state.get_rollback_count(result.rollback_to)
-                    block_reason = (
-                        f"Too many rollbacks to {target} "
-                        f"({total} total, {recent} in the last hour)"
+                    # Report the limiter that actually fired (review-iteration cap
+                    # vs generic burst/total cap) rather than always showing the
+                    # generic rollback_history counts.
+                    block_reason = self.state.describe_rollback_block(
+                        stage, result.rollback_to
                     )
 
                 return event(
@@ -726,14 +726,19 @@ class WorkflowEngine:
             self.state.clear_passed_stages()
 
         # Review iteration: when REVIEW approves during a DEV↔REVIEW loop,
-        # rewind to run the full validation pipeline before final REVIEW.
+        # rewind to run the full validation pipeline once — but skip a second
+        # REVIEW so codex can't keep surfacing fresh issues and restarting the
+        # loop indefinitely. If a validation stage genuinely fails it rolls back
+        # to DEV as a full rollback, which re-runs REVIEW (correct: code changed).
         if current == Stage.REVIEW and self.state.review_iteration:
             self.state.complete_review_iteration()
+            # Run validation (MIGRATION..SECURITY) but not the reviewer again.
+            self.state.fast_track_skip = {Stage.REVIEW.value}
             # Archive rollback now that review iteration is complete
             if tui_app:
                 archive_rollback_if_exists(self.state.task_name, tui_app)
                 tui_app.add_activity(
-                    "Review approved - running full validation pipeline", "🔄"
+                    "Review approved - running final validation (no re-review)", "🔄"
                 )
             # Rewind to the stage after DEV (MIGRATION) for full validation
             next_stage = get_next_stage(Stage.DEV, self.state)

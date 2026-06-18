@@ -4,6 +4,32 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.62.0 — Break the endless REVIEW↔DEV loop; configurable rollback caps
+
+Targets a real task that ran 69+ hours because codex REVIEW kept trickle-feeding a
+few issues per pass, and every approval rewound to re-run the whole validation
+pipeline *and re-review*, giving the reviewer a fresh chance to find new issues and
+restart the loop.
+
+- **Validate once after approval, no re-review.** When REVIEW approves during the
+  DEV↔REVIEW iteration loop, the full validation pipeline (TEST/QA/SECURITY/…) now
+  runs **once** and then advances to DOCS — REVIEW is no longer re-run, so codex can
+  no longer surface fresh issues and restart the loop. A genuine validation failure
+  still rolls back to DEV as a full rollback (which re-reviews, since code changed).
+- **Tight DEV↔REVIEW loop.** The iteration loop now skips *every* stage between DEV
+  and REVIEW (including TEST_GATE) so a review fix goes straight back to the
+  reviewer; the regression check moves to the post-approval validation pass.
+- **Exhaustive single-pass review.** `review_codex.md` / `review.md` now require the
+  reviewer to report **every** blocking issue in one pass rather than trickling a
+  few out at a time (each omitted issue costs a full extra round-trip).
+- **Accurate block messages.** A blocked rollback now names the limiter that
+  actually fired — the REVIEW→DEV iteration cap vs the generic burst/total cap —
+  with the real counter and the config key to raise, instead of always showing
+  generic rollback-history counts.
+- **Configurable rollback caps.** New `stages` config keys: `max_rollbacks_per_stage`
+  (default 5), `rollback_time_window_hours` (default 1), `max_total_rollbacks_per_stage`
+  (default 12). 0 disables either cap. (Previously hard-coded at 3/1/6.)
+
 ## 0.58.0 — Catch hallucinated APIs: baseline-diffed validation + grounding prompts
 
 Targets the dominant AI-coding failure mode (seen in a real task: a hallucinated

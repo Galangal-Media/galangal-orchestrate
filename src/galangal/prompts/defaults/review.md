@@ -71,8 +71,12 @@ If your only findings are in the "Suggestions" category, **APPROVE**.
 - **APPROVE** — no blocking issues. Suggestions may still be recorded.
 - **REQUEST_CHANGES** — there are blocking *code* defects fixable in DEV. This sends
   the code back to DEV and returns directly to REVIEW (no intermediate stages run
-  during the iteration loop). Once you APPROVE, the full validation pipeline
-  (TEST/QA/SECURITY/…) re-runs to confirm nothing regressed.
+  during the iteration loop). Because the loop comes straight back to you, report
+  **every** blocking defect you can find in this pass — list them all rather than
+  trickling a few out at a time, since each omitted defect costs a full extra
+  DEV↔REVIEW round-trip. Once you APPROVE, the full validation pipeline
+  (TEST/QA/SECURITY/…) runs **once**; it does not return to REVIEW unless a
+  validation stage fails.
 - **REDESIGN** — the problem is architectural: the chosen approach is wrong, not just
   the code. Use this when no amount of DEV patching fixes it because the *plan/design*
   is flawed. This rolls back to DESIGN so the approach can be reconsidered rather than

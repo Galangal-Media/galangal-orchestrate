@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 from galangal.config.schema import GalangalConfig, StageConfig
 from galangal.core.artifacts import artifact_exists, read_artifact
 from galangal.core.state import (
+    MAX_ROLLBACKS_PER_STAGE,
     Stage,
     TaskType,
     WorkflowState,
@@ -368,8 +369,9 @@ class TestRollbackIntegration:
         """Test that rollback loop is prevented after max rollbacks."""
         state = make_state(task_name="test-task", stage=Stage.QA)
 
-        # Simulate 3 previous rollbacks to DEV within the time window
-        for _ in range(3):
+        # Fill the per-window burst cap with recent rollbacks to DEV so the next
+        # one is blocked as a loop.
+        for _ in range(MAX_ROLLBACKS_PER_STAGE):
             state.record_rollback(Stage.QA, Stage.DEV, "Previous failure")
 
         result = StageResult.rollback_required(

@@ -15,6 +15,15 @@ Your focus is on **code quality**, not functional correctness.
 
 Review the implementation for code quality, maintainability, and adherence to best practices.
 
+## Be exhaustive — one comprehensive pass
+
+When you `REQUEST_CHANGES`, the code goes straight back to DEV and comes **directly back to you** — there are no intermediate stages to surface other problems. So you MUST find and report **every** issue in a single pass:
+
+- Review **all** changed files end to end (`git diff main...HEAD`) before deciding. Do not stop at the first few problems.
+- Report **every** blocking issue you can find now, in the `issues` array — do not trickle them out a handful at a time across many round-trips.
+- Each omitted issue costs a full extra DEV↔REVIEW round-trip, which is expensive. A long, complete issue list is far better than a short one.
+- Only `APPROVE` once you genuinely have nothing blocking left to raise.
+
 ## Output Format
 
 You MUST respond with a JSON object containing these fields:
@@ -44,9 +53,11 @@ You MUST respond with a JSON object containing these fields:
 - **decision** (required): Must be exactly one of:
   - `"APPROVE"` - Code quality is acceptable, no blocking issues
   - `"REQUEST_CHANGES"` - Issues that need fixing before the code can be merged.
-    This sends code directly back to DEV for fixes, then returns to REVIEW.
-    No intermediate stages (TEST/QA/SECURITY) run during this iteration loop.
-    Once REVIEW approves, the full validation pipeline re-runs automatically.
+    This sends code straight back to DEV, which fixes and returns directly to
+    REVIEW (no intermediate stages run during this loop). List every blocking
+    issue now — see "Be exhaustive" above. Once you APPROVE, the full validation
+    pipeline (TEST, QA, SECURITY, ...) runs **once**; it does not come back to
+    REVIEW unless a validation stage fails.
 
 - **issues** (optional): Array of specific issues found. Each issue has:
   - `severity`: One of `critical`, `major`, `minor`, or `suggestion`

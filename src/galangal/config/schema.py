@@ -22,6 +22,27 @@ class StageConfig(BaseModel):
     skip: list[str] = Field(default_factory=list, description="Stages to always skip")
     timeout: int = Field(default=14400, description="Stage timeout in seconds (default: 4 hours)")
     max_retries: int = Field(default=5, description="Max retries per stage")
+    max_rollbacks_per_stage: int = Field(
+        default=5,
+        description=(
+            "Max rollbacks to the same stage within `rollback_time_window_hours` "
+            "before the rollback is blocked as a loop. Applies to generic "
+            "(non-REVIEW->DEV) rollbacks; the REVIEW<->DEV loop uses "
+            "`review_iteration_max` instead. 0 disables the per-window cap."
+        ),
+    )
+    rollback_time_window_hours: int = Field(
+        default=1,
+        description="Sliding window (hours) for the `max_rollbacks_per_stage` burst cap.",
+    )
+    max_total_rollbacks_per_stage: int = Field(
+        default=12,
+        description=(
+            "Absolute cap on rollbacks to the same stage over the whole task, "
+            "regardless of timing. Catches slow loops the time-window cap misses. "
+            "0 disables the total cap."
+        ),
+    )
     review_iteration_ask_after: int = Field(
         default=3,
         description=(

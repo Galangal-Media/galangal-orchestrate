@@ -693,14 +693,19 @@ def get_hidden_stages_for_task_type(
     return hidden
 
 
-# Maximum rollbacks to the same stage within the time window
-MAX_ROLLBACKS_PER_STAGE = 3
+# Default rollback-loop caps. These mirror the StageConfig defaults
+# (max_rollbacks_per_stage / rollback_time_window_hours /
+# max_total_rollbacks_per_stage) and are the values used when no project config
+# overrides them. The live checks in RollbackState read get_config(), so per-
+# project `.galangal/config.yaml` overrides win; these remain as documented
+# defaults and for callers/tests that want the baseline.
+MAX_ROLLBACKS_PER_STAGE = 5
 ROLLBACK_TIME_WINDOW_HOURS = 1
 # Absolute cap on rollbacks to the same stage over the whole task. The
 # time-window cap above misses genuinely-stuck loops whose cycles take longer
 # than the window (each rollback ages out before the next), so this bounds the
 # total number of attempts regardless of how slowly they happen.
-MAX_TOTAL_ROLLBACKS_PER_STAGE = 6
+MAX_TOTAL_ROLLBACKS_PER_STAGE = 12
 
 
 @dataclass
@@ -1130,18 +1135,21 @@ class RollbackState:
         Returns:
             True if rollback is allowed, False if too many recent rollbacks.
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=ROLLBACK_TIME_WINDOW_HOURS)
+        from galangal.config.loader import get_config
+
+        cfg = get_config().stages
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=cfg.rollback_time_window_hours)
         cutoff_str = cutoff.isoformat()
 
         to_target = [r for r in self.rollback_history if r.to_stage == target_stage.value]
         recent_rollbacks = [r for r in to_target if r.timestamp > cutoff_str]
 
         # Block on either a burst within the window OR too many over the whole
-        # task (the latter catches slow loops the window would miss).
-        return (
-            len(recent_rollbacks) < MAX_ROLLBACKS_PER_STAGE
-            and len(to_target) < MAX_TOTAL_ROLLBACKS_PER_STAGE
-        )
+        # task (the latter catches slow loops the window would miss). Either cap
+        # set to 0 disables that check.
+        burst_ok = cfg.max_rollbacks_per_stage <= 0 or len(recent_rollbacks) < cfg.max_rollbacks_per_stage
+        total_ok = cfg.max_total_rollbacks_per_stage <= 0 or len(to_target) < cfg.max_total_rollbacks_per_stage
+        return burst_ok and total_ok
 
     def get_total_rollback_count(self, target_stage: "Stage") -> int:
         """Get the total number of rollbacks to a stage over the whole task."""
@@ -1156,7 +1164,10 @@ class RollbackState:
         Returns:
             Number of rollbacks to this stage in the time window.
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=ROLLBACK_TIME_WINDOW_HOURS)
+        from galangal.config.loader import get_config
+
+        window_hours = get_config().stages.rollback_time_window_hours
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
         cutoff_str = cutoff.isoformat()
 
         return len(
@@ -1734,6 +1745,35 @@ class WorkflowState:
         """Get the total number of rollbacks to a stage over the whole task."""
         return self._rollback.get_total_rollback_count(target_stage)
 
+    def describe_rollback_block(self, from_stage: Stage, target_stage: Stage) -> str:
+        """Explain why a rollback was blocked, citing the limiter that fired.
+
+        ``handle_rollback`` blocks on one of two independent limits, and the
+        previous block message always reported generic ``rollback_history``
+        counts even when the REVIEW<->DEV iteration cap (a different counter) was
+        the real cause. This returns a message tied to whichever limit actually
+        applies so the UI isn't misleading.
+        """
+        from galangal.config.loader import get_config
+
+        cfg = get_config().stages
+        is_review_iteration = from_stage == Stage.REVIEW and target_stage == Stage.DEV
+        if is_review_iteration:
+            return (
+                f"REVIEW->DEV iteration cap reached: {self.review_iteration_count} "
+                f"round-trips (max {cfg.review_iteration_max}). "
+                "Raise stages.review_iteration_max to allow more."
+            )
+        recent = self.get_rollback_count(target_stage)
+        total = self.get_total_rollback_count(target_stage)
+        return (
+            f"Too many rollbacks to {target_stage.value}: "
+            f"{recent} in the last {cfg.rollback_time_window_hours}h "
+            f"(max {cfg.max_rollbacks_per_stage}), {total} total "
+            f"(max {cfg.max_total_rollbacks_per_stage}). "
+            "Raise stages.max_rollbacks_per_stage / max_total_rollbacks_per_stage to allow more."
+        )
+
     # =========================================================================
     # Fast-track rollback methods (delegating to FastTrackState)
     # =========================================================================
@@ -1781,10 +1821,13 @@ class WorkflowState:
             # Count each round-trip so the loop cap / user check-in has a
             # persisted basis (survives pause-resume, unlike a runner-local dict).
             self.review_iteration_count += 1
+            # Tight DEV->REVIEW loop: skip *every* stage between DEV and REVIEW
+            # (including TEST_GATE) so a review fix goes straight back to the
+            # reviewer. The full validation pipeline (TEST_GATE, QA, SECURITY, ...)
+            # runs once after REVIEW approves; see WorkflowEngine._advance_to_next_stage.
             dev_idx = STAGE_ORDER.index(Stage.DEV)
             review_idx = STAGE_ORDER.index(Stage.REVIEW)
             loop_skip = set(STAGE_ORDER[dev_idx + 1 : review_idx])
-            loop_skip.discard(Stage.TEST_GATE)  # mechanical regression check stays in the loop
             self.fast_track_skip = {s.value for s in loop_skip}
         elif is_fast_track:
             # Minor rollback: skip stages that already passed.
