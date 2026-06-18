@@ -843,6 +843,10 @@ class ExecutionState:
     # iteration loop (oldest round first). Used to flag issues raised repeatedly
     # so DEV fixes them properly. Reset when the loop completes.
     review_issue_rounds: list[list[dict[str, Any]]] = field(default_factory=list)
+    # Hash of each stage's declared input files at the moment it last passed,
+    # keyed by Stage.value. Used by content-hash stage caching to skip a stage
+    # whose inputs are unchanged. Empty unless stages.cache_unchanged_stages is on.
+    stage_input_hashes: dict[str, str] = field(default_factory=dict)
     # Truncated errors from the most recent failed attempts at the *current*
     # stage, oldest-first. Lets a retry see the whole oscillation, not just the
     # last failure, so it stops flip-flopping between two wrong fixes.
@@ -925,6 +929,7 @@ class ExecutionState:
             "failure_history": self.failure_history,
             "review_iteration_count": self.review_iteration_count,
             "review_issue_rounds": self.review_issue_rounds,
+            "stage_input_hashes": self.stage_input_hashes,
             "task_cost_usd": self.task_cost_usd,
             "task_tokens": self.task_tokens,
             "stage_costs": self.stage_costs,
@@ -943,6 +948,7 @@ class ExecutionState:
             last_failure=d.get("last_failure"),
             review_iteration_count=d.get("review_iteration_count", 0),
             review_issue_rounds=[list(r) for r in d.get("review_issue_rounds", [])],
+            stage_input_hashes=dict(d.get("stage_input_hashes", {})),
             failure_history=list(d.get("failure_history", [])),
             task_cost_usd=d.get("task_cost_usd", 0.0),
             task_tokens=d.get("task_tokens", 0),
@@ -1364,6 +1370,7 @@ class WorkflowState:
         review_iteration: bool = False,
         review_iteration_count: int = 0,
         review_issue_rounds: list[list[dict[str, Any]]] | None = None,
+        stage_input_hashes: dict[str, str] | None = None,
         failure_history: list[str] | None = None,
         task_cost_usd: float = 0.0,
         task_tokens: int = 0,
@@ -1406,6 +1413,7 @@ class WorkflowState:
             review_iteration=review_iteration,
             review_iteration_count=review_iteration_count,
             review_issue_rounds=[list(r) for r in review_issue_rounds] if review_issue_rounds else [],
+            stage_input_hashes=dict(stage_input_hashes) if stage_input_hashes else {},
             failure_history=list(failure_history) if failure_history else [],
             task_cost_usd=task_cost_usd,
             task_tokens=task_tokens,
@@ -1562,6 +1570,20 @@ class WorkflowState:
     @review_issue_rounds.setter
     def review_issue_rounds(self, value: list[list[dict[str, Any]]]) -> None:
         self._execution.review_issue_rounds = value
+
+    @property
+    def stage_input_hashes(self) -> dict[str, str]:
+        return self._execution.stage_input_hashes
+
+    @stage_input_hashes.setter
+    def stage_input_hashes(self, value: dict[str, str]) -> None:
+        self._execution.stage_input_hashes = value
+
+    def record_stage_input_hash(self, stage: "Stage", input_hash: str | None) -> None:
+        """Record the input hash captured when ``stage`` passed (no-op for a
+        non-cacheable stage, where the hash is None)."""
+        if input_hash is not None:
+            self._execution.stage_input_hashes[stage.value] = input_hash
 
     def record_review_issue_round(self, issues: list[dict[str, Any]]) -> None:
         """Record one blocking REVIEW round's issues (trimmed) for recurrence
@@ -1954,6 +1976,7 @@ class WorkflowState:
         d["review_iteration"] = self.review_iteration
         d["review_iteration_count"] = self.review_iteration_count
         d["review_issue_rounds"] = self.review_issue_rounds
+        d["stage_input_hashes"] = self.stage_input_hashes
         d["task_cost_usd"] = self.task_cost_usd
         d["task_tokens"] = self.task_tokens
         d["stage_costs"] = self.stage_costs
@@ -2039,6 +2062,7 @@ class WorkflowState:
             review_iteration=d.get("review_iteration", False),
             review_iteration_count=d.get("review_iteration_count", 0),
             review_issue_rounds=d.get("review_issue_rounds"),
+            stage_input_hashes=d.get("stage_input_hashes"),
             task_cost_usd=d.get("task_cost_usd", 0.0),
             task_tokens=d.get("task_tokens", 0),
             stage_costs=d.get("stage_costs"),

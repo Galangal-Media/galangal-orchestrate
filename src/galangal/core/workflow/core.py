@@ -327,6 +327,16 @@ def get_next_stage(current: Stage, state: WorkflowState) -> Stage | None:
         if runner.should_skip_stage(next_stage.value.upper(), task_name):
             continue
 
+        # Check 9: content-hash stage caching. Skip a stage that already passed
+        # if the files it depends on (its `inputs` globs) are byte-identical to
+        # when it last passed. Opt-in; only affects stages that declare `inputs`.
+        if config.stages.cache_unchanged_stages:
+            cached = state.stage_input_hashes.get(next_stage.value)
+            if cached is not None:
+                live = runner.compute_stage_input_hash(next_stage.value.upper())
+                if live is not None and live == cached:
+                    continue
+
         return next_stage
 
     return None
@@ -1150,6 +1160,22 @@ def handle_rollback(state: WorkflowState, result: StageResult) -> bool:
                 loc = f" ({file_ref}:{line})" if file_ref and line else ""
                 lines.append(f"- **[{sev}]** {desc}{loc} — raised {i['times_seen']}x")
             reason = reason + "\n".join(lines)
+
+            # Persist confirmed recurring issues to the cross-task mistake DB so
+            # future tasks' DEV prompts are warned before making the same error.
+            from galangal.mistakes import log_mistake
+
+            for i in recurring:
+                desc = i.get("description", "")
+                if not desc:
+                    continue
+                files = [i["file"]] if i.get("file") else None
+                log_mistake(
+                    f"Recurring REVIEW issue (raised {i['times_seen']}x): {desc}",
+                    stage=Stage.REVIEW.value,
+                    task_name=task_name,
+                    files=files,
+                )
 
     # Check for rollback loops (exempt REVIEW→DEV iteration since the
     # whole point of the iteration loop is repeated back-and-forth)

@@ -347,6 +347,16 @@ class WorkflowEngine:
             )
 
         if result.type == StageResultType.ROLLBACK_REQUIRED:
+            # Autonomous arbiter: if REVIEW and DEV are deadlocked on a recurring
+            # issue, let a second backend adjudicate before rolling back again.
+            verdict = self._maybe_arbitrate_review(result)
+            if verdict == "overturn":
+                return event(
+                    EventType.STAGE_COMPLETED,
+                    stage=stage,
+                    message=getattr(self, "_last_arbiter_msg", "Approved by arbiter"),
+                )
+
             # Try to process rollback
             if handle_rollback(self.state, result):
                 # Include fast-track info in message for visibility
@@ -515,6 +525,106 @@ class WorkflowEngine:
         if artifact_exists(artifact_name, self.state.task_name):
             return False
         return True
+
+    def _maybe_arbitrate_review(self, result: StageResult) -> str:
+        """Adjudicate a deadlocked REVIEW→DEV rollback with a second backend.
+
+        Triggers only when the arbiter is enabled and an issue has been re-raised
+        at least ``arbiter_after_rounds`` times (DEV keeps "fixing" it, REVIEW
+        keeps rejecting). The arbiter rules the disputed issues either a genuine
+        blocker or reviewer overreach.
+
+        Returns one of:
+        - "overturn": reviewer is overreaching → REVIEW should be approved.
+        - "uphold":   issues are real → proceed with the rollback.
+        - "n/a":      arbiter not applicable/disabled (proceed normally).
+
+        Fails safe to "uphold"/"n/a" on any error so a flaky arbiter never drops
+        a real block.
+        """
+        cfg = self.config.stages
+        if not cfg.arbiter_enabled:
+            return "n/a"
+        if self.state.stage != Stage.REVIEW or result.rollback_to != Stage.DEV:
+            return "n/a"
+
+        recurring = self.state.recurring_review_issues()
+        disputed = [i for i in recurring if i.get("times_seen", 0) >= cfg.arbiter_after_rounds]
+        if not disputed:
+            return "n/a"
+
+        try:
+            from galangal.ai import get_backend_with_fallback
+            from galangal.core.utils import extract_json_object
+
+            backend_name = self.config.ai.stage_backends.get("ARBITER", self.config.ai.default)
+            backend = get_backend_with_fallback(backend_name, config=self.config)
+
+            spec = read_artifact("SPEC.md", self.state.task_name) or ""
+            notes = read_artifact("REVIEW_NOTES.md", self.state.task_name) or ""
+            issue_lines = "\n".join(
+                f"- [{i.get('severity', '')}] {i.get('description', '')} "
+                f"({i.get('file', '')}:{i.get('line', '')}) — raised {i.get('times_seen')}x"
+                for i in disputed
+            )
+            prompt = (
+                "You are an impartial ARBITER resolving a deadlock between a code "
+                "reviewer and a developer. The reviewer has re-raised the issues "
+                "below across multiple rounds; the developer has repeatedly tried to "
+                "address them but the reviewer keeps rejecting. Decide whether the "
+                "reviewer is right to keep blocking, or is overreaching (demanding "
+                "work beyond the spec / gold-plating / subjective preference).\n\n"
+                "Read the repository if helpful (git diff against the base branch).\n\n"
+                f"## Disputed issues\n{issue_lines}\n\n"
+                f"## SPEC.md (acceptance criteria = definition of done)\n{spec[:4000]}\n\n"
+                f"## REVIEW_NOTES.md\n{notes[:4000]}\n\n"
+                'Respond with ONLY a JSON object: {"verdict": "uphold" | "overturn", '
+                '"reasoning": "<one paragraph>"}. Use "uphold" if the issues are '
+                'genuine blockers the developer must fix; "overturn" if the reviewer '
+                "is overreaching and the work should be approved as-is."
+            )
+            output = backend.generate_text(prompt, timeout=300)
+            data = extract_json_object(output) or {}
+            verdict = str(data.get("verdict", "")).strip().lower()
+            reasoning = str(data.get("reasoning", "")).strip()
+            if verdict not in ("uphold", "overturn"):
+                return "uphold"  # fail safe: keep the block
+
+            self._arbiter_reasoning = reasoning
+            tui_app_msg = (
+                f"Arbiter ({backend_name}) {verdict}s the reviewer "
+                f"on {len(disputed)} recurring issue(s)"
+            )
+            from galangal.logging import workflow_logger
+
+            workflow_logger.rollback(
+                from_stage=Stage.REVIEW.value,
+                to_stage=Stage.DEV.value,
+                task_name=self.state.task_name,
+                reason=f"ARBITER {verdict}: {reasoning[:300]}",
+            )
+
+            if verdict == "overturn":
+                # Approve REVIEW: write the decision artifact and let the normal
+                # success/advance path (incl. final validation) take over.
+                write_artifact("REVIEW_DECISION", "APPROVE", self.state.task_name)
+                notes_suffix = (
+                    f"\n\n## Arbiter override (APPROVE)\n{reasoning}\n"
+                    f"\nThe arbiter judged the reviewer to be overreaching on the "
+                    f"recurring issues above and approved the work.\n"
+                )
+            else:
+                # Upheld: tell DEV an independent arbiter confirmed these are real
+                # blockers, so it stops arguing and fixes the root cause.
+                notes_suffix = (
+                    f"\n\n## Arbiter ruling (UPHELD — these are genuine blockers)\n"
+                    f"{reasoning}\n"
+                )
+            write_artifact("REVIEW_NOTES.md", notes + notes_suffix, self.state.task_name)
+            self._last_arbiter_msg = tui_app_msg
+            return verdict
+        except Exception:
+            return "uphold"
 
     def execute_peer_review(
         self, tui_app: WorkflowTUIApp
@@ -708,6 +818,15 @@ class WorkflowEngine:
         # Record duration and passed stage
         duration = self.state.record_stage_duration()
         self.state.record_passed_stage(current)
+
+        # Content-hash stage caching: remember the inputs hash at the moment this
+        # stage passed, so a later re-run can skip it if those inputs are unchanged.
+        if self.config.stages.cache_unchanged_stages:
+            from galangal.validation.runner import ValidationRunner
+
+            self.state.record_stage_input_hash(
+                current, ValidationRunner().compute_stage_input_hash(current.value.upper())
+            )
 
         # Record stage lineage if enabled
         self._record_stage_lineage(current)
@@ -999,13 +1118,23 @@ class WorkflowEngine:
             )
 
     def _handle_fix_in_dev(self, error: str, feedback: str = "") -> WorkflowEvent:
-        """Force rollback to DEV with feedback."""
+        """Force rollback to DEV with feedback.
+
+        This is a manual override after a rollback was blocked, so it clears the
+        caps that did the blocking to give the loop a fresh budget: both the
+        generic per-stage rollback history for DEV AND the REVIEW->DEV iteration
+        counter (otherwise the next REVIEW round immediately re-hits the cap and
+        re-prompts). The recurring-issue history is kept so repeated issues are
+        still flagged to DEV.
+        """
         original_stage = self.state.stage.value
 
-        # Clear rollback history for DEV to allow rollback
+        # Clear rollback history for DEV to allow rollback (generic cap)
         self.state.rollback_history = [
             r for r in self.state.rollback_history if r.to_stage != Stage.DEV.value
         ]
+        # Reset the REVIEW->DEV iteration counter so the loop gets a fresh budget.
+        self.state.review_iteration_count = 0
 
         self.state.stage = Stage.DEV
         self.state.last_failure = (

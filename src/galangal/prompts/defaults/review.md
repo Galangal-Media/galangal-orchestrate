@@ -63,6 +63,10 @@ or "None". Each: what's wrong, where, and why it blocks.]
 - Unused imports or dead code (the linter owns these)
 - Missing type hints (unless they cause an actual bug)
 - Minor refactors that don't change behavior
+- **Anything outside the spec's scope** — work listed under `SPEC.md` Non-Goals,
+  or gold-plating beyond the Acceptance Criteria. Anchor to the spec: the
+  definition of done is meeting the Acceptance Criteria without real defects, not
+  your idea of the ideal implementation.
 
 If your only findings are in the "Suggestions" category, **APPROVE**.
 

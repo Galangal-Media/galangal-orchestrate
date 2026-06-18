@@ -4,6 +4,34 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.64.0 — Autonomous arbiter, stage caching, spec anchoring, regression tests
+
+A batch of REVIEW-loop and efficiency improvements, plus a fix to "Fix in DEV".
+
+- **Autonomous arbiter.** When a REVIEW issue has been re-raised
+  `stages.arbiter_after_rounds` (default 3) times — DEV and REVIEW deadlocked — a
+  second backend adjudicates. If it rules the reviewer is overreaching, REVIEW is
+  auto-approved; otherwise the rollback proceeds with the arbiter's reasoning
+  appended to `REVIEW_NOTES.md`. Off by default (`stages.arbiter_enabled`); set
+  `ai.stage_backends['ARBITER']` for an independent backend (defaults to
+  `ai.default`). Fails safe to "uphold".
+- **Recurring issues → mistake DB.** Confirmed recurring REVIEW issues are now
+  logged to the cross-task mistake DB, so future tasks' DEV prompts are warned.
+- **Regression tests for fixed defects.** The TEST prompt now requires a
+  regression test for each defect listed in `ROLLBACK.md`/`REVIEW_NOTES.md`
+  (especially recurring ones) — turning detection into prevention.
+- **Content-hash stage caching** (opt-in). With `stages.cache_unchanged_stages`
+  on, a validation stage is skipped on re-run when the files it depends on (new
+  per-stage `validation.<stage>.inputs` globs) are byte-identical to when it last
+  passed. Only stages that declare `inputs` are ever cached — broad-scan and
+  code-modifying stages never auto-skip.
+- **Definition-of-Done anchoring.** PM marks the Acceptance Criteria as the
+  contract; both REVIEW prompts now block only on acceptance-criteria violations
+  and real defects, not on Non-Goals or gold-plating.
+- **Fix: "Fix in DEV" now resets the REVIEW→DEV iteration counter.** Previously it
+  only reset the generic rollback cap, so after one more round the review-loop cap
+  re-blocked immediately. It now clears both, giving the loop a fresh budget.
+
 ## 0.63.0 — Smarter REVIEW: severity-gated auto-approve + recurring-issue tracking
 
 Reduces REVIEW↔DEV churn by not bouncing on trivia and by helping DEV fix

@@ -3,6 +3,7 @@ Config-driven validation runner.
 """
 
 import fnmatch
+import hashlib
 import re
 import subprocess
 import xml.etree.ElementTree as ET
@@ -402,6 +403,49 @@ class ValidationRunner:
             pass  # Return whatever we collected so far
 
         return changed
+
+    def compute_stage_input_hash(self, stage: str) -> str | None:
+        """Hash the files a stage's result depends on (its configured ``inputs``
+        globs), for content-hash stage caching.
+
+        Returns a hex digest over the matching changed files' paths + contents,
+        or ``None`` when the stage declares no ``inputs`` globs (and is therefore
+        not cacheable — the safe default). Two calls return the same digest iff
+        those files are byte-identical, so a stage that already passed can be
+        skipped when its inputs are unchanged.
+        """
+        stage_config: StageValidation | None = getattr(
+            self.config.validation, stage.lower(), None
+        )
+        if stage_config is None or not stage_config.inputs:
+            return None
+
+        patterns = stage_config.inputs
+        try:
+            changed = self._get_all_changed_files()
+            matched = sorted(
+                f
+                for f in changed
+                if any(
+                    fnmatch.fnmatch(f, p) or fnmatch.fnmatch(f.lower(), p.lower())
+                    for p in patterns
+                )
+            )
+            h = hashlib.sha256()
+            for rel in matched:
+                h.update(rel.encode("utf-8"))
+                h.update(b"\0")
+                try:
+                    h.update((self.project_root / rel).read_bytes())
+                except OSError:
+                    # Deleted/unreadable file still contributes its path so the
+                    # hash changes when it reappears.
+                    h.update(b"<missing>")
+                h.update(b"\0")
+            return h.hexdigest()
+        except Exception:
+            # On any error, return None -> not cacheable -> stage runs normally.
+            return None
 
     def _should_skip(self, skip_condition: SkipCondition, task_name: str) -> bool:
         """

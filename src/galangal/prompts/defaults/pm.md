@@ -38,6 +38,11 @@ Create two files in the task's artifacts directory (see "Artifacts Directory" in
 - [Potential issues or concerns]
 ```
 
+**The Acceptance Criteria are the definition of done.** REVIEW judges the work
+against this list, so make it complete and objective: each criterion should be
+something a reviewer can verify as plainly met or not met. Put anything
+deliberately out of scope under Non-Goals so it isn't treated as a gap later.
+
 ### 2. PLAN.md
 
 ```markdown

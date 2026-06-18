@@ -43,6 +43,15 @@ class StageConfig(BaseModel):
             "0 disables the total cap."
         ),
     )
+    cache_unchanged_stages: bool = Field(
+        default=False,
+        description=(
+            "Skip re-running a validation stage if the files it depends on (its "
+            "validation `inputs` globs) are unchanged since it last passed. Avoids "
+            "redundant re-validation after a small fix. Only affects stages that "
+            "declare `inputs`; off by default."
+        ),
+    )
     review_block_min_severity: str = Field(
         default="major",
         description=(
@@ -52,6 +61,24 @@ class StageConfig(BaseModel):
             "and the issues are recorded without a DEV round-trip. Order: "
             "suggestion < minor < major < critical. Set to 'suggestion' to block on "
             "anything (disables auto-approve)."
+        ),
+    )
+    arbiter_enabled: bool = Field(
+        default=False,
+        description=(
+            "When a REVIEW issue has been re-raised arbiter_after_rounds times "
+            "(DEV and REVIEW deadlocked), have a second backend adjudicate it. If "
+            "it rules the reviewer is overreaching, REVIEW is auto-approved; "
+            "otherwise the rollback proceeds with the arbiter's reasoning. Set "
+            "ai.stage_backends['ARBITER'] to a backend other than REVIEW's for an "
+            "independent opinion (defaults to ai.default)."
+        ),
+    )
+    arbiter_after_rounds: int = Field(
+        default=3,
+        description=(
+            "How many times the same issue must be re-raised before the arbiter "
+            "adjudicates it. Only used when arbiter_enabled is true."
         ),
     )
     review_iteration_ask_after: int = Field(
@@ -260,6 +287,16 @@ class StageValidation(BaseModel):
     artifact: str | None = Field(default=None, description="Artifact file to check for markers")
     artifacts_required: list[str] = Field(
         default_factory=list, description="Required artifact files"
+    )
+    inputs: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Glob patterns for the files this stage's result depends on. When "
+            "stages.cache_unchanged_stages is enabled, the stage is skipped on a "
+            "re-run if these files are byte-identical to when it last passed. "
+            "Empty (default) = never cached. Only declare globs that fully cover "
+            "what the stage validates, or it may skip a check it should re-run."
+        ),
     )
 
 

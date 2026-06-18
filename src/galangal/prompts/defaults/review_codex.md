@@ -15,6 +15,14 @@ Your focus is on **code quality**, not functional correctness.
 
 Review the implementation for code quality, maintainability, and adherence to best practices.
 
+## Scope — anchor to the spec
+
+Judge the work against `SPEC.md`'s **Acceptance Criteria** (the definition of
+done) plus genuine defects (bugs, security, broken error handling). Respect
+`SPEC.md`'s **Non-Goals**: do **not** block on work that is deliberately out of
+scope, or on gold-plating beyond what the task requires. "It would be nicer if…"
+that isn't a spec requirement or a real defect is a `suggestion`, not a blocker.
+
 ## Be exhaustive — one comprehensive pass
 
 When you `REQUEST_CHANGES`, the code goes straight back to DEV and comes **directly back to you** — there are no intermediate stages to surface other problems. So you MUST find and report **every** issue in a single pass:

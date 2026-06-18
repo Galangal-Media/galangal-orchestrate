@@ -43,16 +43,27 @@ Create TEST_PLAN.md in the task's artifacts directory:
 | path/to/test.py | 5 | Tests for feature X |
 ```
 
+## Regression tests for fixed defects
+
+If `ROLLBACK.md` or `REVIEW_NOTES.md` are present, they list defects that REVIEW
+or QA found and DEV has since fixed. For **each** such defect, add a regression
+test that would have **failed before the fix and passes now** — i.e. a test that
+directly exercises the bug. Pay special attention to any "RECURRING ISSUES"
+section: those are bugs that came back, so they most need a test to lock the fix
+in. List these under a "Regression Tests" subsection in TEST_PLAN.md.
+
 ## Process
 
 1. Read SPEC.md for acceptance criteria
 2. Read PLAN.md for what was implemented
-3. Analyze the implementation to understand what needs testing
-4. Write tests that verify:
+3. Read ROLLBACK.md / REVIEW_NOTES.md (if present) for defects that were fixed
+4. Analyze the implementation to understand what needs testing
+5. Write tests that verify:
    - Core functionality works
    - Edge cases are handled
    - Error conditions are handled properly
-5. Document the tests written in TEST_PLAN.md
+   - Each previously-found defect is covered by a regression test
+6. Document the tests written in TEST_PLAN.md
 
 ## Important Rules
 
