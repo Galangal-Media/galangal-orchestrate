@@ -182,16 +182,27 @@ class TestMarkupSafety:
     (regression: a review note containing '[/{id}]' crashed the prompt/activity log
     with MarkupError)."""
 
-    def test_activity_format_display_is_valid_markup(self):
+    def test_untrusted_activity_is_escaped_and_valid_markup(self):
         from rich.text import Text
 
         from galangal.ui.tui.types import ActivityEntry
 
         nasty = "reviewed [/{id}] and [bold]unbalanced and [MAJOR] tags"
-        entry = ActivityEntry(message=nasty)
+        entry = ActivityEntry(message=nasty)  # markup=False (default)
         # Must not raise MarkupError, and must round-trip through the markup parser.
         Text.from_markup(entry.format_display())
         Text.from_markup(entry.format_display(show_timestamp=False))
+        # The dangerous closing tag is escaped (rendered literally).
+        assert "\\[/{id}]" in entry.format_display()
+
+    def test_trusted_markup_passes_through(self):
+        from galangal.ui.tui.types import ActivityEntry
+
+        # Intentional styling (e.g. the completion banner) must NOT be escaped.
+        entry = ActivityEntry(message="[bold #b8bb26]WORKFLOW COMPLETE[/]", markup=True)
+        out = entry.format_display(show_timestamp=False)
+        assert "[bold #b8bb26]WORKFLOW COMPLETE[/]" in out
+        assert "\\[" not in out
 
     @pytest.mark.asyncio
     async def test_modal_renders_bracket_content_without_crashing(self, app):

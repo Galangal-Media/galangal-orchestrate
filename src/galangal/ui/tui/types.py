@@ -55,6 +55,11 @@ class ActivityEntry:
     icon: str = "•"
     details: str | None = None
     verbose_only: bool = False
+    # True only for trusted, intentionally-styled messages (e.g. the completion
+    # banner). Default False = the message is escaped so arbitrary '[...]' content
+    # (AI output, review notes) renders literally instead of crashing the markup
+    # parser.
+    markup: bool = False
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def format_display(self, show_timestamp: bool = True) -> str:
@@ -78,9 +83,10 @@ class ActivityEntry:
         # Escape the message so '[...]' sequences in arbitrary content (AI output,
         # file paths, review notes) are rendered literally instead of being parsed
         # as Rich/Textual markup (which crashes the RichLog on an unbalanced tag).
+        # Trusted, intentionally-styled messages (markup=True) pass through as-is.
         from rich.markup import escape
 
-        msg = escape(self.message)
+        msg = self.message if self.markup else escape(self.message)
         if show_timestamp:
             time_str = self.timestamp.strftime("%H:%M:%S")
             return f"[#928374]{time_str}[/] [{color}]{msg}[/]"

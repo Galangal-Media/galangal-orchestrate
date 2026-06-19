@@ -4,6 +4,18 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.65.2 — Keep intentional styling while escaping untrusted activity content
+
+Follow-up to 0.65.1, which escaped *every* activity message and so broke the few
+that use intentional Rich markup (the WORKFLOW COMPLETE banner, "Task completed",
+the PR link rendered as raw `[bold ...]` tags).
+
+- `ActivityEntry` / `add_activity` gain a `markup` flag. Default `False` escapes the
+  message (arbitrary AI/review content still can't crash the markup parser);
+  `markup=True` opts trusted, intentionally-styled messages through as-is.
+- Flipped the intentional-markup callers (completion banner, "Task completed
+  successfully!", PR link, "Starting new task…") to `markup=True`.
+
 ## 0.65.1 — Fix TUI crash on '[...]' content in prompts and the activity log
 
 A REVIEW_NOTES.md note containing `[/{id}]` (a markup-like closing tag) crashed the

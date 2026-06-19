@@ -280,6 +280,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
         category: ActivityCategory = ActivityCategory.SYSTEM,
         details: str | None = None,
         verbose_only: bool = False,
+        markup: bool = False,
     ) -> None:
         """
         Add activity to log.
@@ -292,6 +293,9 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
             details: Optional additional details for export.
             verbose_only: If True, only show in verbose mode (e.g., tool calls).
                          If False, show in both modes (e.g., Claude's text responses).
+            markup: True only for trusted, intentionally-styled messages (e.g. the
+                completion banner). Leave False for any message that may contain
+                arbitrary content (AI output, review notes) so it is escaped.
         """
         entry = ActivityEntry(
             message=activity,
@@ -300,6 +304,7 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
             category=category,
             details=details,
             verbose_only=verbose_only,
+            markup=markup,
         )
         self._activity_entries.append(entry)
         if self._activity_log_handle:
@@ -394,9 +399,9 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
     def show_workflow_complete(self) -> None:
         """Show workflow completion banner."""
         self.add_activity("")
-        self.add_activity("[bold #b8bb26]════════════════════════════════════════[/]", "")
-        self.add_activity("[bold #b8bb26]           WORKFLOW COMPLETE            [/]", "")
-        self.add_activity("[bold #b8bb26]════════════════════════════════════════[/]", "")
+        self.add_activity("[bold #b8bb26]════════════════════════════════════════[/]", "", markup=True)
+        self.add_activity("[bold #b8bb26]           WORKFLOW COMPLETE            [/]", "", markup=True)
+        self.add_activity("[bold #b8bb26]════════════════════════════════════════[/]", "", markup=True)
         self.add_activity("")
 
     def show_error(self, message: str, details: str | None = None) -> None:

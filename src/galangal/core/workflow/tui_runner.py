@@ -1832,9 +1832,9 @@ async def _handle_workflow_complete(app: WorkflowTUIApp, state: WorkflowState) -
 
         if success:
             app.add_activity("")
-            app.add_activity("[bold #b8bb26]Task completed successfully![/]", "✓")
+            app.add_activity("[bold #b8bb26]Task completed successfully![/]", "✓", markup=True)
             if pr_url and pr_url != "PR already exists":
-                app.add_activity(f"[#83a598]PR: {pr_url}[/]", "")
+                app.add_activity(f"[#83a598]PR: {pr_url}[/]", "", markup=True)
             app.add_activity("")
 
         # Show post-completion options
@@ -1982,7 +1982,7 @@ def _start_new_task_tui() -> str:
         await _init_hub_client(config)
 
         try:
-            app.add_activity("[bold]Starting new task...[/bold]", "🆕")
+            app.add_activity("[bold]Starting new task...[/bold]", "🆕", markup=True)
 
             # Check if there's a pending CREATE_TASK from the hub
             pending_task = await _check_for_remote_task_create()

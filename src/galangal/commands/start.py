@@ -249,7 +249,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             app.call_from_thread(app.set_timer, 0.5, app.exit)
 
         try:
-            app.add_activity("[bold]Starting new task...[/bold]", "🆕")
+            app.add_activity("[bold]Starting new task...[/bold]", "🆕", markup=True)
 
             # Check if on base branch before starting
             on_base, current_branch, base_branch = is_on_base_branch()
