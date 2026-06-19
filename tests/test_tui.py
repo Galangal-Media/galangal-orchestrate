@@ -175,3 +175,36 @@ class TestPromptActions:
             # When input is active, check_action should return False
             app._input_callback = lambda v: None
             assert app.check_action_quit_workflow() is False
+
+
+class TestMarkupSafety:
+    """Arbitrary content with '[...]' must not be parsed as Rich/Textual markup
+    (regression: a review note containing '[/{id}]' crashed the prompt/activity log
+    with MarkupError)."""
+
+    def test_activity_format_display_is_valid_markup(self):
+        from rich.text import Text
+
+        from galangal.ui.tui.types import ActivityEntry
+
+        nasty = "reviewed [/{id}] and [bold]unbalanced and [MAJOR] tags"
+        entry = ActivityEntry(message=nasty)
+        # Must not raise MarkupError, and must round-trip through the markup parser.
+        Text.from_markup(entry.format_display())
+        Text.from_markup(entry.format_display(show_timestamp=False))
+
+    @pytest.mark.asyncio
+    async def test_modal_renders_bracket_content_without_crashing(self, app):
+        # A label containing markup-like brackets must lay out fine (regression:
+        # raw '[...]' content crashed the modal with MarkupError during layout).
+        async with app.run_test() as pilot:
+            result = []
+            app.show_text_input(
+                "Fix this: closing tag [/{id}] and [bold]unbalanced", "",
+                lambda v: result.append(v),
+            )
+            await pilot.pause()
+            await pilot.pause()
+            # Reaching here means layout/render succeeded; cancel to clean up.
+            await pilot.press("escape")
+            await pilot.pause()

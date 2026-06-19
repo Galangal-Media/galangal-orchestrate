@@ -75,10 +75,16 @@ class ActivityEntry:
         }
         color = colors.get(self.level, "#ebdbb2")
 
+        # Escape the message so '[...]' sequences in arbitrary content (AI output,
+        # file paths, review notes) are rendered literally instead of being parsed
+        # as Rich/Textual markup (which crashes the RichLog on an unbalanced tag).
+        from rich.markup import escape
+
+        msg = escape(self.message)
         if show_timestamp:
             time_str = self.timestamp.strftime("%H:%M:%S")
-            return f"[#928374]{time_str}[/] [{color}]{self.message}[/]"
-        return f"[{color}]{self.message}[/]"
+            return f"[#928374]{time_str}[/] [{color}]{msg}[/]"
+        return f"[{color}]{msg}[/]"
 
     def format_export(self) -> str:
         """

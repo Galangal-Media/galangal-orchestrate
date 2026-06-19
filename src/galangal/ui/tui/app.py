@@ -1356,7 +1356,9 @@ class WorkflowTUIApp(WidgetAccessMixin, App[None]):
             if self.verbose:
                 log = self._safe_query("#activity-log", RichLog)
                 if log:
-                    display = line.strip()[:150]  # Truncate to 150 chars
+                    from rich.markup import escape
+
+                    display = escape(line.strip()[:150])  # Truncate; escape markup
                     log.write(f"[#7c6f64]{display}[/]")
 
         self._safe_update(_add)

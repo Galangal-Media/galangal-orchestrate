@@ -55,7 +55,10 @@ class PromptModal(ModalScreen[str]):
         max_key = max((int(o.key) for o in self._options if o.key.isdigit()), default=3)
         hint = f"Press 1-{max_key} to choose, Esc to cancel"
         with Vertical(id="prompt-dialog"):
-            yield Static(self._message, id="prompt-message")
+            # Render the message as a literal Text (markup OFF): it can contain
+            # arbitrary content (review notes, ROLLBACK.md, AI output) with '[...]'
+            # sequences that would otherwise be parsed as Textual markup and crash.
+            yield Static(Text(self._message), id="prompt-message")
             yield Static(Text.from_markup(options_text), id="prompt-options")
             yield Static(hint, id="prompt-hint")
 
@@ -108,7 +111,7 @@ class TextInputModal(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="text-input-dialog"):
-            yield Static(self._label, id="text-input-label")
+            yield Static(Text(self._label), id="text-input-label")
             yield Input(value=self._default, placeholder=self._label, id="text-input-field")
             yield Static("Press Enter to submit, Esc to cancel", id="text-input-hint")
 
@@ -147,8 +150,8 @@ class QuestionAnswerModal(ModalScreen[list[str] | None]):
 
         with Vertical(id="qa-dialog"):
             yield Static("Discovery Questions", id="qa-title")
-            yield Static(questions_display, id="qa-questions")
-            yield Static(self._get_current_question_text(), id="qa-current-question")
+            yield Static(Text(questions_display), id="qa-questions")
+            yield Static(Text(self._get_current_question_text()), id="qa-current-question")
             yield Input(placeholder="Your answer...", id="qa-input-field")
             yield Static(self._get_progress_text(), id="qa-progress")
             yield Static("Press Enter to submit answer, Esc to cancel", id="qa-hint")
@@ -184,7 +187,7 @@ class QuestionAnswerModal(ModalScreen[list[str] | None]):
 
     def _update_question_display(self) -> None:
         question_widget = self.query_one("#qa-current-question", Static)
-        question_widget.update(self._get_current_question_text())
+        question_widget.update(Text(self._get_current_question_text()))
 
         progress_widget = self.query_one("#qa-progress", Static)
         progress_widget.update(self._get_progress_text())
@@ -254,7 +257,7 @@ class MultilineInputModal(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="multiline-input-dialog"):
-            yield Static(self._label, id="multiline-input-label")
+            yield Static(Text(self._label), id="multiline-input-label")
             yield TextArea(self._default, id="multiline-input-field")
             with Horizontal(id="multiline-input-footer"):
                 yield Static("Ctrl+S to submit, Esc to cancel", id="multiline-input-hint")

@@ -4,6 +4,19 @@ All notable changes to galangal-orchestrate are documented here. This project
 uses [semantic versioning](https://semver.org/) loosely (0.x, minor = features,
 patch = fixes).
 
+## 0.65.1 — Fix TUI crash on '[...]' content in prompts and the activity log
+
+A REVIEW_NOTES.md note containing `[/{id}]` (a markup-like closing tag) crashed the
+TUI with `MarkupError` when shown in a prompt on resume, because Textual's `Static`
+parses Rich markup by default.
+
+- **PromptModal** now renders its message as a literal `Text` (markup off) — the
+  exact crash. Text-input / multiline labels and Q&A question text hardened the
+  same way.
+- **Activity log** (`format_display`) and the verbose log write now `escape()` the
+  message, so a stray `[...]` in any log line can't crash the RichLog.
+- The error panel was already safe (uses `Text.append`).
+
 ## 0.65.0 — Force exhaustive REVIEW: per-file coverage + completeness self-check
 
 Targets codex reporting only 3-4 issues per round and trickling the rest across
